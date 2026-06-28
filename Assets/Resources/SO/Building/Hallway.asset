@@ -1,0 +1,122 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 319e562edb6800049aa5db86683c9031, type: 3}
+  m_Name: Hallway
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects:
+    - {fileID: 1878171585, guid: 2fb3ab25e50d145418738cd340acb8a2, type: 3}
+    - {fileID: 11400000, guid: 1fabc1135bd2c3e4fbd37f188f947dee, type: 2}
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes:
+    - Name: id
+      Entry: 3
+      Data: 0
+    - Name: objectName
+      Entry: 1
+      Data: "\uBCF5\uB3C4"
+    - Name: width
+      Entry: 3
+      Data: 1
+    - Name: height
+      Entry: 3
+      Data: 1
+    - Name: maintenance
+      Entry: 3
+      Data: 0
+    - Name: sprite
+      Entry: 10
+      Data: 0
+    - Name: icon
+      Entry: 10
+      Data: 0
+    - Name: layer
+      Entry: 3
+      Data: 0
+    - Name: category
+      Entry: 3
+      Data: 1
+    - Name: horizontalDraggable
+      Entry: 5
+      Data: true
+    - Name: verticalDraggable
+      Entry: 5
+      Data: true
+    - Name: OnBuildCondition
+      Entry: 7
+      Data: 0|System.Collections.Generic.List`1[[IBuildingCondition, Assembly-CSharp]],
+        mscorlib
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: unlocked
+      Entry: 5
+      Data: true
+    - Name: type
+      Entry: 7
+      Data: 1|System.RuntimeType, mscorlib
+    - Name: 
+      Entry: 1
+      Data: Hallway, Assembly-CSharp
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: tiles
+      Entry: 7
+      Data: 2|System.Collections.Generic.Dictionary`2[[GridTexture+TilemapLayer,
+        Assembly-CSharp],[UnityEngine.Tilemaps.Tile, UnityEngine.TilemapModule]],
+        mscorlib
+    - Name: comparer
+      Entry: 7
+      Data: 3|System.Collections.Generic.EnumEqualityComparer`1[[GridTexture+TilemapLayer,
+        Assembly-CSharp]], mscorlib
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: 
+      Entry: 12
+      Data: 1
+    - Name: 
+      Entry: 7
+      Data: 
+    - Name: $k
+      Entry: 3
+      Data: 0
+    - Name: $v
+      Entry: 10
+      Data: 1
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 

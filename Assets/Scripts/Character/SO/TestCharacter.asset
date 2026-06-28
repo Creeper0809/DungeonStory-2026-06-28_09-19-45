@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 177cfc3b70256b84ca2f4f0975a0db84, type: 3}
+  m_Name: TestCharacter
+  m_EditorClassIdentifier: 
+  characterType: 0
+  id: 0
+  characterName: "\uD14C\uC2A4\uD2B8 \uCE90\uB9AD\uD130"
+  characterSprite: {fileID: -177130652, guid: 268b13836c8af3d408110e228f534b75, type: 3}
+  favoriteStore:
+  - {fileID: 11400000, guid: 183b18c5841fb7a438bab789f642e364, type: 2}
+  frequencyVisitMax: 1
+  frequencyVisitMin: 3
+  maxHoldingMoney: 1000
+  minHoldingMoney: 100
+  speedType: 4
+  respawnSpeedType: 13
+  basicBehaviorPatterns: {fileID: 11400000, guid: f4e7a2a787e1bfa43ad08033eac3d2d3, type: 2}

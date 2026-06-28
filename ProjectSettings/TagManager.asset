@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 2
+  tags:
+  - GridCanvas
+  - Grid
+  - Building
+  - Character
+  - CharacterSpawner
+  layers:
+  - Default
+  - TransparentFX
+  - Ignore Raycast
+  - 
+  - Water
+  - UI
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  m_SortingLayers:
+  - name: Background
+    uniqueID: 3171043705
+    locked: 0
+  - name: OutsideObject
+    uniqueID: 1375179869
+    locked: 0
+  - name: DungeonHallway
+    uniqueID: 3062291443
+    locked: 0
+  - name: DungeonBackObject
+    uniqueID: 3466037299
+    locked: 0
+  - name: DungeonMiddleObject
+    uniqueID: 1885656093
+    locked: 0
+  - name: DungeonFrontObject
+    uniqueID: 1617109073
+    locked: 0
+  - name: Wall
+    uniqueID: 2626896471
+    locked: 0
+  - name: Default
+    uniqueID: 0
+    locked: 0
+  - name: UI
+    uniqueID: 2844421451
+    locked: 0
