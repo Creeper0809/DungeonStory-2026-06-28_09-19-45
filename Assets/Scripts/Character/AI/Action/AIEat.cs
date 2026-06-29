@@ -11,26 +11,18 @@ public class AIEat : AIActionSet
     {
         character.GetAbility<AbilityShopping>().StartSopping();
     }
-    public override BuildableObject GetDestination(Character character)
+    public override IReadOnlyList<BuildableObject> GetDestinationCandidates(
+        Character character,
+        GridPathSearchResult searchResult)
     {
-        Func<BuildableObject, bool> condition = (building) =>
-        {
-            if (building is Shop shop)
-            {
-                if (shop.type == Shop.Type.Food)
-                {
-                    return true;
-                }
-            }
-            return false;
-        };
-        List<BuildableObject> reachableBuilding = character.GetReachableBuilding()
-                                                           .Where(condition)
-                                                           .ToList();
-        if (!reachableBuilding.Any())
-        {
-            return null;
-        }
-        return reachableBuilding.First();
+        if (character == null) return Array.Empty<BuildableObject>();
+
+        IEnumerable<BuildableObject> reachableBuildings = searchResult != null
+            ? searchResult.GetAllVisitableBuilding()
+            : character.GetReachableBuilding();
+
+        return reachableBuildings
+            .Where((building) => building is Shop shop && shop.type == Shop.Type.Food)
+            .ToList();
     }
 }

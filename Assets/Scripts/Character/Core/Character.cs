@@ -9,7 +9,6 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.PlayerLoop;
 using UnityEngine.TextCore.Text;
-using static UnityEditor.PlayerSettings;
 using Random = UnityEngine.Random;
 
 public class Character : SerializedMonoBehaviour, IInfoable
@@ -32,6 +31,17 @@ public class Character : SerializedMonoBehaviour, IInfoable
         MOVE,
         EXECUTE
     }
+
+    public enum LifecycleState
+    {
+        None,
+        SpawningOutside,
+        EnteringDungeon,
+        Active,
+        ExitingDungeon,
+        Despawned
+    }
+
     public CharacterSO data;
 
     private SpriteRenderer spriteRenderer;
@@ -44,6 +54,9 @@ public class Character : SerializedMonoBehaviour, IInfoable
     public Dictionary<Condition, float> stats;
 
     private bool isAbilityCache = false;
+    [SerializeField]
+    [ReadOnly]
+    private LifecycleState lifecycleState = LifecycleState.None;
 
     public Action<Dictionary<Condition, float>> OnStatChange;
 
@@ -51,11 +64,17 @@ public class Character : SerializedMonoBehaviour, IInfoable
 
     private Facing facing;
     public CharacterType characterType;
+
+    public LifecycleState CurrentLifecycleState => lifecycleState;
+    public bool CanRunAi => data != null && lifecycleState == LifecycleState.Active;
+    public IReadOnlyList<string> Log => log;
+
     private void Awake()
     {
         spriteRenderer = GetComponent<SpriteRenderer>();
         ai = GetComponent<AIBrain>();
         CacheAbility();
+        log = new List<string>();
         stats = new Dictionary<Condition, float>()
         {
              { Condition.SLEEP,     5f},
@@ -70,6 +89,11 @@ public class Character : SerializedMonoBehaviour, IInfoable
         if(data != null)
         {
             Initialization(data);
+            if (lifecycleState == LifecycleState.None)
+            {
+                SetLifecycleState(LifecycleState.Active);
+            }
+            StartCoroutine(SnapToWalkableGridWhenReady());
         }
         StartCoroutine(ChangeStatByTick());
     }
@@ -89,18 +113,37 @@ public class Character : SerializedMonoBehaviour, IInfoable
     }
     void Update()
     {
-        if(ai.isBestActionEnd)
+        if (!CanRunAi)
         {
-            ai.DecideAction();
-            ai.bestAction.SetDestination(this);
+            return;
+        }
+
+        if(ai != null && ai.isBestActionEnd)
+        {
+            if (!ai.DecideAction() || ai.bestAction == null || ai.bestAction.actionset == null)
+            {
+                return;
+            }
+
+            string actionName = ai.bestAction.actionset.actionName;
             ai.bestAction.actionset.Execute(this);
-            log.Add($"{gameObject.name}이 {ai.bestAction.actionset.actionName} 행동을 시작하였습니다");
+            AddLog($"{gameObject.name}이 {actionName} 행동을 시작하였습니다");
         }
     }
+
     public List<BuildableObject> GetReachableBuilding()
     {
+        Grid grid = GridSystemManager.Instance.grid;
+        if (grid == null) return new List<BuildableObject>();
+
+        GridPathSearchResult searchResult = ai != null ? ai.GetPathSearch(this) : null;
+        if (searchResult != null)
+        {
+            return searchResult.GetAllVisitableBuilding();
+        }
+
         Vector2Int pos = GetNowXY();
-        return GridSystemManager.Instance.grid.GetAllVisitableBuilding(pos).ToList();
+        return grid.GetAllVisitableBuilding(pos).ToList();
     }
     public void ChangeLayer(string layer)
     {
@@ -125,6 +168,23 @@ public class Character : SerializedMonoBehaviour, IInfoable
         Debug.Log($"{gameObject.name} : 찾는 어빌리티가 없음 {typeof(T)}");
         return null;
     }
+
+    public bool TryGetAbility<T>(out T result) where T : CharacterAbility
+    {
+        CacheAbility();
+        foreach (CharacterAbility ability in characterAbilities)
+        {
+            if (ability is T characterAbility)
+            {
+                result = characterAbility;
+                return true;
+            }
+        }
+
+        result = null;
+        return false;
+    }
+
     public void Initialization(CharacterSO data)
     {
         this.data = data;
@@ -136,11 +196,79 @@ public class Character : SerializedMonoBehaviour, IInfoable
             ability.Initializtion(data);
         }
     }
+
+    public void SetAiPaused(bool value)
+    {
+        SetLifecycleState(value ? LifecycleState.EnteringDungeon : LifecycleState.Active);
+    }
+
+    public bool IsAiPaused()
+    {
+        return !CanRunAi;
+    }
+
+    public void SetLifecycleState(LifecycleState nextState)
+    {
+        lifecycleState = nextState;
+        if (ai == null) return;
+
+        ai.bestAction = null;
+        ai.isExecuted = false;
+        ai.isBestActionEnd = nextState == LifecycleState.Active;
+        ai.ClearPathSearchCache();
+    }
+
+    public void AddLog(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+
+        log ??= new List<string>();
+        log.Add(message);
+        const int maxLogCount = 80;
+        if (log.Count > maxLogCount)
+        {
+            log.RemoveRange(0, log.Count - maxLogCount);
+        }
+    }
+
     public Vector2Int GetNowXY()
     {
         Vector2Int startPos = GridSystemManager.Instance.grid.GetXY(transform.position);
         startPos = GridSystemManager.Instance.grid.IsValidGridPos(startPos) ? startPos : Vector2Int.zero;
         return startPos;
+    }
+
+    private IEnumerator SnapToWalkableGridWhenReady()
+    {
+        for (int i = 0; i < 30; i++)
+        {
+            if (lifecycleState == LifecycleState.SpawningOutside
+                || lifecycleState == LifecycleState.EnteringDungeon
+                || lifecycleState == LifecycleState.ExitingDungeon
+                || lifecycleState == LifecycleState.Despawned)
+            {
+                yield break;
+            }
+
+            Grid grid = GridSystemManager.Instance != null ? GridSystemManager.Instance.grid : null;
+            if (grid != null)
+            {
+                Vector2Int currentPos = grid.GetXY(transform.position);
+                if (grid.IsValidGridPos(currentPos) && grid.IsWalkable(currentPos))
+                {
+                    yield break;
+                }
+
+                if (grid.TryFindNearestWalkablePosition(currentPos, out Vector2Int walkablePosition))
+                {
+                    transform.position = grid.GetWorldPos(walkablePosition);
+                    ai?.ClearPathSearchCache();
+                    yield break;
+                }
+            }
+
+            yield return null;
+        }
     }
     public void DoFade(float alpha,float duration)
     {
@@ -159,7 +287,7 @@ public class Character : SerializedMonoBehaviour, IInfoable
     }
     private void OnMouseDown()
     {
-        if (GridSystemManager.Instance.gridMode.Value != GridMode.None) return;
+        if (GridSystemManager.Instance.Mode != GridMode.None) return;
         InfoFeedEvent.Trigger(this);
     }
 

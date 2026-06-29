@@ -8,17 +8,27 @@ using UnityEngine;
 using Random = UnityEngine.Random;
 public class AbilityShopping : CharacterAbility
 {
+    private const int DefaultMaxLookAroundCount = 1;
+
     private int holdingMoney;
     public int visitCount { get; private set; }
+    public int lookAroundCount { get; private set; }
     public List<BuildableObject> visitedBuilding { get; private set; }
     public override void Initializtion(CharacterSO data)
     {
+        base.Initializtion(data);
         visitedBuilding = new List<BuildableObject>();
         visitCount = data.GetFrequencyVisit();
+        lookAroundCount = 0;
         holdingMoney = data.GetHoldingMoney();
     }
     public Stock DetermineBuyingItem(List<Stock> stocks)
     {
+        if (stocks == null || !stocks.Any())
+        {
+            return new Stock(-1,0);
+        }
+
         if(character.characterType == CharacterType.NPC)
         {
             return stocks.OrderBy((_) => Guid.NewGuid()).First();
@@ -33,28 +43,118 @@ public class AbilityShopping : CharacterAbility
     }
     private IEnumerator Shopping()
     {
-        yield return move.MoveByPath(character.ai.bestAction.path);
-        if(grid.GetGridCell(grid.GetXY(transform.position)).GetBuildingInlayer() == character.ai.bestAction.destination && character.ai.bestAction.destination is IInteractable shop)
+        AIAction action = character != null && character.ai != null
+            ? character.ai.bestAction
+            : null;
+        if (action == null || action.destination == null)
+        {
+            character?.AddLog("쇼핑 실패: 목적지 없음");
+            if (character != null && character.ai != null)
+            {
+                character.ai.isBestActionEnd = true;
+            }
+            yield break;
+        }
+
+        if (move == null || grid == null)
+        {
+            CacheCommonReferences();
+        }
+        if (move == null || grid == null)
+        {
+            character?.AddLog("쇼핑 실패: 이동 정보 없음");
+            if (character != null && character.ai != null)
+            {
+                character.ai.isBestActionEnd = true;
+            }
+            yield break;
+        }
+
+        yield return move.MoveByCurrentBestActionPath();
+        if(grid.GetGridCell(grid.GetXY(transform.position))?.GetBuildingInlayer() == action.destination && action.destination is IInteractable shop)
         {
             yield return shop.Interact(character);
-            visitedBuilding.Add(character.ai.bestAction.destination);
+            RegisterVisit(action.destination);
         }
-        character.ai.isBestActionEnd = true;
+        else
+        {
+            character?.AddLog("쇼핑 실패: 목적지 도달 실패");
+        }
+        if (character != null && character.ai != null)
+        {
+            character.ai.isBestActionEnd = true;
+        }
     }
+
+    public void RegisterVisit(BuildableObject building)
+    {
+        if (building != null && !visitedBuilding.Contains(building))
+        {
+            visitedBuilding.Add(building);
+        }
+
+        if (visitCount > 0)
+        {
+            visitCount--;
+        }
+    }
+
+    public void RegisterLookAround()
+    {
+        lookAroundCount++;
+    }
+
+    public bool CanLookAround()
+    {
+        return character != null
+            && ShouldUseVisitFallback()
+            && lookAroundCount < DefaultMaxLookAroundCount;
+    }
+
+    public bool ShouldExitDungeon()
+    {
+        return character != null
+            && ShouldUseVisitFallback()
+            && lookAroundCount >= DefaultMaxLookAroundCount;
+    }
+
+    public bool ShouldUseVisitFallback()
+    {
+        return visitCount <= 0 || !IsThereVisitableBuilding();
+    }
+
     public bool IsThereVisitableBuilding()
     {
-        Vector2Int startPos = grid.GetXY(transform.position);
-        startPos = grid.IsValidGridPos(startPos) ? startPos : Vector2Int.zero;
-        return grid.GetAllVisitableBuilding(startPos)
-                          .Where((x) => !visitedBuilding.Contains(x))
-                          .Any();
+        if (grid == null)
+        {
+            CacheCommonReferences();
+        }
+
+        if (grid == null)
+        {
+            return false;
+        }
+
+        if (visitCount <= 0)
+        {
+            return false;
+        }
+
+        IEnumerable<BuildableObject> reachableBuildings = character != null
+            ? character.GetReachableBuilding()
+            : Enumerable.Empty<BuildableObject>();
+
+        return reachableBuildings
+            .Where((building) => building != null && !building.isDestroy && !visitedBuilding.Contains(building))
+            .Any();
     }
     public BuildableObject FindShop()
     {
-        Vector2Int startPos = grid.GetXY(transform.position);
-        startPos = grid.IsValidGridPos(startPos) ? startPos : Vector2Int.zero;
-        int wantId = character.data.favoriteStore[Random.Range(0, character.data.favoriteStore.Length)].id;
-        List<BuildableObject> reachableBulding = grid.GetAllVisitableBuilding(startPos)
+        IEnumerable<BuildableObject> reachableBuildings = character != null
+            ? character.GetReachableBuilding()
+            : Enumerable.Empty<BuildableObject>();
+
+        List<BuildableObject> reachableBulding = reachableBuildings
                                                            .Where((x) => !visitedBuilding.Contains(x))
                                                            .OrderBy((x) => Guid.NewGuid())
                                                            .ToList();
@@ -62,7 +162,14 @@ public class AbilityShopping : CharacterAbility
         {
             return null;
         }
-        BuildableObject selectedBuilding = reachableBulding.Any((building) => building.id == wantId) 
+
+        if (character.data.favoriteStore == null || character.data.favoriteStore.Length == 0)
+        {
+            return reachableBulding.First();
+        }
+
+        int wantId = character.data.favoriteStore[Random.Range(0, character.data.favoriteStore.Length)].id;
+        BuildableObject selectedBuilding = reachableBulding.Any((building) => building.id == wantId)
                                                               ? reachableBulding.Find((building) => building.id == wantId)
                                                               : reachableBulding.First();
         return selectedBuilding;

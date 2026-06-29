@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using UnityEngine.TextCore.Text;
 
 public class Shop : BuildableObject, IInteractable
 {
@@ -17,10 +16,21 @@ public class Shop : BuildableObject, IInteractable
     private Character worker;
     public Type type { get; private set; }
     private StockInfo baseStock;
+    private GameData gameData;
+
     public override void Initialization(BuildingSO buildingSO, Vector2Int buildPos)
     {
         base.Initialization(buildingSO, buildPos);
-        baseStock = DataManager.Instance.GetData<StockInfo>().Where((x) => x.Value.shopId == id).First().Value;
+        gameData = GameManager.Current != null ? GameManager.Current.gameData : null;
+
+        Dictionary<int, StockInfo> stockInfos = DataManager.Instance.GetData<StockInfo>();
+        baseStock = stockInfos?.Values.FirstOrDefault((x) => x.shopId == id);
+        if (baseStock == null)
+        {
+            Debug.LogWarning($"{name} 상점 재고 데이터를 찾지 못했습니다. shopId: {id}");
+            return;
+        }
+
         type = baseStock.type;
         FillStock();
     }
@@ -28,6 +38,7 @@ public class Shop : BuildableObject, IInteractable
     {
         AbilityShopping shopable = character.GetAbility<AbilityShopping>();
         AbilityMove moveable = character.GetAbility<AbilityMove>();
+        if (shopable == null || moveable == null) yield break;
 
         int howmany = shopable.GetShoppingCount();
         int usedMoney = 0;
@@ -36,9 +47,12 @@ public class Shop : BuildableObject, IInteractable
             Stock buyItem = shopable.DetermineBuyingItem(GetStock());
             yield return moveable.Move2PosBySpeed(GetRandomBuyPos(), 0.7f);
             if (buyItem.id == -1) continue;
-            yield return shopable.BuyItem(stocks.Where((stock) => stock.id == buyItem.id).First());
+            RemainStock remainStock = stocks.FirstOrDefault((stock) => stock.id == buyItem.id);
+            if (remainStock == null || remainStock.stock <= 0) continue;
+
+            yield return shopable.BuyItem(remainStock);
             usedMoney += buyItem.cost;
-            stocks.Where((stock) => stock.id == buyItem.id).First().stock--;
+            remainStock.stock--;
         }
         if (usedMoney == 0)
         {
@@ -47,8 +61,25 @@ public class Shop : BuildableObject, IInteractable
         int endX = buildPoses.Max((pos) => pos.x) - 1;
         Vector2 endPos = grid.GetWorldPos(new Vector2Int(endX, centerPos.y));
         yield return moveable.Move2PosBySpeed(endPos);
-        GameManager.Instance.numbers[NumberCondition.ONEARNMONEY].Spawn(endPos + Vector2.up, usedMoney);
-        gameData.holdingMoney.Value += usedMoney;
+
+        GameManager gameManager = GameManager.Current;
+        if (gameManager != null
+            && gameManager.numbers != null
+            && gameManager.numbers.TryGetValue(NumberCondition.ONEARNMONEY, out var earnMoneyNumber))
+        {
+            earnMoneyNumber.Spawn(endPos + Vector2.up, usedMoney);
+        }
+
+        if (gameData == null && gameManager != null)
+        {
+            gameData = gameManager.gameData;
+        }
+
+        if (gameData != null)
+        {
+            gameData.holdingMoney.Value += usedMoney;
+        }
+
         yield return new WaitForSeconds(0.5f);
     }
     public List<Stock> GetStock()
@@ -78,9 +109,9 @@ public class Shop : BuildableObject, IInteractable
     }
     public IEnumerator AllocateWorker(Character character)
     {
-        if (worker)
+        if (worker != null && worker != character)
         {
-            
+            yield break;
         }
         worker = character;
         float endX = buildPoses.Max((pos) => pos.x) - 0.2f;
@@ -92,6 +123,8 @@ public class Shop : BuildableObject, IInteractable
     }
     public void DeallocateWorker(Character character)
     {
+        if (worker != character) return;
+
         worker = null;
         character.transform.position = character.transform.position - new Vector3(0, 0.15f);
         character.ChangeLayer("Default");
@@ -99,8 +132,12 @@ public class Shop : BuildableObject, IInteractable
     private void FillStock()
     {
         stocks.Clear();
+        if (baseStock == null || baseStock.stocks == null) return;
+
         foreach (var stockTuple in baseStock.stocks)
         {
+            if (stockTuple == null || stockTuple.Item1 == null) continue;
+
             var(stock, count) = stockTuple;
             stocks.Add(new RemainStock(stock.id,stock.itemName,Mathf.FloorToInt(stock.cost * baseStock.multifly),count,stock.buyevent));
         }

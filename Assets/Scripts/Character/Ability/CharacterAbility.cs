@@ -12,13 +12,23 @@ public class CharacterAbility : SerializedMonoBehaviour
     {
         character = GetComponent<Character>();
     }
-    private void Start()
+    protected virtual void Start()
     {
+        CacheCommonReferences();
+    }
+    protected void CacheCommonReferences()
+    {
+        if (character == null)
+        {
+            character = GetComponent<Character>();
+        }
+        if (character == null) return;
+
         move = character.GetAbility<AbilityMove>();
         grid = GridSystemManager.Instance.grid;
     }
     public virtual void Initializtion(CharacterSO data)
     {
-        
+        CacheCommonReferences();
     }
 }

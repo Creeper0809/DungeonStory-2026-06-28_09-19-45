@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -7,10 +6,28 @@ public class AIWork : AIActionSet
 {
     public override void Execute(Character character)
     {
-        character.GetAbility<AbilityWork>().StartWorking();
+        if (character != null && character.TryGetAbility(out AbilityWork work))
+        {
+            work.StartWorking();
+            return;
+        }
+
+        if (character != null && character.ai != null)
+        {
+            character.ai.isBestActionEnd = true;
+        }
     }
-    public override BuildableObject GetDestination(Character character)
+    public override IReadOnlyList<BuildableObject> GetDestinationCandidates(
+        Character character,
+        GridPathSearchResult searchResult)
     {
-        return character.GetAbility<AbilityWork>().assignedShop;
+        if (character == null || !character.TryGetAbility(out AbilityWork work))
+        {
+            return new List<BuildableObject>();
+        }
+
+        return work.TryAssignShop(searchResult) && work.assignedShop != null
+            ? new List<BuildableObject> { work.assignedShop }
+            : new List<BuildableObject>();
     }
 }

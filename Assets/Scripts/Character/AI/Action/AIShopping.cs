@@ -12,20 +12,41 @@ public class AIShopping : AIActionSet
     {
         character.GetAbility<AbilityShopping>().StartSopping();
     }
-    public override BuildableObject GetDestination(Character character)
+    public override IReadOnlyList<BuildableObject> GetDestinationCandidates(
+        Character character,
+        GridPathSearchResult searchResult)
     {
-        AbilityShopping shopping = character.GetAbility<AbilityShopping>();
-        int wantId = character.data.favoriteStore[Random.Range(0, character.data.favoriteStore.Length)].id;
-        List<BuildableObject> reachableBulding = character.GetReachableBuilding()
-                                                                .Where((x) => !shopping.visitedBuilding.Contains(x))
-                                                                .ToList();
-        if (!reachableBulding.Any())
+        AbilityShopping shopping = character != null ? character.GetAbility<AbilityShopping>() : null;
+        if (shopping == null)
+        {
+            return Array.Empty<BuildableObject>();
+        }
+
+        IEnumerable<BuildableObject> reachableBuildings = searchResult != null
+            ? searchResult.GetAllVisitableBuilding()
+            : character.GetReachableBuilding();
+
+        return reachableBuildings
+            .Where((building) => building != null && !shopping.visitedBuilding.Contains(building))
+            .ToList();
+    }
+
+    public override BuildableObject SelectDestination(
+        Character character,
+        IReadOnlyList<BuildableObject> candidates)
+    {
+        if (character == null || candidates == null || candidates.Count == 0)
         {
             return null;
         }
-        BuildableObject selectedBuilding = reachableBulding.Any((building) => building.id == wantId)
-                                                              ? reachableBulding.First((building) => building.id == wantId)
-                                                              : reachableBulding.First();
-        return selectedBuilding;
+
+        if (character.data == null || character.data.favoriteStore == null || character.data.favoriteStore.Length == 0)
+        {
+            return candidates.FirstOrDefault();
+        }
+
+        int wantId = character.data.favoriteStore[Random.Range(0, character.data.favoriteStore.Length)].id;
+        return candidates.FirstOrDefault((building) => building != null && building.id == wantId)
+            ?? candidates.FirstOrDefault();
     }
 }

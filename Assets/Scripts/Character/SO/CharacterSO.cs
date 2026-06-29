@@ -23,21 +23,11 @@ public class CharacterSO : ScriptableObject
     [SerializeField] private CharacterSpeedType speedType;
     [SerializeField] private CharacterRespawnSpeedType respawnSpeedType;
 
-    public float moveSpeed { 
-        private set 
-        { 
-            moveSpeed = value; 
-        } 
-        get 
-        {
-            return (int)speedType / 3.5f;
-        } 
-    }
+    public float moveSpeed => (int)speedType / 3.5f;
 
-    public TimeOfDay leavingTime 
-    { 
-        private set { leavingTime = value; }
-        get 
+    public TimeOfDay leavingTime
+    {
+        get
         {
             if(characterType == CharacterType.NPC)
             {
@@ -49,12 +39,8 @@ public class CharacterSO : ScriptableObject
             }
         }
     }
-    public TimeOfDay respawnTime 
+    public TimeOfDay respawnTime
     {
-        private set
-        {
-            respawnTime = value;
-        }
         get
         {
             if(characterType == CharacterType.NPC)
@@ -68,11 +54,7 @@ public class CharacterSO : ScriptableObject
         }
     }
 
-    public float respawnSpeed { 
-        private set
-        {
-            respawnSpeed = value;
-        }
+    public float respawnSpeed {
         get
         {
             int temp = (int)respawnSpeedType;
@@ -86,10 +68,12 @@ public class CharacterSO : ScriptableObject
     //                                                                    GetSet                                                    //
     //                                                                                                                              //
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    
+
     public int GetFrequencyVisit()
     {
-        return Random.Range(frequencyVisitMin, frequencyVisitMax);
+        int min = Mathf.Max(1, frequencyVisitMin);
+        int max = Mathf.Max(min, frequencyVisitMax);
+        return Random.Range(min, max + 1);
     }
     public int GetHoldingMoney()
     {

@@ -1,17 +1,18 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class UIGridTab : MonoBehaviour
 {
-    public int buildingCategory;
+    [FormerlySerializedAs("buildingCategory")]
+    public int categoryId;
+
     private void Start()
     {
         CloseTab();
     }
-    public bool ToggleTab(int buildingCategory)
+    public bool ToggleTab(int categoryId)
     {
-        if (this.buildingCategory != buildingCategory)
+        if (this.categoryId != categoryId)
         {
             CloseTab();
             return false;

@@ -20,12 +20,12 @@ public class UtilSingleton<T> : SerializedMonoBehaviour where T : Component
         {
             if (_instance == null)
             {
-                _instance = FindObjectOfType<T>();
-                
+                _instance = FindFirstObjectByType<T>();
+
                 if (_instance == null)
                 {
                     GameObject obj = GameObject.Find(typeof(T).Name);
-                    if(obj != null)
+                    if(obj == null)
                     {
                         obj = new GameObject();
                         obj.name = typeof(T).Name + "_AutoCreated";

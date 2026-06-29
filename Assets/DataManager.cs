@@ -31,6 +31,15 @@ public class DataManager
             {
                 data[type] = new Dictionary<int, DataScriptableObject>();
             }
+
+            if (data[type].ContainsKey(scriptableObject.id))
+            {
+                Debug.LogWarning(
+                    $"{type} id {scriptableObject.id} 중복 데이터가 있습니다. " +
+                    $"{data[type][scriptableObject.id].name}를 유지하고 {scriptableObject.name}는 무시합니다.");
+                continue;
+            }
+
             data[type].Add(scriptableObject.id, scriptableObject);
             Debug.Log($"{type}에 {scriptableObject.name} 데이터가 추가되었습니다");
         }

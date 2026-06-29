@@ -1,91 +1,89 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using TMPro;
 using UnityEngine;
 
 public class GridGhostObject : MonoBehaviour
 {
-    private GameObject ghostObject;
-    private GridSystemManager gridSystemManager;
-    private SpriteRenderer ghostSpriteRenderer;
-    private bool hidden;
+    [SerializeField] private GameObject ghostObject;
+    [SerializeField] private Color buildableColor = Color.green;
+    [SerializeField] private Color blockedColor = Color.red;
 
-    void Awake()
+    private SpriteRenderer ghostSpriteRenderer;
+
+    public bool IsHidden { get; private set; } = true;
+
+    private void Awake()
     {
-        ghostObject = transform.GetChild(0).gameObject;
-        gridSystemManager = GridSystemManager.Instance;
-        ghostSpriteRenderer = ghostObject.GetComponent<SpriteRenderer>();
+        Initialize();
     }
-    private void Start()
+
+    public void Initialize(GameObject target = null)
     {
-       
-    }
-    void Update()
-    {
-        if (hidden) return;
-        Vector3 evenOffset = new Vector2(0.5f, 0);
-        if (!gridSystemManager.isDragging)
+        if (target != null)
         {
-            Vector2Int targetPos = gridSystemManager.grid.GetXY(GameManager.Instance.GetMouseWorldPos());
-            OnBuildableChange(gridSystemManager.selectedBuilding.Value.IsSatisfyConditionOnBuild(gridSystemManager.grid, targetPos));
-            Vector3 pos = gridSystemManager.GetMouseWorldPosSnapped();
-            Vector2 instatiatePos = gridSystemManager.selectedBuilding.Value.width % 2 == 0 ? pos + evenOffset : pos;
-            ghostObject.transform.position = Vector3.Lerp(ghostObject.transform.position, new Vector3(instatiatePos.x, instatiatePos.y, GridSystemManager.Instance.gridOriginPos.z), Time.unscaledDeltaTime * 25f);
-            return;
+            ghostObject = target;
         }
-        ghostSpriteRenderer.size = new Vector3(gridSystemManager.selectedBuilding.Value.width, 3);
-        var poses = gridSystemManager.totalSelectedPos;
-        var miny = poses.Min(pos => pos.y);
-        var minx = poses.Min(pos => pos.x) + (gridSystemManager.xCount / 2);
-        var pos2 = gridSystemManager.grid.GetWorldPos(new Vector2Int(minx, miny));
-        ghostObject.transform.position = gridSystemManager.selectedBuilding.Value.width *  gridSystemManager.xCount% 2 == 0 ? pos2 + evenOffset: pos2;
-        ghostSpriteRenderer.size = new Vector3(gridSystemManager.selectedBuilding.Value.width * gridSystemManager.xCount, gridSystemManager.yCount * 3);
-    }
-    private void OnBuildableChange(bool buildable)
-    {
-        if (buildable)
+
+        if (ghostObject == null && transform.childCount > 0)
         {
-            ghostSpriteRenderer.color = Color.green;
+            ghostObject = transform.GetChild(0).gameObject;
         }
-        else
+
+        ghostSpriteRenderer = ghostObject != null
+            ? ghostObject.GetComponent<SpriteRenderer>()
+            : null;
+    }
+
+    public void Show(Sprite sprite)
+    {
+        EnsureInitialized();
+        IsHidden = false;
+        if (ghostSpriteRenderer != null)
         {
-            ghostSpriteRenderer.color = Color.red;
+            ghostSpriteRenderer.sprite = sprite;
         }
     }
-    private void OnGridModeChanged(GridMode gridMode)
+
+    public void Hide()
     {
-        if (gridMode == GridMode.None) CleanObject();
-    }
-    public void OnSelectedChanged(BuildingSO buildingSO)
-    {
-        if (gridSystemManager.gridMode.Value != GridMode.Build) return;
-        CleanObject();
-        if(buildingSO != null)
+        EnsureInitialized();
+        IsHidden = true;
+        if (ghostSpriteRenderer != null)
         {
-            ghostObject.transform.position = GameManager.Instance.GetMouseWorldPos();
-            RefreshVisual(buildingSO);
+            ghostSpriteRenderer.sprite = null;
         }
     }
-    private void RefreshVisual(BuildingSO buildingSO)
+
+    public void SetBuildable(bool buildable)
     {
-        hidden = false;
-        ghostSpriteRenderer.sprite = buildingSO.sprite;
+        EnsureInitialized();
+        if (ghostSpriteRenderer != null)
+        {
+            ghostSpriteRenderer.color = buildable ? buildableColor : blockedColor;
+        }
     }
-    private void CleanObject()
+
+    public void SetWorldPosition(Vector3 worldPosition, float lerpSpeed = 0f)
     {
-        hidden = true;
-        ghostSpriteRenderer.sprite = null;
+        EnsureInitialized();
+        if (ghostObject == null) return;
+
+        ghostObject.transform.position = lerpSpeed > 0f
+            ? Vector3.Lerp(ghostObject.transform.position, worldPosition, Time.unscaledDeltaTime * lerpSpeed)
+            : worldPosition;
     }
-    private void OnEnable()
+
+    public void SetSize(Vector2 size)
     {
-        gridSystemManager.selectedBuilding.OnValueChange += OnSelectedChanged;
-        gridSystemManager.gridMode.OnValueChange += OnGridModeChanged;
+        EnsureInitialized();
+        if (ghostSpriteRenderer != null)
+        {
+            ghostSpriteRenderer.size = size;
+        }
     }
-    private void OnDisable()
+
+    private void EnsureInitialized()
     {
-        gridSystemManager.selectedBuilding.OnValueChange -= OnSelectedChanged;
-        gridSystemManager.gridMode.OnValueChange -= OnGridModeChanged;
+        if (ghostObject != null && ghostSpriteRenderer != null) return;
+
+        Initialize();
     }
 }

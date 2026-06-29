@@ -1,68 +1,83 @@
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
 public class GridCell
 {
-    public Dictionary<GridLayer, BuildableObject> cell { get; private set;}
-    public bool isbuildable;
-    public Vector2Int pos;
-    public List<Vector2Int> connectedFloor;
+    private readonly Dictionary<GridLayer, IGridOccupant> occupants;
+    private List<GridTraversalLink> traversalLinks;
+    private bool isBuildable;
+
+    public Vector2Int Position { get; }
+    public IReadOnlyList<GridTraversalLink> TraversalLinks => traversalLinks;
+    public IReadOnlyList<Vector2Int> ConnectedFloor => traversalLinks.Select((link) => link.To).ToList();
+
     public GridCell(Vector2Int pos)
     {
-        cell = new Dictionary<GridLayer, BuildableObject>();
-        connectedFloor = new List<Vector2Int>();
-        isbuildable = true;
-        this.pos = pos;
+        occupants = new Dictionary<GridLayer, IGridOccupant>();
+        traversalLinks = new List<GridTraversalLink>();
+        isBuildable = true;
+        Position = pos;
     }
-    public BuildableObject GetBuildingInlayer(GridLayer layer = GridLayer.Building)
+    public IGridOccupant GetOccupant(GridLayer layer = GridLayer.Building)
     {
-        if(!HasBuildingInLayer()) return null;
-        return cell[layer];
+        if(!HasOccupantInLayer(layer)) return null;
+        return occupants[layer];
     }
-    public BuildableObject GetBuilding()
+    public IGridOccupant GetTopOccupant()
     {
-        if (cell == null || cell.Count == 0) return null;
-        var orderedBuildings = cell.OrderByDescending(kvp => (int)kvp.Key).ToList();
+        if (occupants.Count == 0) return null;
+        var orderedBuildings = occupants.OrderByDescending(kvp => (int)kvp.Key).ToList();
         return orderedBuildings.First().Value;
     }
-    public void ConnectFloor(List<Vector2Int> poses)
+    public void ConnectFloor(IEnumerable<Vector2Int> poses)
     {
-        connectedFloor = poses;
+        traversalLinks = poses?
+            .Where((pos) => pos != Position)
+            .Select((pos) => new GridTraversalLink(pos, GetTopOccupant(), GridMoveType.Instant))
+            .ToList() ?? new List<GridTraversalLink>();
     }
-    public void DestroyBuildByLayer(GridLayer layer)
+    public void SetTraversalLinks(IEnumerable<GridTraversalLink> links)
     {
-        if (!HasBuildingInLayer(layer)) return;
-        cell.Remove(layer);
+        traversalLinks = links?.ToList() ?? new List<GridTraversalLink>();
     }
-    public List<BuildableObject> GetAllBuilding()
+    public void RemoveOccupantByLayer(GridLayer layer)
     {
-        List<BuildableObject> result = new List<BuildableObject>();
-        foreach (var building in cell.Values)
+        if (!HasOccupantInLayer(layer)) return;
+        occupants.Remove(layer);
+    }
+    public List<IGridOccupant> GetAllOccupants()
+    {
+        List<IGridOccupant> result = new List<IGridOccupant>();
+        foreach (var building in occupants.Values)
         {
             result.Add(building);
         }
         return result;
     }
-    public bool CanBuild(GridLayer layer = GridLayer.Building)
+    public bool CanOccupy(GridLayer layer = GridLayer.Building)
     {
-        return !HasBuildingInLayer(layer) && isbuildable;
+        return !HasOccupantInLayer(layer) && isBuildable;
     }
-    public bool HasBuildingInLayer(GridLayer layer = GridLayer.Building)
+    public bool HasOccupantInLayer(GridLayer layer = GridLayer.Building)
     {
-        if(cell.ContainsKey(layer))
-        {
-            return true;
-        }
-        return false;
+        return occupants.ContainsKey(layer);
     }
-    public bool HasBuilding()
+    public bool HasOccupant()
     {
-        return cell.Count > 0;
+        return occupants.Count > 0;
     }
-    public void Build(GridLayer layer,BuildableObject buildableObject)
+    public bool TrySetOccupant(GridLayer layer, IGridOccupant occupant)
     {
-        cell.Add(layer, buildableObject);
+        if (occupant == null || !CanOccupy(layer)) return false;
+
+        occupants.Add(layer, occupant);
+        return true;
     }
+
+    public void SetOccupant(GridLayer layer,IGridOccupant occupant)
+    {
+        TrySetOccupant(layer, occupant);
+    }
+
 }

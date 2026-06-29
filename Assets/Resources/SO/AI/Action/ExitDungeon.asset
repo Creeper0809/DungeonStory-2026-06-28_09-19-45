@@ -16,8 +16,7 @@ MonoBehaviour:
     SerializedFormat: 2
     SerializedBytes: 
     ReferencedUnityObjects:
-    - {fileID: 11400000, guid: 35efa56dfca7be6468e8cc9639787844, type: 2}
-    - {fileID: 11400000, guid: 26fadb0544522bb40a62591c9fb8345e, type: 2}
+    - {fileID: 11400000, guid: 312dbdc64a07404da28751ecc7ad4e52, type: 2}
     SerializedBytesString: 
     Prefab: {fileID: 0}
     PrefabModificationsReferencedUnityObjects: []
@@ -28,13 +27,10 @@ MonoBehaviour:
       Data: 0|Consideration[], Assembly-CSharp
     - Name: 
       Entry: 12
-      Data: 2
+      Data: 1
     - Name: 
       Entry: 10
       Data: 0
-    - Name: 
-      Entry: 10
-      Data: 1
     - Name: 
       Entry: 13
       Data: 

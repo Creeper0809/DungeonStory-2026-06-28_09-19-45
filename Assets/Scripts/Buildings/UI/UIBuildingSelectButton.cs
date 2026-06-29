@@ -13,11 +13,11 @@ public class UIBuildingSelectButton : MonoBehaviour
     }
     public void OnClick()
     {
-        GridSystemManager.Instance.SetGridModeBuild();
-        GridSystemManager.Instance.SelectBuildingById(id);
+        DungeonStoryGridBuildingController.Instance.SetGridModeBuild();
+        DungeonStoryGridBuildingController.Instance.SelectBuildingById(id);
     }
     public void ActiveDestroyMode()
     {
-        GridSystemManager.Instance.SetGridMode(GridMode.Destory);
+        DungeonStoryGridBuildingController.Instance.SetDestroyMode();
     }
 }

@@ -17,8 +17,11 @@ public class BuildingSummaryInfo : UIPopUp,UtilEventListener<InfoFeedEvent>
     {
         if (eventType.infoable.GetInfoType() != InfoFeedEvent.Type.BUILDING) return;
         UIManager.Instance.CloseAllPopup();
-        if (eventType.infoable is BuildableObject building)
+        if (eventType.infoable is BuildingInfoTarget buildingInfo)
         {
+            BuildableObject building = buildingInfo.Building;
+            if (building == null) return;
+
             UI.gameObject.SetActive(true);
             UIManager.Instance.OpenPopup(this);
             BuildingSO data = DataManager.Instance.GetData<BuildingSO>()[building.id];
@@ -43,6 +46,22 @@ public class BuildingSummaryInfo : UIPopUp,UtilEventListener<InfoFeedEvent>
         this.EventStopListening<InfoFeedEvent>();
     }
 }
+
+public class BuildingInfoTarget : IInfoable
+{
+    public BuildableObject Building { get; }
+
+    public BuildingInfoTarget(BuildableObject building)
+    {
+        Building = building;
+    }
+
+    public InfoFeedEvent.Type GetInfoType()
+    {
+        return InfoFeedEvent.Type.BUILDING;
+    }
+}
+
 public struct InfoFeedEvent
 {
     public IInfoable infoable;

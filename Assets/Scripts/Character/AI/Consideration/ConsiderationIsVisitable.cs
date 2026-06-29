@@ -9,7 +9,13 @@ public class ConsiderationIsVisitable : Consideration
     public Shop.Type type;
     public override float ScoreConsideration(Character character)
     {
-        AbilityShopping shopping = character.GetAbility<AbilityShopping>();
+        AbilityShopping shopping = null;
+        character?.TryGetAbility(out shopping);
+        if (shopping == null || shopping.visitCount <= 0)
+        {
+            return 0f;
+        }
+
         List<BuildableObject> reachableBulding = character.GetReachableBuilding()
                                                         .Where((x) => !shopping.visitedBuilding.Contains(x))
                                                         .ToList();
