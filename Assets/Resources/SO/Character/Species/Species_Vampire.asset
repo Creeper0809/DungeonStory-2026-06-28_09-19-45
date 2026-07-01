@@ -1,0 +1,70 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: af4061a25738a28e7b9dbb8593dd53e7, type: 3}
+  m_Name: Species_Vampire
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterSpeciesSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 3
+  speciesTag: Vampire
+  displayName: "\uBC40\uD30C\uC774\uC5B4"
+  shortDescription: "\uC7A5\uAE30 \uCCB4\uB958/\uC5F0\uAD6C/\uB9C8\uB825/\uACF5\uD3EC
+    \uC704\uD5D8"
+  description: "\uC2DD\uC0AC \uBD80\uB2F4\uC740 \uB0AE\uACE0 \uC5F0\uAD6C\uC640 \uB9C8\uB825
+    \uC2DC\uC124\uC744 \uC624\uB798 \uC774\uC6A9\uD558\uC9C0\uB9CC, \uBD88\uB9CC\uC774
+    \uC313\uC774\uBA74 \uACF5\uD3EC \uC0AC\uACE0\uB97C \uB9CC\uB4E0\uB2E4."
+  preferredFacilityLabels:
+  - "\uC5F0\uAD6C\uC2E4"
+  - "\uB9C8\uB825 \uC800\uC7A5\uC18C"
+  - "\uC5B4\uB460 \uD734\uC2DD \uD658\uACBD"
+  dislikedEnvironmentLabels:
+  - "\uBC1D\uC740 \uC2DC\uC124"
+  - "\uC131\uC2A4\uB7EC\uC6B4 \uC7A5\uC2DD"
+  - "\uD63C\uC7A1\uD55C \uC0C1\uC5C5 \uAD6C\uC5ED"
+  stayDurationMultiplier: 1.45
+  incidentType: 3
+  incidentName: "\uBC40\uD30C\uC774\uC5B4 \uACF5\uD3EC"
+  incidentDescription: "\uBD88\uB9CC\uC774 \uC313\uC774\uBA74 \uC8FC\uBCC0 \uC190\uB2D8\uC758
+    \uB9CC\uC871\uB3C4\uC640 \uCCB4\uB958 \uC758\uC9C0\uB97C \uB5A8\uC5B4\uB728\uB9B0\uB2E4."
+  incidentMitigatingRoles: 36
+  statBonus:
+    attack: 1
+    sales: 1
+    research: 3
+    moveSpeed: 0
+    strength: 0
+    toughness: 0
+    dexterity: 1
+    cleaning: -1
+    endurance: 1
+  modifiers:
+    consumptionMultiplier: 0.8
+    spendingMultiplier: 1.25
+    waitPatienceMultiplier: 1.1
+    crowdSensitivityMultiplier: 1.25
+    accidentChanceMultiplier: 1.1
+    workSpeedMultiplier: 1.05
+    researchSpeedMultiplier: 1.35
+    combatPowerMultiplier: 1.1
+    moveSpeedMultiplier: 1
+    stayDurationMultiplier: 1
+    preferredFacilityRoles: 52
+    dislikedFacilityRoles: 1
+    preferredWorkTypes: 17
+    dislikedWorkTypes: 8

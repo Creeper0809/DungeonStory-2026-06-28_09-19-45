@@ -13,15 +13,33 @@ public class NoticeFeed : MonoBehaviour, UtilEventListener<NoticeFeedEvent>
 
     private void Start()
     {
-        noticePool = new ObjectPool<GameObject>(CreatePooledItem, OnTakeFromPool, OnReturnedToPool, OnDestroyPoolObject, true, 5, 15);
+        EnsurePool();
     }
     public virtual void OnTriggerEvent(NoticeFeedEvent e)
     {
+        EnsurePool();
+        if (noticePool == null)
+        {
+            return;
+        }
+
         GameObject noticeObject = noticePool.Get();
-        noticeObject.transform.parent = this.transform;
+        if (noticeObject == null)
+        {
+            return;
+        }
+
+        noticeObject.transform.SetParent(transform, false);
         noticeObject.transform.SetAsFirstSibling();
         noticeObject.transform.localScale = new Vector3(1, 1, 1);
-        TMP_Text textObject = noticeObject.transform.GetChild(0).GetComponent<TMP_Text>();
+        TMP_Text textObject = noticeObject.GetComponentInChildren<TMP_Text>(true);
+        if (textObject == null)
+        {
+            noticePool.Release(noticeObject);
+            return;
+        }
+
+        TMPKoreanFont.Apply(textObject);
         textObject.text = e.notice;
         textObject.color = Color.white;
         switch (e.grade)
@@ -36,20 +54,43 @@ public class NoticeFeed : MonoBehaviour, UtilEventListener<NoticeFeedEvent>
             .OnComplete(() => noticePool.Release(noticeObject))
             .Play();
     }
+
+    private void EnsurePool()
+    {
+        if (noticePool != null)
+        {
+            return;
+        }
+
+        noticePool = new ObjectPool<GameObject>(CreatePooledItem, OnTakeFromPool, OnReturnedToPool, OnDestroyPoolObject, true, 5, 15);
+    }
+
     private GameObject CreatePooledItem()
     {
-        return Instantiate(textPrefab);
+        if (textPrefab != null)
+        {
+            return Instantiate(textPrefab);
+        }
+
+        Debug.LogError("NoticeFeed requires textPrefab.");
+        return null;
     }
     private void OnTakeFromPool(GameObject poolGo)
     {
+        if (poolGo == null) return;
+
         poolGo.SetActive(true);
     }
     private void OnReturnedToPool(GameObject poolGo)
     {
+        if (poolGo == null) return;
+
         poolGo.SetActive(false);
     }
     private void OnDestroyPoolObject(GameObject poolGo)
     {
+        if (poolGo == null) return;
+
         Destroy(poolGo);
     }
     private void OnEnable()

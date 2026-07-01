@@ -13,9 +13,41 @@ MonoBehaviour:
   m_Name: TestCharacter
   m_EditorClassIdentifier: 
   characterType: 0
+  role: 0
   id: 0
   characterName: "\uD14C\uC2A4\uD2B8 \uCE90\uB9AD\uD130"
-  characterSprite: {fileID: -177130652, guid: 268b13836c8af3d408110e228f534b75, type: 3}
+  speciesTag: Orc
+  species: {fileID: 11400000, guid: c7f6b6a35919a8091a84822b06288975, type: 2}
+  baseStats:
+    attack: 5
+    sales: 5
+    research: 5
+    moveSpeed: 5
+    strength: 5
+    toughness: 5
+    dexterity: 5
+    cleaning: 5
+    endurance: 5
+  traits:
+  - {fileID: 11400000, guid: 95fa850a1a682706faa160ba49bb26cf, type: 2}
+  defaultWorkPriorities:
+    operate: 1
+    restock: 2
+    repair: 2
+    clean: 3
+    research: 3
+    guard: 3
+    rescue: 2
+    rest: 3
+  aiPersonality:
+    diligence: 1
+    curiosity: 1
+    selfCare: 1
+    patience: 1
+    shoppingInterest: 1
+  ownerSummary: 
+  ownerPreferredWorkTypes: 0
+  characterSprite: {fileID: -7880743687467962618, guid: 10947ec9a8d2243f58638b352fee8956, type: 3}
   favoriteStore:
   - {fileID: 11400000, guid: 183b18c5841fb7a438bab789f642e364, type: 2}
   frequencyVisitMax: 1
@@ -24,4 +56,4 @@ MonoBehaviour:
   minHoldingMoney: 100
   speedType: 4
   respawnSpeedType: 13
-  basicBehaviorPatterns: {fileID: 11400000, guid: f4e7a2a787e1bfa43ad08033eac3d2d3, type: 2}
+  basicBehaviorPatterns: {fileID: 0}

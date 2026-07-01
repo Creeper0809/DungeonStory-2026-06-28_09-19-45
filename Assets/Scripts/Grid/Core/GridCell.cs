@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 public class GridCell
@@ -10,7 +9,6 @@ public class GridCell
 
     public Vector2Int Position { get; }
     public IReadOnlyList<GridTraversalLink> TraversalLinks => traversalLinks;
-    public IReadOnlyList<Vector2Int> ConnectedFloor => traversalLinks.Select((link) => link.To).ToList();
 
     public GridCell(Vector2Int pos)
     {
@@ -27,19 +25,54 @@ public class GridCell
     public IGridOccupant GetTopOccupant()
     {
         if (occupants.Count == 0) return null;
-        var orderedBuildings = occupants.OrderByDescending(kvp => (int)kvp.Key).ToList();
-        return orderedBuildings.First().Value;
+
+        bool found = false;
+        GridLayer topLayer = GridLayer.Hallway;
+        IGridOccupant topOccupant = null;
+        foreach (KeyValuePair<GridLayer, IGridOccupant> kvp in occupants)
+        {
+            if (!found || kvp.Key > topLayer)
+            {
+                found = true;
+                topLayer = kvp.Key;
+                topOccupant = kvp.Value;
+            }
+        }
+
+        return topOccupant;
     }
     public void ConnectFloor(IEnumerable<Vector2Int> poses)
     {
-        traversalLinks = poses?
-            .Where((pos) => pos != Position)
-            .Select((pos) => new GridTraversalLink(pos, GetTopOccupant(), GridMoveType.Instant))
-            .ToList() ?? new List<GridTraversalLink>();
+        traversalLinks.Clear();
+        if (poses == null)
+        {
+            return;
+        }
+
+        IGridOccupant topOccupant = GetTopOccupant();
+        foreach (Vector2Int pos in poses)
+        {
+            if (pos != Position)
+            {
+                traversalLinks.Add(new GridTraversalLink(pos, topOccupant, GridMoveType.Instant));
+            }
+        }
     }
     public void SetTraversalLinks(IEnumerable<GridTraversalLink> links)
     {
-        traversalLinks = links?.ToList() ?? new List<GridTraversalLink>();
+        traversalLinks.Clear();
+        if (links == null)
+        {
+            return;
+        }
+
+        foreach (GridTraversalLink link in links)
+        {
+            if (link != null)
+            {
+                traversalLinks.Add(link);
+            }
+        }
     }
     public void RemoveOccupantByLayer(GridLayer layer)
     {
@@ -49,11 +82,37 @@ public class GridCell
     public List<IGridOccupant> GetAllOccupants()
     {
         List<IGridOccupant> result = new List<IGridOccupant>();
-        foreach (var building in occupants.Values)
+        FillAllOccupants(result);
+        return result;
+    }
+    public void FillAllOccupants(List<IGridOccupant> result)
+    {
+        if (result == null)
+        {
+            return;
+        }
+
+        foreach (IGridOccupant building in occupants.Values)
         {
             result.Add(building);
         }
-        return result;
+    }
+    public bool ContainsOccupant(IGridOccupant occupant)
+    {
+        if (occupant == null)
+        {
+            return false;
+        }
+
+        foreach (IGridOccupant candidate in occupants.Values)
+        {
+            if (candidate == occupant)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
     public bool CanOccupy(GridLayer layer = GridLayer.Building)
     {

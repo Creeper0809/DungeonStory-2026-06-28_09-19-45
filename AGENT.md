@@ -1,5 +1,16 @@
 # DungeonStory Agent Guide
 
+## Fallback Policy
+
+- Do not add fallback behavior by default.
+- Prefer failing loudly with a clear reason, debug state, and test coverage over silently substituting another behavior.
+- Add a fallback only when it is explicitly required by the design, requested by the user, or needed for a deliberate compatibility path.
+- Any fallback must be visible: log or expose the exact fallback reason, source action, target action, and affected object.
+- Any fallback that changes gameplay behavior must have a focused regression test for the original failure case and the fallback path.
+- Avoid fallback chains. If more than one fallback step is needed, stop and model the state explicitly instead.
+- Never use fallback movement or fallback AI actions to hide missing grid, missing destination, invalid data, or unreachable path errors.
+- For character AI, a failed action should usually be reported as unavailable/cannot-start/no-path rather than replaced with another action unless the design document names that replacement.
+
 이 문서는 DungeonStory 프로젝트에서 Codex/에이전트가 작업할 때 지켜야 할 기본 규칙이다.
 
 ## Unity MCP 사용

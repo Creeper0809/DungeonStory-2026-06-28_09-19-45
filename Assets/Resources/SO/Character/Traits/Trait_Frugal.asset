@@ -1,0 +1,52 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1d73e94ec113318588b25eed8f9f9ee0, type: 3}
+  m_Name: Trait_Frugal
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterTraitSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 102
+  traitName: "\uC808\uC57D\uAC00"
+  description: "\uC18C\uBE44\uAC00 \uC904\uACE0 \uBD88\uB9CC \uC0AC\uACE0 \uD655\uB960\uC774
+    \uB0AE\uC544\uC9C4\uB2E4."
+  statBonus:
+    attack: 0
+    sales: 0
+    research: 0
+    moveSpeed: 0
+    strength: 0
+    toughness: 0
+    dexterity: 0
+    cleaning: 0
+    endurance: 1
+  modifiers:
+    consumptionMultiplier: 0.75
+    spendingMultiplier: 0.75
+    waitPatienceMultiplier: 1.2
+    crowdSensitivityMultiplier: 0.9
+    accidentChanceMultiplier: 0.9
+    workSpeedMultiplier: 1
+    researchSpeedMultiplier: 1
+    combatPowerMultiplier: 1
+    moveSpeedMultiplier: 1
+    stayDurationMultiplier: 1
+    preferredFacilityRoles: 0
+    dislikedFacilityRoles: 0
+    preferredWorkTypes: 0
+    dislikedWorkTypes: 0

@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 public abstract class GridPlacementGhostPresenter : MonoBehaviour
@@ -15,8 +14,6 @@ public abstract class GridPlacementGhostPresenter : MonoBehaviour
     protected abstract float GridOriginZ { get; }
     protected abstract bool IsDraggingSelection { get; }
     protected abstract IReadOnlyList<Vector2Int> SelectedGridPositions { get; }
-    protected abstract int SelectedColumnCount { get; }
-    protected abstract int SelectedRowCount { get; }
     protected abstract Vector3 MouseWorldPosition { get; }
     protected abstract Vector3 MouseWorldPositionSnapped { get; }
 
@@ -45,8 +42,9 @@ public abstract class GridPlacementGhostPresenter : MonoBehaviour
         }
 
         EnsureGhostObject();
-        ghostObject.SetWorldPosition(MouseWorldPosition);
+        ghostObject.SetSize(new Vector2(Mathf.Max(1, GhostWidth), CellWorldHeight));
         ghostObject.Show(GhostSprite);
+        ghostObject.SetWorldPosition(MouseWorldPosition);
     }
 
     protected void HideGhost()
@@ -80,6 +78,7 @@ public abstract class GridPlacementGhostPresenter : MonoBehaviour
     {
         Vector2Int targetPos = grid.GetXY(MouseWorldPosition);
         ghostObject.SetBuildable(CanPlaceAt(targetPos));
+        ghostObject.SetSize(new Vector2(Mathf.Max(1, GhostWidth), CellWorldHeight));
 
         Vector3 snappedPosition = MouseWorldPositionSnapped;
         Vector2 offset = GhostWidth % 2 == 0 ? new Vector2(0.5f, 0f) : Vector2.zero;
@@ -93,16 +92,23 @@ public abstract class GridPlacementGhostPresenter : MonoBehaviour
         if (selectedPositions == null || selectedPositions.Count == 0) return;
 
         int width = Mathf.Max(1, GhostWidth);
-        int xCount = Mathf.Max(1, SelectedColumnCount);
-        int yCount = Mathf.Max(1, SelectedRowCount);
+        Vector3 evenWidthOffset = width % 2 == 0 ? new Vector3(0.5f, 0f, 0f) : Vector3.zero;
+        List<Vector3> worldPositions = new List<Vector3>(selectedPositions.Count);
+        List<bool> buildableStates = new List<bool>(selectedPositions.Count);
 
-        int minY = selectedPositions.Min((pos) => pos.y);
-        int minX = selectedPositions.Min((pos) => pos.x) + (xCount / 2);
-        Vector3 basePosition = grid.GetWorldPos(new Vector2Int(minX, minY));
-        Vector3 offset = (width * xCount) % 2 == 0 ? new Vector3(0.5f, 0f, 0f) : Vector3.zero;
+        foreach (Vector2Int selectedPosition in selectedPositions)
+        {
+            Vector3 worldPosition = grid.GetWorldPos(selectedPosition) + evenWidthOffset;
+            worldPosition.z = GridOriginZ;
+            worldPositions.Add(worldPosition);
+            buildableStates.Add(CanPlaceAt(selectedPosition));
+        }
 
-        ghostObject.SetWorldPosition(basePosition + offset);
-        ghostObject.SetSize(new Vector2(width * xCount, yCount * CellWorldHeight));
+        ghostObject.ShowRepeated(
+            GhostSprite,
+            worldPositions,
+            new Vector2(width, CellWorldHeight),
+            buildableStates);
     }
 
     private void EnsureGhostObject()

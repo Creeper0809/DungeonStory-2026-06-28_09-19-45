@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -19,10 +19,13 @@ public static class GridFoundationDebugScenarios
     {
         List<string> errors = new List<string>();
 
-        RunScenario("일반 복도 이동", VerifyWalkPath, errors);
-        RunScenario("계단 이동", VerifyStairPath, errors);
-        RunScenario("입장/퇴장 경로", VerifyEntryExitPath, errors);
-        RunScenario("도달 불가 이동 후보 제외", VerifyUnreachableMovementIsExcluded, errors);
+        RunScenario("?쇰컲 蹂듬룄 ?대룞", VerifyWalkPath, errors);
+        RunScenario("怨꾨떒 ?대룞", VerifyStairPath, errors);
+        RunScenario("?낆옣/?댁옣 寃쎈줈", VerifyEntryExitPath, errors);
+        RunScenario("?꾨떖 遺덇? ?대룞 ?꾨낫 ?쒖쇅", VerifyUnreachableMovementIsExcluded, errors);
+
+        RunScenario("????녿뒗 嫄대Ъ sprite generated visual ?뚮뜑", VerifyTilelessBuildingDoesNotCreateGeneratedSprite, errors);
+        RunScenario("?쒕옒洹?ghost sprite 諛섎났 ?뚮뜑", VerifyDraggedGhostUsesRepeatedSprites, errors);
 
         if (errors.Count > 0)
         {
@@ -48,7 +51,7 @@ public static class GridFoundationDebugScenarios
         {
             if (scenario()) continue;
 
-            errors.Add($"{name} 실패: 반복 {i + 1}");
+            errors.Add($"{name} ?ㅽ뙣: 諛섎났 {i + 1}");
             return;
         }
     }
@@ -103,6 +106,100 @@ public static class GridFoundationDebugScenarios
 
         List<IGridOccupant> occupants = grid.SearchPath(new Vector2Int(0, 0)).GetAllReachableOccupants();
         return occupants.Contains(reachable) && !occupants.Contains(unreachable);
+    }
+
+    private static bool VerifyTilelessBuildingDoesNotCreateGeneratedSprite()
+    {
+        BuildingSO lab = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/P1/P1_ResearchLab.asset");
+        if (lab == null
+            || lab.sprite == null
+            || (lab.tiles != null && lab.tiles.Count > 0))
+        {
+            return false;
+        }
+
+        Grid grid = new Grid(10, 1);
+        for (int x = 0; x < grid.width; x++)
+        {
+            AddHallway(grid, new Vector2Int(x, 0));
+        }
+
+        GridBuildingPlacementService service = new GridBuildingPlacementService(
+            grid,
+            null,
+            null,
+            new GridBuildingFactory(),
+            new BuildingPlacementValidator());
+        bool placed = service.TryPlaceBuilding(lab, new Vector2Int(4, 0), out _);
+        BuildableObject building = grid.GetGridCell(new Vector2Int(4, 0)).GetBuilding();
+        SpriteRenderer renderer = building != null
+            ? building.GetComponentInChildren<SpriteRenderer>()
+            : null;
+
+        bool valid = placed
+            && building != null
+            && renderer == null;
+
+        if (building != null)
+        {
+            Object.DestroyImmediate(building.gameObject);
+        }
+
+        return valid;
+    }
+
+    private static bool VerifyDraggedGhostUsesRepeatedSprites()
+    {
+        Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(
+            "Assets/Images/Placeholders/Facilities/facility_research_lab.png");
+        if (sprite == null)
+        {
+            return false;
+        }
+
+        GameObject root = new GameObject("GhostRoot");
+        GameObject mainObject = new GameObject("Ghost");
+        mainObject.transform.SetParent(root.transform, false);
+
+        SpriteRenderer mainRenderer = mainObject.AddComponent<SpriteRenderer>();
+        mainRenderer.sortingLayerName = "UI";
+        mainRenderer.sortingOrder = 100;
+
+        GridGhostObject ghost = root.AddComponent<GridGhostObject>();
+        ghost.Initialize(mainObject);
+
+        List<Vector3> positions = new List<Vector3>
+        {
+            new Vector3(0f, 0f, 0f),
+            new Vector3(1f, 0f, 0f),
+            new Vector3(2f, 0f, 0f)
+        };
+        List<bool> buildableStates = new List<bool> { true, false, true };
+
+        ghost.ShowRepeated(sprite, positions, new Vector2(1f, 3f), buildableStates);
+
+        List<SpriteRenderer> activeRenderers = root
+            .GetComponentsInChildren<SpriteRenderer>(false)
+            .OrderBy((renderer) => renderer.bounds.center.x)
+            .ToList();
+
+        bool repeatedValid = activeRenderers.Count == 3
+            && activeRenderers.All((renderer) => renderer.sprite == sprite)
+            && activeRenderers.All((renderer) => Mathf.Abs(renderer.bounds.size.x - 1f) <= 0.05f)
+            && activeRenderers.All((renderer) => Mathf.Abs(renderer.bounds.size.y - 3f) <= 0.05f)
+            && Mathf.Abs(activeRenderers[0].bounds.center.x - 0f) <= 0.05f
+            && Mathf.Abs(activeRenderers[1].bounds.center.x - 1f) <= 0.05f
+            && Mathf.Abs(activeRenderers[2].bounds.center.x - 2f) <= 0.05f
+            && activeRenderers[0].color == Color.green
+            && activeRenderers[1].color == Color.red
+            && activeRenderers[2].color == Color.green;
+
+        ghost.Show(sprite);
+        bool singleValid = root.GetComponentsInChildren<SpriteRenderer>(false).Length == 1;
+
+        Object.DestroyImmediate(root);
+        return repeatedValid && singleValid;
     }
 
     private static TestOccupant AddHallway(Grid grid, Vector2Int position)

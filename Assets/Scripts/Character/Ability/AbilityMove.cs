@@ -2,7 +2,6 @@ using BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimation;
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 public class AbilityMove : CharacterAbility
@@ -24,59 +23,47 @@ public class AbilityMove : CharacterAbility
     public override void Initializtion(CharacterSO data)
     {
         base.Initializtion(data);
-        moveSpeed = data.moveSpeed;
+        moveSpeed = character != null
+            ? character.GetMoveSpeed()
+            : data != null
+                ? data.moveSpeed
+                : 1f;
+        moveSpeed = Mathf.Max(0.1f, moveSpeed);
     }
 
-    public void MoveLeft()
-    {
-        character.Flip(Character.Facing.LEFT);
-        transform.Translate(Vector2.left * moveSpeed * Time.deltaTime);
-    }
-    public void MoveRight()
-    {
-        character.Flip(Character.Facing.RIGHT);
-        transform.Translate(Vector2.right * moveSpeed * Time.deltaTime);
-    }
-    public IEnumerator MoveByPath(Queue<BuildableObject> path)
+    public IEnumerator MoveByPath(Queue<GridMoveStep> path, AIAction expectedAction = null)
     {
         if (path == null) yield break;
 
-        BuildableObject nextBuilding;
-        while (path.Any() && !(nextBuilding = path.Dequeue()).isDestroy)
+        while (path.Count > 0)
         {
-            if (!nextBuilding.isDestroy && nextBuilding is Stair interactable)
+            if (IsActionMovementCancelled(expectedAction))
             {
-                yield return Move2BuildingCenter(nextBuilding);
-                yield return interactable.Interact(character);
-                continue;
+                yield break;
             }
 
-            yield return Move2Building(nextBuilding);
-        }
-    }
-
-    public IEnumerator MoveByPath(Queue<GridMoveStep> path)
-    {
-        if (path == null) yield break;
-
-        while (path.Any())
-        {
             GridMoveStep step = path.Dequeue();
             if (step == null) continue;
 
-            yield return MoveByStep(step);
+            RefreshCurrentActionReservation();
+            yield return MoveByStep(step, expectedAction);
         }
     }
 
-    private IEnumerator MoveByStep(GridMoveStep step)
+    public IEnumerator MoveByStep(GridMoveStep step, AIAction expectedAction = null)
     {
         if (step.MoveType == GridMoveType.Walk)
         {
-            yield return Move2GridPosition(step.To);
+            yield return Move2GridPosition(step.To, expectedAction);
             yield break;
         }
 
-        yield return Move2GridPosition(step.From);
+        yield return Move2GridPosition(step.From, expectedAction);
+        if (IsActionMovementCancelled(expectedAction))
+        {
+            yield break;
+        }
+
         if (step.MovementOccupant is BuildableObject building
             && !building.isDestroy
             && building is IGridMovementHandler movementHandler)
@@ -85,50 +72,16 @@ public class AbilityMove : CharacterAbility
             yield break;
         }
 
-        yield return Move2GridPosition(step.To);
+        yield return Move2GridPosition(step.To, expectedAction);
     }
 
-    public IEnumerator Move2GridPosition(Vector2Int gridPosition)
+    public IEnumerator Move2GridPosition(Vector2Int gridPosition, AIAction expectedAction = null)
     {
         if (grid == null) yield break;
 
+        RefreshCurrentActionReservation();
         Vector3 endPos = grid.GetWorldPos(gridPosition);
-        Vector2Int current = grid.GetXY(character.transform.position);
-        if (current.y == gridPosition.y)
-        {
-            endPos.y = character.transform.position.y;
-        }
-
-        yield return Move2PosBySpeed(endPos);
-    }
-
-    public IEnumerator Move2Building(BuildableObject building)
-    {
-        if (building == null) yield break;
-
-        Vector2Int characterPos = grid.GetXY(character.transform.position);
-        while (!building.isDestroy && (building != grid.GetGridCell(characterPos)?.GetBuildingInlayer() && building.centerPos.x != characterPos.x))
-        {
-            characterPos = grid.GetXY(character.transform.position);
-            if (building.centerPos.x > characterPos.x)
-            {
-                MoveLeft();
-            }
-            else
-            {
-                MoveRight();
-            }
-            yield return null;
-        }
-    }
-
-    private IEnumerator Move2BuildingCenter(BuildableObject building)
-    {
-        if (building == null) yield break;
-
-        Vector3 target = character.transform.position;
-        target.x = building.transform.position.x;
-        yield return Move2PosBySpeed(target);
+        yield return Move2PosBySpeed(endPos, 1.0f, expectedAction);
     }
 
     public void StartExitDungeon()
@@ -168,6 +121,19 @@ public class AbilityMove : CharacterAbility
         StartCoroutine(WaitForAiAction(duration));
     }
 
+    public bool StartIdleWander(float waitDuration, int minDistance = 2, int maxDistance = 8)
+    {
+        if (!TryFindIdleWanderPath(minDistance, maxDistance, out Queue<GridMoveStep> path)
+            || path == null
+            || path.Count == 0)
+        {
+            return false;
+        }
+
+        StartCoroutine(MoveByPathThenWait(path, waitDuration));
+        return true;
+    }
+
     private IEnumerator MoveByCurrentActionPath(float waitDuration)
     {
         yield return MoveByCurrentBestActionPath();
@@ -183,6 +149,132 @@ public class AbilityMove : CharacterAbility
         }
     }
 
+    private IEnumerator MoveByPathThenWait(Queue<GridMoveStep> path, float waitDuration)
+    {
+        yield return MoveByPath(path);
+
+        if (waitDuration > 0f)
+        {
+            yield return new WaitForSeconds(waitDuration);
+        }
+
+        if (character != null && character.ai != null)
+        {
+            character.ai.isBestActionEnd = true;
+        }
+    }
+
+    public bool TryFindIdleWanderPath(
+        int minDistance,
+        int maxDistance,
+        out Queue<GridMoveStep> path)
+    {
+        path = null;
+        CacheCommonReferences();
+        if (character == null || grid == null)
+        {
+            return false;
+        }
+
+        Vector2Int originalPos = grid.GetXY(character.transform.position);
+        GridPathSearchResult searchResult = GetIdleSearchResult(originalPos);
+        if (searchResult == null)
+        {
+            return false;
+        }
+
+        int min = Mathf.Max(1, minDistance);
+        return searchResult.TryGetMovePathToRandomReachablePosition(
+                IsPlainIdleWalkable,
+                IsSupportedIdleWanderPath,
+                min,
+                maxDistance,
+                out path)
+            || searchResult.TryGetMovePathToRandomReachablePosition(
+                IsPlainIdleWalkable,
+                IsSupportedIdleWanderPath,
+                1,
+                0,
+                out path);
+    }
+
+    private bool IsPlainIdleWalkable(Vector2Int position)
+    {
+        if (grid == null || !grid.IsWalkable(position))
+        {
+            return false;
+        }
+
+        IGridOccupant buildingOccupant = grid.GetGridCell(position)?.GetOccupant(GridLayer.Building);
+        return buildingOccupant == null || !buildingOccupant.IsGridMovement;
+    }
+
+    private static bool IsSupportedIdleWanderPath(Queue<GridMoveStep> path)
+    {
+        if (path == null || path.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (GridMoveStep step in path)
+        {
+            if (step == null)
+            {
+                return false;
+            }
+
+            if (step.MoveType == GridMoveType.Walk)
+            {
+                continue;
+            }
+
+            if (!IsSupportedVerticalMovementStep(step))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsSupportedVerticalMovementStep(GridMoveStep step)
+    {
+        return step != null
+            && (step.MoveType == GridMoveType.Stair || step.MoveType == GridMoveType.Elevator)
+            && step.MovementOccupant is IGridMovementHandler;
+    }
+
+    private GridPathSearchResult GetIdleSearchResult(Vector2Int originalPos)
+    {
+        if (grid == null)
+        {
+            return null;
+        }
+
+        if (!grid.IsValidGridPos(originalPos) || !grid.IsWalkable(originalPos))
+        {
+            return null;
+        }
+
+        return character.ai != null
+            ? character.ai.GetPathSearch(character)
+            : grid.SearchPath(originalPos);
+    }
+
+    private void SnapToGridRowIfWalkable(Vector2Int gridPosition)
+    {
+        if (grid == null
+            || !grid.IsValidGridPos(gridPosition)
+            || !grid.IsWalkable(gridPosition))
+        {
+            return;
+        }
+
+        Vector3 position = transform.position;
+        position.y = grid.GetWorldPos(gridPosition).y;
+        transform.position = position;
+    }
+
     public IEnumerator MoveByCurrentBestActionPath()
     {
         AIAction action = character != null && character.ai != null
@@ -196,11 +288,27 @@ public class AbilityMove : CharacterAbility
 
         if (action.pathSteps != null && action.pathSteps.Count > 0)
         {
-            yield return MoveByPath(new Queue<GridMoveStep>(action.pathSteps));
-            yield break;
+            yield return MoveByPath(new Queue<GridMoveStep>(action.pathSteps), action);
+        }
+    }
+
+    private void RefreshCurrentActionReservation()
+    {
+        if (character == null || character.ai == null || character.ai.bestAction == null)
+        {
+            return;
         }
 
-        yield return MoveByPath(action.path);
+        character.ai.bestAction.RefreshReservation(character);
+    }
+
+    private bool IsActionMovementCancelled(AIAction expectedAction)
+    {
+        return expectedAction != null
+            && (character == null
+                || character.ai == null
+                || character.ai.bestAction != expectedAction
+                || character.ai.isBestActionEnd);
     }
 
     private IEnumerator WaitForAiAction(float duration)
@@ -264,7 +372,7 @@ public class AbilityMove : CharacterAbility
             Vector2Int startPos = grid.GetXY(transform.position);
             startPos = grid.IsValidGridPos(startPos) ? startPos : Vector2Int.zero;
             Queue<GridMoveStep> path = grid.GetMovePath(startPos, condition);
-            if (path.Any())
+            if (path.Count > 0)
             {
                 yield return MoveByPath(path);
             }
@@ -312,14 +420,15 @@ public class AbilityMove : CharacterAbility
         }
         transform.position = endPos;
     }
-    public IEnumerator Move2PosBySpeed(Vector3 endPos, float multifly = 1.0f)
+    public IEnumerator Move2PosBySpeed(Vector3 endPos, float multifly = 1.0f, AIAction expectedAction = null)
     {
         Vector3 startPos = transform.position;
-        if (startPos.x < endPos.x)
+        float deltaX = endPos.x - startPos.x;
+        if (Mathf.Abs(deltaX) > 0.01f && deltaX > 0f)
         {
             character.Flip(Character.Facing.RIGHT);
         }
-        else
+        else if (Mathf.Abs(deltaX) > 0.01f)
         {
             character.Flip(Character.Facing.LEFT);
         }
@@ -335,8 +444,24 @@ public class AbilityMove : CharacterAbility
 
         while (timer < duration)
         {
+            if (IsActionMovementCancelled(expectedAction))
+            {
+                yield break;
+            }
+
             transform.position = Vector3.Lerp(startPos, endPos, (timer / duration));
             timer += Time.deltaTime;
+            int frameStride = CharacterAiScheduler.GetMovementFrameStride(character);
+            for (int i = 1; i < frameStride && timer < duration; i++)
+            {
+                yield return null;
+                if (IsActionMovementCancelled(expectedAction))
+                {
+                    yield break;
+                }
+
+                timer += Time.deltaTime;
+            }
             yield return null;
         }
         transform.position = endPos;

@@ -15,8 +15,6 @@ public class DungeonStoryGridGhostPresenter : GridPlacementGhostPresenter
     protected override float GridOriginZ => gridSystemManager != null ? gridSystemManager.gridOriginPos.z : 0f;
     protected override bool IsDraggingSelection => gridSystemManager != null && gridSystemManager.isDragging;
     protected override IReadOnlyList<Vector2Int> SelectedGridPositions => gridSystemManager?.totalSelectedPos;
-    protected override int SelectedColumnCount => gridSystemManager != null ? gridSystemManager.xCount : 0;
-    protected override int SelectedRowCount => gridSystemManager != null ? gridSystemManager.yCount : 0;
     protected override Vector3 MouseWorldPosition => GameManager.Instance.GetMouseWorldPos();
     protected override Vector3 MouseWorldPositionSnapped => buildingController != null
         ? buildingController.GetMouseWorldPosSnapped()

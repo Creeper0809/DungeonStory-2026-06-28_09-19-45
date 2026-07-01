@@ -1,0 +1,59 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 177cfc3b70256b84ca2f4f0975a0db84, type: 3}
+  m_Name: Owner_Orc
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterSO
+  characterType: 0
+  role: 1
+  id: 1002
+  characterName: "\uC624\uD06C \uC0AC\uC7A5"
+  speciesTag: Orc
+  species: {fileID: 11400000, guid: c7f6b6a35919a8091a84822b06288975, type: 2}
+  baseStats:
+    attack: 8
+    sales: 4
+    research: 3
+    moveSpeed: 4
+    strength: 8
+    toughness: 8
+    dexterity: 5
+    cleaning: 3
+    endurance: 7
+  traits:
+  - {fileID: 11400000, guid: 95fa850a1a682706faa160ba49bb26cf, type: 2}
+  defaultWorkPriorities:
+    operate: 1
+    restock: 2
+    repair: 2
+    clean: 3
+    research: 3
+    guard: 3
+    rescue: 2
+    rest: 3
+  aiPersonality:
+    diligence: 1
+    curiosity: 1
+    selfCare: 1
+    patience: 1
+    shoppingInterest: 1
+  ownerSummary: "\uCD08\uBC18 \uC218\uB9AC, \uACBD\uBE44, \uC804\uD22C \uB300\uC751\uC5D0
+    \uAC15\uD55C \uC0AC\uC7A5"
+  ownerPreferredWorkTypes: 37
+  characterSprite: {fileID: 21300000, guid: bbf2e2af9c80d2a4c9b9d9bfd9cbc907, type: 3}
+  favoriteStore: []
+  frequencyVisitMax: 1
+  frequencyVisitMin: 1
+  maxHoldingMoney: 0
+  minHoldingMoney: 0
+  speedType: 4
+  respawnSpeedType: 13
+  basicBehaviorPatterns: {fileID: 0}

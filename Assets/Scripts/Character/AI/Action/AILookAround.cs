@@ -9,23 +9,32 @@ public class AILookAround : AIActionSet
     [SerializeField] private float minWaitDuration = 0.5f;
     [SerializeField] private float maxWaitDuration = 1.2f;
 
+    public override bool RequiresDestination => false;
+
     public override bool CanStart(Character character)
     {
-        AbilityShopping shopping = null;
-        character?.TryGetAbility(out shopping);
-        return shopping != null && shopping.CanLookAround();
+        return CanUseVisitLookAround(character);
     }
 
     public override void Execute(Character character)
     {
-        character.TryGetAbility(out AbilityShopping shopping);
-        shopping?.RegisterLookAround();
+        if (character == null) return;
 
+        if (CanUseVisitLookAround(character)
+            && character.TryGetAbility(out AbilityShopping shopping))
+        {
+            shopping.RegisterLookAround();
+        }
         float waitDuration = Random.Range(minWaitDuration, maxWaitDuration);
         character.TryGetAbility(out AbilityMove move);
         if (move != null)
         {
-            move.StartMoveByCurrentActionPath(waitDuration);
+            if (move.StartIdleWander(waitDuration, 1, 6))
+            {
+                return;
+            }
+
+            move.StartWait(waitDuration);
             return;
         }
 
@@ -39,8 +48,12 @@ public class AILookAround : AIActionSet
         Character character,
         GridPathSearchResult searchResult)
     {
-        character.TryGetAbility(out AbilityShopping shopping);
-        if (shopping == null || !shopping.CanLookAround())
+        if (character == null)
+        {
+            return new List<BuildableObject>();
+        }
+
+        if (!CanUseVisitLookAround(character))
         {
             return new List<BuildableObject>();
         }
@@ -69,5 +82,18 @@ public class AILookAround : AIActionSet
         }
 
         return candidates.FirstOrDefault();
+    }
+
+    public static bool CanUseVisitLookAround(Character character)
+    {
+        if (character == null
+            || !character.TryGetAbility(out AbilityShopping shopping)
+            || !shopping.CanLookAround())
+        {
+            return false;
+        }
+
+        return !CharacterWorkRoleUtility.TryGetWork(character, out AbilityWork work)
+            || work.IsOffDuty;
     }
 }

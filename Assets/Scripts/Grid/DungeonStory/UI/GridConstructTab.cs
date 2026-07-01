@@ -28,6 +28,7 @@ public class GridConstructTab : UITab
     {
         base.OnOpen();
         UIManager.Instance.CloseAllPopup();
+        RefreshCategoryLabels();
     }
     private void MakeSelectButton()
     {
@@ -41,7 +42,9 @@ public class GridConstructTab : UITab
                 panel.id = (int)so.category;
                 panel.gameObject.name = "BuildingSelect" + so.category;
                 Button selectButton = Instantiate(buildingCategorySelectButtonPrefab, transform.GetChild(0)).GetComponent<Button>();
-                selectButton.transform.GetChild(0).GetComponent<TMP_Text>().text = so.category.ToString();
+                TMP_Text label = selectButton.transform.GetChild(0).GetComponent<TMP_Text>();
+                TMPKoreanFont.Apply(label);
+                label.text = GetCategoryDisplayName(so.category);
                 selectButton.onClick.AddListener(() =>
                 {
                     ToggleSelectButton((int)so.category);
@@ -56,6 +59,7 @@ public class GridConstructTab : UITab
         {
             panel.gameObject.SetActive(false);
         }
+        RefreshCategoryLabels();
     }
     public void ToggleSelectButton(int category)
     {
@@ -67,5 +71,52 @@ public class GridConstructTab : UITab
         }
         DungeonStoryGridBuildingController.Instance.SetGridModeNone();
         temp.Toggle();
+    }
+
+    public void RefreshCategoryLabels()
+    {
+        foreach (TMP_Text label in transform.GetComponentsInChildren<TMP_Text>(true))
+        {
+            if (label == null) continue;
+
+            if (TryGetCategoryDisplayName(label.text, out string displayName))
+            {
+                TMPKoreanFont.Apply(label);
+                label.text = displayName;
+            }
+        }
+    }
+
+    private static string GetCategoryDisplayName(BuildingCategory category)
+    {
+        return category switch
+        {
+            BuildingCategory.Wall => "벽",
+            BuildingCategory.Shop => "상점",
+            BuildingCategory.Special => "특수",
+            BuildingCategory.Movement => "이동",
+            BuildingCategory.Production => "생산",
+            BuildingCategory.Crafting => "제작",
+            BuildingCategory.Resource => "자원",
+            _ => "기타"
+        };
+    }
+
+    private static bool TryGetCategoryDisplayName(string rawText, out string displayName)
+    {
+        displayName = string.Empty;
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            return false;
+        }
+
+        string normalized = rawText.Trim();
+        if (!System.Enum.TryParse(normalized, true, out BuildingCategory category))
+        {
+            return false;
+        }
+
+        displayName = GetCategoryDisplayName(category);
+        return true;
     }
 }

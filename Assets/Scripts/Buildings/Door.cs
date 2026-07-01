@@ -12,14 +12,22 @@ public class Door : BuildableObject
     {
         if (collision.CompareTag("Character"))
         {
-            collision.GetComponent<SpriteRenderer>().sortingLayerName = "OutsideObject";
+            Character character = collision.GetComponent<Character>();
+            if (character != null)
+            {
+                character.ChangeLayer("OutsideObject");
+            }
         }
     }
     private void OnTriggerExit2D(Collider2D collision)
     {
         if (collision.CompareTag("Character"))
         {
-            collision.GetComponent<SpriteRenderer>().sortingLayerName = "Default";
+            Character character = collision.GetComponent<Character>();
+            if (character != null)
+            {
+                character.ChangeLayer("Default");
+            }
         }
     }
 }

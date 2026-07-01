@@ -1,0 +1,82 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 319e562edb6800049aa5db86683c9031, type: 3}
+  m_Name: P1_WarBarracks
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes:
+    - Name: type
+      Entry: 7
+      Data: 0|System.RuntimeType, mscorlib
+    - Name: 
+      Entry: 1
+      Data: DefenseFacility, Assembly-CSharp
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: tiles
+      Entry: 6
+      Data: 
+    - Name: OnBuildCondition
+      Entry: 6
+      Data: 
+  id: 59
+  objectName: "3\uC131 \uC804\uD22C \uBCD1\uC601"
+  sprite: {fileID: 21300000, guid: 817fe2f69ad6482794b6da61b48a8a6e, type: 3}
+  icon: {fileID: 21300000, guid: 817fe2f69ad6482794b6da61b48a8a6e, type: 3}
+  width: 4
+  height: 1
+  layer: 1
+  category: 3
+  horizontalDraggable: 0
+  verticalDraggable: 0
+  movementAnchorOffset: {x: 0, y: 0}
+  maintenance: 5
+  facility:
+    roles: 8
+    capacity: 2
+    useDuration: 1.8
+    internalStockMax: 0
+    restockRequestThreshold: 0
+    requiredWorkers: 2
+    supportedWorkTypes: 37
+    preferredSpeciesTags:
+    - Orc
+    dislikedSpeciesTags: []
+    disabledWhenDamaged: 1
+    requiresStock: 0
+  defense:
+    enabled: 1
+    concept: 6
+    triggerTimings: 13
+    targetRule: 3
+    cooldownSeconds: 1.2
+    periodicIntervalSeconds: 0
+    range: 0
+    star: 3
+    combatLogText: "3\uC131 \uC804\uD22C \uBCD1\uC601"
+    effectAssets:
+    - {fileID: 11400000, guid: 08881978cf0e6db2294746ab0febeba1, type: 2}
+    effects:
+    - kind: 5
+      amount: 24
+      duration: 0
+      stacks: 1
+      logTag: "\uACBD\uBE44 \uAD50\uC804"
+  unlocked: 0

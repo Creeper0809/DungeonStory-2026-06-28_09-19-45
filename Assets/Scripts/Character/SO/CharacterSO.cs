@@ -1,14 +1,26 @@
 using BehaviorDesigner.Runtime;
 using Sirenix.OdinInspector;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = UnityEngine.Random;
 [CreateAssetMenu(menuName = "DungeonStory/Character/SO", order = 0)]
+[DrawWithUnity]
 public class CharacterSO : ScriptableObject
 {
     public CharacterType characterType;
+    public CharacterRole role;
     public int id;
     public string characterName;
+    public string speciesTag;
+    public CharacterSpeciesSO species;
+    public CharacterStatBlock baseStats = CharacterStatBlock.CreateDefault();
+    public CharacterTraitSO[] traits = Array.Empty<CharacterTraitSO>();
+    public WorkPriorityProfile defaultWorkPriorities = WorkPriorityProfile.CreateDefault();
+    public CharacterAiPersonality aiPersonality = new CharacterAiPersonality();
+    [TextArea] public string ownerSummary;
+    public FacilityWorkType ownerPreferredWorkTypes;
 
     public Sprite characterSprite;
 
@@ -23,7 +35,28 @@ public class CharacterSO : ScriptableObject
     [SerializeField] private CharacterSpeedType speedType;
     [SerializeField] private CharacterRespawnSpeedType respawnSpeedType;
 
-    public float moveSpeed => (int)speedType / 3.5f;
+    public string SpeciesTag => !string.IsNullOrWhiteSpace(species?.speciesTag)
+        ? species.speciesTag
+        : speciesTag;
+    public bool IsOwnerCandidate => role == CharacterRole.Owner;
+    public float moveSpeed
+    {
+        get
+        {
+            int rawSpeed = (int)speedType;
+            if (rawSpeed <= 0)
+            {
+                rawSpeed = (int)CharacterSpeedType.Normal;
+            }
+
+            return rawSpeed / 3.5f;
+        }
+    }
+
+    public CharacterRuntimeProfile CreateRuntimeProfile()
+    {
+        return CharacterRuntimeProfile.From(this);
+    }
 
     public TimeOfDay leavingTime
     {
@@ -79,6 +112,13 @@ public class CharacterSO : ScriptableObject
     {
         return Random.Range(minHoldingMoney, maxHoldingMoney);
     }
+
+    public int GetHoldingMoney(CharacterRuntimeProfile profile)
+    {
+        int baseMoney = GetHoldingMoney();
+        float multiplier = profile != null ? profile.GetSpendingMultiplier() : 1f;
+        return Mathf.Max(0, Mathf.RoundToInt(baseMoney * multiplier));
+    }
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //                                                                                                                              //
     //                                                                    ForEditor                                                 //
@@ -106,4 +146,10 @@ public enum CharacterType
     NPC,
     Customer,
     Intruder
+}
+
+public enum CharacterRole
+{
+    Regular,
+    Owner
 }

@@ -12,15 +12,47 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 177cfc3b70256b84ca2f4f0975a0db84, type: 3}
   m_Name: New Character SO
   m_EditorClassIdentifier: 
-  characterType: 0
+  characterType: 1
+  role: 0
   id: 1
   characterName: asd
-  characterSprite: {fileID: 21300000, guid: 6cbca2ba6892b4446bad5d09eb483d77, type: 3}
+  speciesTag: Slime
+  species: {fileID: 11400000, guid: 4c9d840bdf77fa52c83d305b480c977f, type: 2}
+  baseStats:
+    attack: 5
+    sales: 5
+    research: 5
+    moveSpeed: 5
+    strength: 5
+    toughness: 5
+    dexterity: 5
+    cleaning: 5
+    endurance: 5
+  traits:
+  - {fileID: 11400000, guid: 864136c3057790c98b0d70fe75cb56e5, type: 2}
+  defaultWorkPriorities:
+    operate: 1
+    restock: 2
+    repair: 2
+    clean: 3
+    research: 3
+    guard: 3
+    rescue: 2
+    rest: 3
+  aiPersonality:
+    diligence: 1
+    curiosity: 1
+    selfCare: 1
+    patience: 1
+    shoppingInterest: 1
+  ownerSummary: 
+  ownerPreferredWorkTypes: 0
+  characterSprite: {fileID: -177130652, guid: 268b13836c8af3d408110e228f534b75, type: 3}
   favoriteStore: []
-  frequencyVisitMax: 0
-  frequencyVisitMin: 0
-  maxHoldingMoney: 0
-  minHoldingMoney: 0
+  frequencyVisitMax: 3
+  frequencyVisitMin: 1
+  maxHoldingMoney: 300
+  minHoldingMoney: 100
   speedType: 4
   respawnSpeedType: 13
   basicBehaviorPatterns: {fileID: 0}

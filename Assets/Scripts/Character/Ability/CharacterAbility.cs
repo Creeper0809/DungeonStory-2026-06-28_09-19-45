@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+[DrawWithUnity]
 public class CharacterAbility : SerializedMonoBehaviour
 {
     protected Character character;

@@ -108,6 +108,13 @@ public class CharacterSpawner : BuildableObject,IInteractable
             return false;
         }
 
+        RegularCustomerRuntime regularCustomerRuntime = RegularCustomerRuntime.Instance;
+        RegularCustomerState regularCustomerState = regularCustomerRuntime != null ? regularCustomerRuntime.State : null;
+        if (!RegularCustomerService.CanSpawnAsCustomer(characterData, regularCustomerState))
+        {
+            return false;
+        }
+
         if (!TryGetEntryGridPosition(out Vector2Int resolvedEntryGridPosition))
         {
             return false;
@@ -140,7 +147,11 @@ public class CharacterSpawner : BuildableObject,IInteractable
             spawnedCharacter.SetLifecycleState(Character.LifecycleState.Active);
         }
 
-        respawnDict.Add(id, new CharacterRespawnData(id, characterData.respawnSpeed));
+        float demandMultiplier = RunVariableRuntime.Instance != null
+            ? RunVariableRuntime.Instance.GetGuestDemandMultiplier(characterData.SpeciesTag)
+            : 1f;
+        float respawnTime = characterData.respawnSpeed / Mathf.Max(0.1f, demandMultiplier);
+        respawnDict.Add(id, new CharacterRespawnData(id, respawnTime));
         return true;
     }
 
@@ -221,17 +232,35 @@ public class CharacterSpawner : BuildableObject,IInteractable
     }
     private void OnDestroyPoolObject(GameObject poolGo)
     {
-        Destroy(poolGo);
+        if (Application.isPlaying)
+        {
+            Destroy(poolGo);
+        }
+        else
+        {
+            DestroyImmediate(poolGo);
+        }
     }
     public IEnumerator Interact(Character character)
     {
         if (character == null || character.data == null) yield break;
 
+        EnsureRuntimeState();
         if (respawnDict.TryGetValue(character.data.id, out CharacterRespawnData respawnData))
         {
             respawnData.StartCheckRespawn(timer);
         }
-        characterPool.Release(character.gameObject);
+
+        if (characterPool != null)
+        {
+            characterPool.Release(character.gameObject);
+        }
+        else
+        {
+            character.SetLifecycleState(Character.LifecycleState.Despawned);
+            character.gameObject.SetActive(false);
+        }
+
         yield return null;
     }
 }

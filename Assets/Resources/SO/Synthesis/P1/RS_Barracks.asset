@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7396c363cc02169abe906ff8e0f7952, type: 3}
+  m_Name: RS_Barracks
+  m_EditorClassIdentifier: Assembly-CSharp::FacilitySynthesisRecipeSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 7004
+  recipeId: recipe_barracks_1
+  displayName: "\uBCD1\uC601"
+  description: "\uACBD\uBE44\uC2E4\uACFC \uD6C8\uB828\uC7A5\uC744 \uD569\uCCD0 \uB354
+    \uAC15\uD55C \uACBD\uBE44 \uB300\uC751 \uC2DC\uC124\uB85C \uB9CC\uB4E0\uB2E4."
+  resultBuilding: {fileID: 11400000, guid: 849ccb1826db8b83a9170653bfa86dbc, type: 2}
+  materialBuildings:
+  - {fileID: 11400000, guid: 070173726688a0a2f8ef51752e6e8abc, type: 2}
+  - {fileID: 11400000, guid: ee9d89a4c6a8cf58cacb01f135b944bf, type: 2}
+  publicByDefault: 1
+  requiredResearchRecipeId: 
+  levelInheritanceRatio: 0.75

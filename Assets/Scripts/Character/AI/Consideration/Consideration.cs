@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Sirenix.OdinInspector;
+[DrawWithUnity]
 public abstract class Consideration : SerializedScriptableObject
 {
     public string considerationName;

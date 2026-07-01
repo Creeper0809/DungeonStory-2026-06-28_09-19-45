@@ -67,7 +67,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
     private void EnsureInitialized()
     {
-        if (initialized) return;
+        if (initialized && placementService != null && dataManager != null) return;
 
         if (gridSystem == null)
         {
@@ -88,7 +88,12 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
             FindBuildingDataById,
             buildingFactory,
             new BuildingPlacementValidator());
-        placementService.PlaceInitialBuildings(initialPlacement);
+        if (!HasAnyGridOccupants(gridSystem.grid))
+        {
+            placementService.PlaceInitialBuildings(initialPlacement);
+        }
+        gridSystem.OnGridExpand -= OnGridExpand;
+        gridSystem.OnGridObjectChanged -= DrawGridTextureWalls;
         gridSystem.OnGridExpand += OnGridExpand;
         gridSystem.OnGridObjectChanged += DrawGridTextureWalls;
         initialized = true;
@@ -229,6 +234,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
     public void SetGridModeBuild()
     {
+        EnsureInitialized();
         if (gridSystem == null)
         {
             gridSystem = GridSystemManager.Instance;
@@ -264,6 +270,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
     private void PlaceBuilding(List<Vector2Int> poses)
     {
+        EnsureInitialized();
         if (placementService == null || SelectedBuilding == null) return;
         int placedCount = 0;
         BuildingSO building = SelectedBuilding;
@@ -294,6 +301,21 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         if (GridTexture.Instance == null) return;
 
         GridTexture.Instance.DrawWall(gridSystem.grid);
+    }
+
+    private static bool HasAnyGridOccupants(Grid grid)
+    {
+        if (grid == null) return false;
+
+        foreach (GridCell cell in grid.GetCells())
+        {
+            if (cell != null && cell.HasOccupant())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void OnGridExpand()

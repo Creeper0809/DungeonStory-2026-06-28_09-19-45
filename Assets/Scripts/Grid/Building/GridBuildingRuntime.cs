@@ -210,6 +210,7 @@ public class GridBuildingFactory
         }
 
         buildingVisual?.DrawBuilding(buildingData, selectPos);
+        ValidateBuildingVisual(buildingData);
 
         if (placedObject.AddComponent(buildingData.type) is BuildableObject buildableObject)
         {
@@ -217,7 +218,7 @@ public class GridBuildingFactory
             return buildableObject;
         }
 
-        Debug.Log("건물 데이터에 원치 않은 컴퍼넌트가 연결되었습니다");
+        Debug.Log("Building data type must inherit from BuildableObject.");
         UnityEngine.Object.Destroy(placedObject);
         return null;
     }
@@ -228,6 +229,22 @@ public class GridBuildingFactory
 
         buildingVisual?.DeleteBuilding(buildingData, selectPos);
     }
+
+    private static void ValidateBuildingVisual(BuildingSO buildingData)
+    {
+        if (buildingData == null || HasTileVisual(buildingData) || buildingData.sprite != null)
+        {
+            return;
+        }
+
+        Debug.LogWarning($"{buildingData.objectName} has no tile or sprite visual data.");
+    }
+
+    private static bool HasTileVisual(BuildingSO buildingData)
+    {
+        return buildingData.tiles != null && buildingData.tiles.Count > 0;
+    }
+
 }
 
 public class BuildingPlacementValidator
@@ -379,27 +396,6 @@ public static class GridBuildingExtensions
                            .ToList();
     }
 
-    public static Queue<BuildableObject> GetPathTo(this GridPathSearchResult searchResult, BuildableObject destination)
-    {
-        if (searchResult == null || destination == null) return new Queue<BuildableObject>();
-
-        return ToBuildingQueue(searchResult.GetOccupantPathTo(destination));
-    }
-
-    public static Queue<BuildableObject> GetPath(this GridPathSearchResult searchResult, Func<Vector2Int, bool> terminateEndCondition)
-    {
-        if (searchResult == null || terminateEndCondition == null) return new Queue<BuildableObject>();
-
-        return ToBuildingQueue(searchResult.GetOccupantPath(terminateEndCondition));
-    }
-
-    public static Queue<BuildableObject> GetGridPath(this Grid grid, Vector2Int start, Func<Vector2Int, bool> terminateEndCondition)
-    {
-        if (grid == null || terminateEndCondition == null) return new Queue<BuildableObject>();
-
-        return ToBuildingQueue(grid.GetOccupantPath(start, terminateEndCondition));
-    }
-
     public static List<BuildableObject> GetAllVisitableBuilding(this Grid grid, Vector2Int start)
     {
         if (grid == null) return new List<BuildableObject>();
@@ -416,24 +412,6 @@ public static class GridBuildingExtensions
         return grid.GetAllReachableOccupants(start)
                    .OfType<BuildableObject>()
                    .ToList();
-    }
-
-    public static Queue<BuildableObject> SmoothingPath(this Grid grid, Queue<BuildableObject> gridPath)
-    {
-        Queue<BuildableObject> result = new Queue<BuildableObject>();
-        if (gridPath == null || !gridPath.Any()) return result;
-
-        while (gridPath.Count > 1)
-        {
-            BuildableObject building = gridPath.Dequeue();
-            if (building != null && building.IsGridMovement)
-            {
-                result.Enqueue(building);
-            }
-        }
-
-        result.Enqueue(gridPath.Dequeue());
-        return result;
     }
 
     public static bool IsConneted(this Grid grid, Vector2Int start, int id)
@@ -468,19 +446,4 @@ public static class GridBuildingExtensions
         return grid.FindAllOccupants((occupant) => occupant.GridId == buildingSO.id).Count;
     }
 
-    private static Queue<BuildableObject> ToBuildingQueue(Queue<IGridOccupant> occupants)
-    {
-        Queue<BuildableObject> result = new Queue<BuildableObject>();
-        if (occupants == null) return result;
-
-        foreach (IGridOccupant occupant in occupants)
-        {
-            if (occupant is BuildableObject building)
-            {
-                result.Enqueue(building);
-            }
-        }
-
-        return result;
-    }
 }

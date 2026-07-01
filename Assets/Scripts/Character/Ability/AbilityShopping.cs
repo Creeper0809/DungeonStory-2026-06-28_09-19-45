@@ -1,42 +1,130 @@
 using DamageNumbersPro;
-using Sirenix.Utilities;
-using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using Random = UnityEngine.Random;
 public class AbilityShopping : CharacterAbility
 {
     private const int DefaultMaxLookAroundCount = 1;
+    private const float DefaultPurchaseFeedbackIconMaxWorldSize = 0.45f;
 
     private int holdingMoney;
+    [SerializeField, Min(0.05f)]
+    private float purchaseFeedbackIconMaxWorldSize = DefaultPurchaseFeedbackIconMaxWorldSize;
+
     public int visitCount { get; private set; }
     public int lookAroundCount { get; private set; }
     public List<BuildableObject> visitedBuilding { get; private set; }
+    public int HoldingMoney => holdingMoney;
     public override void Initializtion(CharacterSO data)
     {
         base.Initializtion(data);
         visitedBuilding = new List<BuildableObject>();
-        visitCount = data.GetFrequencyVisit();
+        visitCount = data != null ? data.GetFrequencyVisit() : 1;
         lookAroundCount = 0;
-        holdingMoney = data.GetHoldingMoney();
+        holdingMoney = data != null
+            ? data.GetHoldingMoney(character != null ? character.profile : null)
+            : 0;
     }
     public Stock DetermineBuyingItem(List<Stock> stocks)
     {
-        if (stocks == null || !stocks.Any())
+        if (stocks == null || stocks.Count == 0)
         {
             return new Stock(-1,0);
         }
 
-        if(character.characterType == CharacterType.NPC)
+        if (Shop.IsInternalStaffUse(character))
         {
-            return stocks.OrderBy((_) => Guid.NewGuid()).First();
+            return stocks[Random.Range(0, stocks.Count)];
         }
-        List<Stock> filter = stocks.Where((stock) => stock.cost <= holdingMoney).ToList();
-        if (!filter.Any()) return new Stock(-1,0);
-        return filter.OrderBy((_) => Guid.NewGuid()).First();
+
+        int affordableCount = 0;
+        Stock selected = default;
+        foreach (Stock stock in stocks)
+        {
+            if (stock.cost > holdingMoney)
+            {
+                continue;
+            }
+
+            affordableCount++;
+            if (Random.Range(0, affordableCount) == 0)
+            {
+                selected = stock;
+            }
+        }
+
+        return affordableCount > 0 ? selected : new Stock(-1, 0);
     }
+
+    public bool CanPay(Stock stock)
+    {
+        return character != null
+            && (Shop.IsInternalStaffUse(character) || stock.cost <= holdingMoney);
+    }
+
+    public bool CanBuyFrom(Shop shop, out string failureReason)
+    {
+        failureReason = string.Empty;
+        if (shop == null)
+        {
+            failureReason = "상점 없음";
+            return false;
+        }
+
+        List<Stock> stocks = shop.GetStock();
+        if (stocks == null || stocks.Count == 0)
+        {
+            failureReason = "재고 없음";
+            return false;
+        }
+
+        bool canPayAny = false;
+        foreach (Stock stock in stocks)
+        {
+            if (CanPay(stock))
+            {
+                canPayAny = true;
+                break;
+            }
+        }
+
+        if (!canPayAny)
+        {
+            failureReason = "소지금 부족";
+            return false;
+        }
+
+        return true;
+    }
+
+    public float GetAffordabilityScore(Shop shop)
+    {
+        if (shop == null) return 1f;
+
+        List<Stock> stocks = shop.GetStock();
+        if (stocks == null || stocks.Count == 0)
+        {
+            return 0f;
+        }
+
+        if (Shop.IsInternalStaffUse(character))
+        {
+            return 1f;
+        }
+
+        int affordableCount = 0;
+        foreach (Stock stock in stocks)
+        {
+            if (CanPay(stock))
+            {
+                affordableCount++;
+            }
+        }
+
+        return Mathf.Clamp01((float)affordableCount / stocks.Count);
+    }
+
     public void StartSopping()
     {
         StartCoroutine(Shopping());
@@ -63,6 +151,7 @@ public class AbilityShopping : CharacterAbility
         if (move == null || grid == null)
         {
             character?.AddLog("쇼핑 실패: 이동 정보 없음");
+            action.ReleaseReservation(character);
             if (character != null && character.ai != null)
             {
                 character.ai.isBestActionEnd = true;
@@ -74,11 +163,13 @@ public class AbilityShopping : CharacterAbility
         if(grid.GetGridCell(grid.GetXY(transform.position))?.GetBuildingInlayer() == action.destination && action.destination is IInteractable shop)
         {
             yield return shop.Interact(character);
+            action.ReleaseReservation(character);
             RegisterVisit(action.destination);
         }
         else
         {
             character?.AddLog("쇼핑 실패: 목적지 도달 실패");
+            action.ReleaseReservation(character);
         }
         if (character != null && character.ai != null)
         {
@@ -104,21 +195,36 @@ public class AbilityShopping : CharacterAbility
         lookAroundCount++;
     }
 
+    public void BeginOffDutyVisitCycle()
+    {
+        visitCount = Mathf.Max(visitCount, 1);
+        lookAroundCount = DefaultMaxLookAroundCount;
+        visitedBuilding?.Clear();
+    }
+
+    public bool IsOffDutyStaffVisitor()
+    {
+        return character != null
+            && Shop.IsInternalStaffUse(character)
+            && character.TryGetAbility(out AbilityWork work)
+            && work.IsOffDuty;
+    }
+
     public bool CanLookAround()
     {
         return character != null
-            && ShouldUseVisitFallback()
+            && ShouldEndVisitCycle()
             && lookAroundCount < DefaultMaxLookAroundCount;
     }
 
     public bool ShouldExitDungeon()
     {
         return character != null
-            && ShouldUseVisitFallback()
+            && ShouldEndVisitCycle()
             && lookAroundCount >= DefaultMaxLookAroundCount;
     }
 
-    public bool ShouldUseVisitFallback()
+    public bool ShouldEndVisitCycle()
     {
         return visitCount <= 0 || !IsThereVisitableBuilding();
     }
@@ -140,52 +246,103 @@ public class AbilityShopping : CharacterAbility
             return false;
         }
 
-        IEnumerable<BuildableObject> reachableBuildings = character != null
-            ? character.GetReachableBuilding()
-            : Enumerable.Empty<BuildableObject>();
+        if (character == null)
+        {
+            return false;
+        }
 
-        return reachableBuildings
-            .Where((building) => building != null && !building.isDestroy && !visitedBuilding.Contains(building))
-            .Any();
+        foreach (BuildableObject building in character.GetReachableBuilding())
+        {
+            if (CanVisitBuilding(building))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
     public BuildableObject FindShop()
     {
-        IEnumerable<BuildableObject> reachableBuildings = character != null
-            ? character.GetReachableBuilding()
-            : Enumerable.Empty<BuildableObject>();
-
-        List<BuildableObject> reachableBulding = reachableBuildings
-                                                           .Where((x) => !visitedBuilding.Contains(x))
-                                                           .OrderBy((x) => Guid.NewGuid())
-                                                           .ToList();
-        if (!reachableBulding.Any())
+        if (character == null)
         {
             return null;
         }
 
-        if (character.data.favoriteStore == null || character.data.favoriteStore.Length == 0)
+        BuildableObject randomCandidate = null;
+        BuildableObject favorite = null;
+        int candidateCount = 0;
+        int favoriteCount = 0;
+        int wantId = character.data != null
+            && character.data.favoriteStore != null
+            && character.data.favoriteStore.Length > 0
+                ? character.data.favoriteStore[Random.Range(0, character.data.favoriteStore.Length)].id
+                : -1;
+
+        foreach (BuildableObject building in character.GetReachableBuilding())
         {
-            return reachableBulding.First();
+            if (!CanVisitBuilding(building))
+            {
+                continue;
+            }
+
+            candidateCount++;
+            if (Random.Range(0, candidateCount) == 0)
+            {
+                randomCandidate = building;
+            }
+
+            if (building.id == wantId)
+            {
+                favoriteCount++;
+                if (Random.Range(0, favoriteCount) == 0)
+                {
+                    favorite = building;
+                }
+            }
         }
 
-        int wantId = character.data.favoriteStore[Random.Range(0, character.data.favoriteStore.Length)].id;
-        BuildableObject selectedBuilding = reachableBulding.Any((building) => building.id == wantId)
-                                                              ? reachableBulding.Find((building) => building.id == wantId)
-                                                              : reachableBulding.First();
-        return selectedBuilding;
+        return favorite != null ? favorite : randomCandidate;
     }
+
+    private bool CanVisitBuilding(BuildableObject building)
+    {
+        if (building == null
+            || building.isDestroy
+            || visitedBuilding.Contains(building)
+            || !building.CanVisit(character, out _))
+        {
+            return false;
+        }
+
+        return building is not Shop shop || CanBuyFrom(shop, out _);
+    }
+
     public int GetShoppingCount()
     {
-        return UnityEngine.Random.Range(1, 4);
+        int baseCount = UnityEngine.Random.Range(1, 4);
+        float multiplier = character != null ? character.GetConsumptionMultiplier() : 1f;
+        return Mathf.Max(1, Mathf.RoundToInt(baseCount * multiplier));
     }
     public IEnumerator BuyItem(RemainStock item)
     {
-        DamageNumber number = GameManager.Instance.numbers[NumberCondition.ONBUYINGITEM].Spawn(gameObject.transform.position + Vector3.up);
-        SaleItem iteminfo = DataManager.Instance.GetData<SaleItem>()[item.id];
-        number.GetComponent<SpriteRenderer>().sprite = iteminfo.itemSprite;
-        //사는 애니메이션
+        if (GameManager.Instance != null
+            && GameManager.Instance.numbers != null
+            && GameManager.Instance.numbers.TryGetValue(NumberCondition.ONBUYINGITEM, out var buyingNumber)
+            && DataManager.Instance != null
+            && DataManager.Instance.GetData<SaleItem>() != null
+            && DataManager.Instance.GetData<SaleItem>().TryGetValue(item.id, out SaleItem iteminfo))
+        {
+            DamageNumber number = buyingNumber.Spawn(gameObject.transform.position + Vector3.up);
+            SpriteRenderer iconRenderer = number.GetComponent<SpriteRenderer>();
+            if (iconRenderer != null)
+            {
+                iconRenderer.sprite = iteminfo.itemSprite;
+                FitPurchaseFeedbackIcon(iconRenderer);
+            }
+        }
+
         yield return new WaitForSeconds(0.5f);
-        if(character.characterType != CharacterType.NPC)
+        if (!Shop.IsInternalStaffUse(character))
         {
             holdingMoney -= item.cost;
         }
@@ -193,5 +350,27 @@ public class AbilityShopping : CharacterAbility
         {
             events.Onbuy(character);
         }
+    }
+
+    private void FitPurchaseFeedbackIcon(SpriteRenderer iconRenderer)
+    {
+        if (iconRenderer == null || iconRenderer.sprite == null)
+        {
+            return;
+        }
+
+        Vector2 spriteSize = iconRenderer.sprite.bounds.size;
+        float longestSide = Mathf.Max(spriteSize.x, spriteSize.y);
+        if (longestSide <= Mathf.Epsilon)
+        {
+            return;
+        }
+
+        float maxWorldSize = purchaseFeedbackIconMaxWorldSize > 0f
+            ? purchaseFeedbackIconMaxWorldSize
+            : DefaultPurchaseFeedbackIconMaxWorldSize;
+        float fittedScale = Mathf.Min(1f, maxWorldSize / longestSide);
+        iconRenderer.drawMode = SpriteDrawMode.Simple;
+        iconRenderer.transform.localScale = new Vector3(fittedScale, fittedScale, iconRenderer.transform.localScale.z);
     }
 }

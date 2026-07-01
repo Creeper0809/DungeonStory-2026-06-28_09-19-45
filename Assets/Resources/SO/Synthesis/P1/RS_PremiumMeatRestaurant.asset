@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7396c363cc02169abe906ff8e0f7952, type: 3}
+  m_Name: RS_PremiumMeatRestaurant
+  m_EditorClassIdentifier: Assembly-CSharp::FacilitySynthesisRecipeSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 7002
+  recipeId: recipe_premium_meat_1
+  displayName: "\uACE0\uAE09 \uACE0\uAE30 \uC2DD\uB2F9"
+  description: "\uACE0\uAE30 \uC2DD\uB2F9\uC5D0 \uD734\uC2DD \uAE30\uB2A5\uC744 \uC11E\uC5B4
+    \uCCB4\uB958 \uAC00\uCE58\uAC00 \uB192\uC740 \uC2DD\uB2F9\uC73C\uB85C \uB9CC\uB4E0\uB2E4."
+  resultBuilding: {fileID: 11400000, guid: efeb84377b5d50174a68d4b8a90d2492, type: 2}
+  materialBuildings:
+  - {fileID: 11400000, guid: 6b9d24242759e5df88c7b99baf956d07, type: 2}
+  - {fileID: 11400000, guid: 6392785b3fc4a7e458c76c6c5a33040e, type: 2}
+  publicByDefault: 1
+  requiredResearchRecipeId: 
+  levelInheritanceRatio: 0.75

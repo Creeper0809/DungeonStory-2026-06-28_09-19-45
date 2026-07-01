@@ -1,0 +1,87 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 319e562edb6800049aa5db86683c9031, type: 3}
+  m_Name: P1_FireVent
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes:
+    - Name: type
+      Entry: 7
+      Data: 0|System.RuntimeType, mscorlib
+    - Name: 
+      Entry: 1
+      Data: DefenseFacility, Assembly-CSharp
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: tiles
+      Entry: 6
+      Data: 
+    - Name: OnBuildCondition
+      Entry: 6
+      Data: 
+  id: 32
+  objectName: "1\uC131 \uD654\uC5FC \uBD84\uC0AC\uAD6C"
+  sprite: {fileID: 21300000, guid: 0c3f64bf3ef710b75b3f43a7c6a701ea, type: 3}
+  icon: {fileID: 21300000, guid: 0c3f64bf3ef710b75b3f43a7c6a701ea, type: 3}
+  width: 2
+  height: 1
+  layer: 1
+  category: 3
+  horizontalDraggable: 0
+  verticalDraggable: 0
+  movementAnchorOffset: {x: 0, y: 0}
+  maintenance: 0
+  facility:
+    roles: 0
+    capacity: 0
+    useDuration: 0
+    internalStockMax: 0
+    restockRequestThreshold: 0
+    requiredWorkers: 0
+    supportedWorkTypes: 4
+    preferredSpeciesTags: []
+    dislikedSpeciesTags: []
+    disabledWhenDamaged: 1
+    requiresStock: 0
+  defense:
+    enabled: 1
+    concept: 3
+    triggerTimings: 5
+    targetRule: 2
+    cooldownSeconds: 3
+    periodicIntervalSeconds: 0
+    range: 0
+    star: 1
+    combatLogText: "1\uC131 \uD654\uC5FC \uBD84\uC0AC\uAD6C"
+    effectAssets:
+    - {fileID: 11400000, guid: bc44554ade70dd959822076412ca797b, type: 2}
+    - {fileID: 11400000, guid: 235b702a65756b7fab5de81f026586b7, type: 2}
+    effects:
+    - kind: 0
+      amount: 18
+      duration: 0
+      stacks: 1
+      logTag: "\uD53C\uD574"
+    - kind: 2
+      amount: 2
+      duration: 5
+      stacks: 1
+      logTag: "\uC5F0\uC18C"
+  unlocked: 1

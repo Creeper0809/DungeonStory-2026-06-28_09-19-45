@@ -1,0 +1,349 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using UnityEditor;
+using UnityEngine;
+
+public static class FacilityDebugScenarios
+{
+    [MenuItem("DungeonStory/Debug/Facilities/Run P1 Facility Scenarios")]
+    public static void RunFromMenu()
+    {
+        bool success = RunAll(true);
+        if (!success)
+        {
+            Debug.LogError("P1 facility scenarios failed.");
+        }
+    }
+
+    public static bool RunAll(bool logSuccess)
+    {
+        List<string> errors = new List<string>();
+
+        RunScenario("P1 시설 에셋 수", VerifyP1AssetCounts, errors);
+        RunScenario("방문 후보 판정", VerifyVisitability, errors);
+        RunScenario("작업 후보 판정", VerifyWorkability, errors);
+        RunScenario("재고/파손 제외", VerifyUnavailableFacilitiesAreExcluded, errors);
+        RunScenario("재고 계열 설정", VerifyStockCategories, errors);
+        RunScenario("창고 런타임 재고", VerifyWarehouseInventory, errors);
+        RunScenario("창고에서 상점 보충", VerifyWarehouseRestocksShop, errors);
+        RunScenario("운영일 납품 제안", VerifyDailyDeliveryOffers, errors);
+        RunScenario("돈으로 창고 재고 구매", VerifyPurchaseDeliveryUsesMoneyAndWarehouseCapacity, errors);
+        RunScenario("재고 구매 실패 조건", VerifyPurchaseDeliveryFailureConditions, errors);
+        RunScenario("침입 보상 재고 입고", VerifyDefenseRewardStockGrant, errors);
+        RunScenario("내부 생산 확장 슬롯", VerifyInternalProductionSlot, errors);
+
+        if (errors.Count > 0)
+        {
+            foreach (string error in errors)
+            {
+                Debug.LogError(error);
+            }
+
+            return false;
+        }
+
+        if (logSuccess)
+        {
+            Debug.Log("P1 facility scenarios passed.");
+        }
+
+        return true;
+    }
+
+    private static void RunScenario(string name, System.Func<bool> scenario, List<string> errors)
+    {
+        if (scenario()) return;
+
+        errors.Add(name);
+    }
+
+    private static bool VerifyP1AssetCounts()
+    {
+        List<BuildingSO> buildings = AssetDatabase.FindAssets("t:BuildingSO", new[] { "Assets/Resources/SO/Building/P1" })
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Select(AssetDatabase.LoadAssetAtPath<BuildingSO>)
+            .Where((building) => building != null)
+            .ToList();
+        int baseManagementBuildingCount = buildings
+            .Count((building) => building != null
+                && building.id < 30
+                && (building.Defense == null || !building.Defense.IsDefenseFacility));
+        int synthesisManagementBuildingCount = buildings
+            .Count((building) => building != null
+                && building.id >= 50
+                && building.id < 60
+                && (building.Defense == null || !building.Defense.IsDefenseFacility));
+        string[] stocks = AssetDatabase.FindAssets("t:StockInfo", new[] { "Assets/Resources/SO/Stock/P1" });
+        return baseManagementBuildingCount == 9
+            && synthesisManagementBuildingCount == 4
+            && stocks.Length >= 8;
+    }
+
+    private static bool VerifyVisitability()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject lowFood = world.Place("P1_LowFoodShop", new Vector2Int(1, 0));
+        BuildableObject restRoom = world.Place("P1_RestRoom", new Vector2Int(5, 0));
+        BuildableObject warehouse = world.Place("P1_Warehouse", new Vector2Int(9, 0));
+
+        List<BuildableObject> visitable = world.Grid.SearchPath(Vector2Int.zero).GetAllVisitableBuilding();
+        return visitable.Contains(lowFood)
+            && visitable.Contains(restRoom)
+            && !visitable.Contains(warehouse);
+    }
+
+    private static bool VerifyWorkability()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject shop = world.Place("P1_LowFoodShop", new Vector2Int(1, 0));
+        BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(5, 0));
+        BuildableObject warehouse = world.Place("P1_Warehouse", new Vector2Int(9, 0));
+
+        return shop is IWorkableFacility shopWork
+            && lab is IWorkableFacility labWork
+            && warehouse is IWorkableFacility warehouseWork
+            && shopWork.CanAssignWorker(null, out _)
+            && labWork.CanAssignWorker(null, out _)
+            && warehouseWork.CanAssignWorker(null, out _);
+    }
+
+    private static bool VerifyUnavailableFacilitiesAreExcluded()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject shop = world.Place("P1_LowFoodShop", new Vector2Int(1, 0));
+        BuildableObject restRoom = world.Place("P1_RestRoom", new Vector2Int(5, 0));
+
+        ClearShopStock(shop);
+        restRoom.SetDamaged(true);
+
+        List<BuildableObject> visitable = world.Grid.SearchPath(Vector2Int.zero).GetAllVisitableBuilding();
+        return !visitable.Contains(shop)
+            && !visitable.Contains(restRoom)
+            && !shop.CanVisit(null, out string stockReason)
+            && stockReason == "재고 없음"
+            && !restRoom.CanVisit(null, out string damageReason)
+            && damageReason == "시설 파손";
+    }
+
+    private static bool VerifyStockCategories()
+    {
+        SaleItem food = AssetDatabase.LoadAssetAtPath<SaleItem>("Assets/Resources/SO/Stock/Item/햄버거.asset");
+        SaleItem sword = AssetDatabase.LoadAssetAtPath<SaleItem>("Assets/Resources/SO/Stock/Item/도란검.asset");
+        SaleItem shield = AssetDatabase.LoadAssetAtPath<SaleItem>("Assets/Resources/SO/Stock/Item/도란방패.asset");
+
+        return food != null
+            && sword != null
+            && shield != null
+            && food.category == StockCategory.Food
+            && sword.category == StockCategory.Weapon
+            && shield.category == StockCategory.Weapon;
+    }
+
+    private static bool VerifyWarehouseInventory()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject warehouseBuilding = world.Place("P1_Warehouse", new Vector2Int(5, 0));
+
+        return warehouseBuilding is IWarehouseFacility warehouse
+            && warehouse.HasWarehouseInventory
+            && warehouse.Inventory.TotalStock == warehouseBuilding.Facility.internalStockMax
+            && warehouse.Inventory.GetStock(StockCategory.Food) > 0
+            && warehouse.Inventory.GetStock(StockCategory.Weapon) > 0
+            && warehouse.Inventory.GetStock(StockCategory.Mana) > 0;
+    }
+
+    private static bool VerifyWarehouseRestocksShop()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject shopBuilding = world.Place("P1_LowFoodShop", new Vector2Int(1, 0));
+        BuildableObject warehouseBuilding = world.Place("P1_Warehouse", new Vector2Int(7, 0));
+        Shop shop = shopBuilding as Shop;
+        IWarehouseFacility warehouse = warehouseBuilding as IWarehouseFacility;
+        ClearShopStock(shopBuilding);
+
+        int beforeWarehouseFood = warehouse.Inventory.GetStock(StockCategory.Food);
+        int moved = shop.RestockFrom(new[] { warehouse }, 5, out string message);
+
+        return moved == 5
+            && message == "5개 보충"
+            && shop.CurrentStock == 5
+            && warehouse.Inventory.GetStock(StockCategory.Food) == beforeWarehouseFood - 5;
+    }
+
+    private static bool VerifyDailyDeliveryOffers()
+    {
+        IReadOnlyList<StockDeliveryOffer> offers = StockSupplyService.CreateDailyDeliveryOffers(1);
+
+        return offers.Count == 4
+            && offers.Any((offer) => offer.category == StockCategory.Food && offer.amount > 0 && offer.cost > 0)
+            && offers.Any((offer) => offer.category == StockCategory.General && offer.amount > 0 && offer.cost > 0)
+            && offers.Any((offer) => offer.category == StockCategory.Weapon && offer.amount > 0 && offer.cost > 0)
+            && offers.Any((offer) => offer.category == StockCategory.Mana && offer.amount > 0 && offer.cost > 0);
+    }
+
+    private static bool VerifyPurchaseDeliveryUsesMoneyAndWarehouseCapacity()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject warehouseBuilding = world.Place("P1_Warehouse", new Vector2Int(5, 0));
+        IWarehouseFacility warehouse = warehouseBuilding as IWarehouseFacility;
+        GameData gameData = CreateGameData(500);
+        warehouse.Inventory.Withdraw(StockCategory.Food, 10);
+
+        int beforeMoney = gameData.holdingMoney.Value;
+        int beforeFood = warehouse.Inventory.GetStock(StockCategory.Food);
+        StockDeliveryOffer offer = new StockDeliveryOffer(StockCategory.Food, 5, 40, "테스트 납품");
+        bool success = StockSupplyService.TryPurchaseDelivery(
+            gameData,
+            new[] { warehouse },
+            offer,
+            out StockSupplyResult result);
+
+        int afterMoney = gameData.holdingMoney.Value;
+        Object.DestroyImmediate(gameData);
+        return success
+            && result.success
+            && result.deliveredAmount == 5
+            && warehouse.Inventory.GetStock(StockCategory.Food) == beforeFood + 5
+            && warehouse.Inventory.TotalStock <= warehouse.Inventory.MaxCapacity
+            && beforeMoney - afterMoney == 40;
+    }
+
+    private static bool VerifyPurchaseDeliveryFailureConditions()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject warehouseBuilding = world.Place("P1_Warehouse", new Vector2Int(5, 0));
+        IWarehouseFacility warehouse = warehouseBuilding as IWarehouseFacility;
+        GameData poorData = CreateGameData(1);
+        GameData richData = CreateGameData(500);
+        StockDeliveryOffer offer = new StockDeliveryOffer(StockCategory.Food, 5, 40, "테스트 납품");
+
+        bool noMoney = !StockSupplyService.TryPurchaseDelivery(
+            poorData,
+            new[] { warehouse },
+            offer,
+            out StockSupplyResult noMoneyResult)
+            && noMoneyResult.reason == "자금 부족";
+
+        bool noSpace = !StockSupplyService.TryPurchaseDelivery(
+            richData,
+            new[] { warehouse },
+            offer,
+            out StockSupplyResult noSpaceResult)
+            && noSpaceResult.reason == "창고 공간 부족";
+
+        Object.DestroyImmediate(poorData);
+        Object.DestroyImmediate(richData);
+        return noMoney && noSpace;
+    }
+
+    private static bool VerifyDefenseRewardStockGrant()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject warehouseBuilding = world.Place("P1_Warehouse", new Vector2Int(5, 0));
+        IWarehouseFacility warehouse = warehouseBuilding as IWarehouseFacility;
+        warehouse.Inventory.Withdraw(StockCategory.Weapon, 5);
+
+        int beforeWeapon = warehouse.Inventory.GetStock(StockCategory.Weapon);
+        bool success = StockSupplyService.GrantReward(
+            new[] { warehouse },
+            StockCategory.Weapon,
+            3,
+            "침입 방어 보상",
+            out StockSupplyResult result);
+
+        return success
+            && result.success
+            && result.cost == 0
+            && result.deliveredAmount == 3
+            && warehouse.Inventory.GetStock(StockCategory.Weapon) == beforeWeapon + 3;
+    }
+
+    private static bool VerifyInternalProductionSlot()
+    {
+        using FacilityScenarioWorld world = new FacilityScenarioWorld();
+        BuildableObject warehouseBuilding = world.Place("P1_Warehouse", new Vector2Int(5, 0));
+        IWarehouseFacility warehouse = warehouseBuilding as IWarehouseFacility;
+        warehouse.Inventory.Withdraw(StockCategory.Mana, 4);
+
+        int beforeMana = warehouse.Inventory.GetStock(StockCategory.Mana);
+        List<StockSupplyResult> results = StockSupplyService.RunInternalProduction(
+            new[] { warehouse },
+            new[] { new StockProductionRule(StockCategory.Mana, 2, "내부 생산") });
+
+        return results.Count == 1
+            && results[0].success
+            && results[0].deliveredAmount == 2
+            && warehouse.Inventory.GetStock(StockCategory.Mana) == beforeMana + 2;
+    }
+
+    private static void ClearShopStock(BuildableObject building)
+    {
+        FieldInfo field = typeof(Shop).GetField("stocks", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (field != null)
+        {
+            field.SetValue(building, new List<RemainStock>());
+        }
+    }
+
+    private static GameData CreateGameData(int holdingMoney)
+    {
+        GameData gameData = ScriptableObject.CreateInstance<GameData>();
+        gameData.holdingMoney = new Data<int>();
+        gameData.holdingMoney.Initialize(holdingMoney);
+        return gameData;
+    }
+
+    private sealed class FacilityScenarioWorld : System.IDisposable
+    {
+        private readonly List<GameObject> objects = new List<GameObject>();
+
+        public FacilityScenarioWorld()
+        {
+            Grid = new Grid(14, 1);
+            for (int x = 0; x < Grid.width; x++)
+            {
+                Grid.RegisterOccupant(
+                    new TestHallwayOccupant(),
+                    GridLayer.Hallway,
+                    new List<Vector2Int> { new Vector2Int(x, 0) },
+                    false);
+            }
+        }
+
+        public Grid Grid { get; }
+
+        public BuildableObject Place(string assetName, Vector2Int position)
+        {
+            BuildingSO buildingData = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+                $"Assets/Resources/SO/Building/P1/{assetName}.asset");
+            GridBuildingFactory factory = new GridBuildingFactory();
+            BuildableObject building = factory.Create(Grid, buildingData, position);
+            objects.Add(building.gameObject);
+            building.SetGrid(Grid);
+            building.Initialization(buildingData, position);
+            Grid.RegisterOccupant(
+                building,
+                buildingData.Placement.Layer,
+                buildingData.GetGridPosList(position),
+                buildingData.Placement.IsMovement);
+            return building;
+        }
+
+        public void Dispose()
+        {
+            foreach (GameObject obj in objects.Where((obj) => obj != null))
+            {
+                Object.DestroyImmediate(obj);
+            }
+        }
+    }
+
+    private sealed class TestHallwayOccupant : IGridOccupant
+    {
+        public int GridId => 0;
+        public bool IsGridDestroyed => false;
+        public bool IsGridVisitable => false;
+        public bool IsGridMovement => true;
+    }
+}

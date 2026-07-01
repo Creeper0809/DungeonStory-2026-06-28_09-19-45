@@ -1,12 +1,9 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Consideration/Visitable", order = 0)]
 public class ConsiderationIsVisitable : Consideration
 {
     public Shop.Type type;
+    [SerializeField] private FacilityRole role = FacilityRole.None;
     public override float ScoreConsideration(Character character)
     {
         AbilityShopping shopping = null;
@@ -16,20 +13,31 @@ public class ConsiderationIsVisitable : Consideration
             return 0f;
         }
 
-        List<BuildableObject> reachableBulding = character.GetReachableBuilding()
-                                                        .Where((x) => !shopping.visitedBuilding.Contains(x))
-                                                        .ToList();
-        if(type == Shop.Type.X) return reachableBulding.Any() ? 1 : 0;
-
-        List<BuildableObject> filter = reachableBulding.Where((building) =>
+        GridPathSearchResult searchResult = character.ai != null ? character.ai.GetPathSearch(character) : null;
+        FacilityRole targetRole = role != FacilityRole.None ? role : ConvertLegacyType(type);
+        if (targetRole != FacilityRole.None)
         {
-            if (building is Shop shop)
-            {
-                if (shop.type == type) return true;
-            }
-            return false;
-        }).ToList();
+            return FacilityCandidateScorer.HasCandidate(character, searchResult, targetRole) ? 1f : 0f;
+        }
 
-        return filter.Any() ? 1 : 0;
+        foreach (BuildableObject building in character.GetReachableBuilding())
+        {
+            if (building != null && building.CanVisit(character, out _))
+            {
+                return 1f;
+            }
+        }
+
+        return 0f;
+    }
+
+    private static FacilityRole ConvertLegacyType(Shop.Type type)
+    {
+        return type switch
+        {
+            Shop.Type.Food => FacilityRole.Meal,
+            Shop.Type.Item => FacilityRole.Purchase,
+            _ => FacilityRole.None
+        };
     }
 }
