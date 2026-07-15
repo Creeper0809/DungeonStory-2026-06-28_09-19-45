@@ -1,7 +1,14 @@
 using System;
 using System.Collections.Generic;
 
-public static class FacilityCandidateCache
+public interface IFacilityCandidateCache
+{
+    IReadOnlyList<BuildableObject> GetCandidates(Grid grid, FacilityRole role);
+    void MarkDynamicStateDirty();
+    void Clear();
+}
+
+public sealed class FacilityCandidateCacheStore : IFacilityCandidateCache
 {
     private sealed class GridFacilityCache
     {
@@ -11,11 +18,11 @@ public static class FacilityCandidateCache
             new Dictionary<FacilityRole, List<BuildableObject>>();
     }
 
-    private static readonly Dictionary<Grid, GridFacilityCache> CacheByGrid =
+    private readonly Dictionary<Grid, GridFacilityCache> cacheByGrid =
         new Dictionary<Grid, GridFacilityCache>();
-    private static int facilityStateVersion;
+    private int facilityStateVersion;
 
-    public static IReadOnlyList<BuildableObject> GetCandidates(Grid grid, FacilityRole role)
+    public IReadOnlyList<BuildableObject> GetCandidates(Grid grid, FacilityRole role)
     {
         if (grid == null || role == FacilityRole.None)
         {
@@ -43,7 +50,7 @@ public static class FacilityCandidateCache
         return merged;
     }
 
-    public static void MarkDynamicStateDirty()
+    public void MarkDynamicStateDirty()
     {
         unchecked
         {
@@ -51,18 +58,18 @@ public static class FacilityCandidateCache
         }
     }
 
-    public static void Clear()
+    public void Clear()
     {
-        CacheByGrid.Clear();
+        cacheByGrid.Clear();
         MarkDynamicStateDirty();
     }
 
-    private static GridFacilityCache GetCache(Grid grid)
+    private GridFacilityCache GetCache(Grid grid)
     {
-        if (!CacheByGrid.TryGetValue(grid, out GridFacilityCache cache))
+        if (!cacheByGrid.TryGetValue(grid, out GridFacilityCache cache))
         {
             cache = new GridFacilityCache();
-            CacheByGrid[grid] = cache;
+            cacheByGrid[grid] = cache;
         }
 
         if (cache.Version != grid.version || cache.StateVersion != facilityStateVersion)
@@ -75,7 +82,7 @@ public static class FacilityCandidateCache
         return cache;
     }
 
-    private static List<BuildableObject> GetSingleRoleCandidates(
+    private List<BuildableObject> GetSingleRoleCandidates(
         Grid grid,
         GridFacilityCache cache,
         FacilityRole role)

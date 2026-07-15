@@ -55,6 +55,9 @@ TagManager:
   - name: DungeonBackObject
     uniqueID: 3466037299
     locked: 0
+  - name: RoomOverlay
+    uniqueID: 2357890141
+    locked: 0
   - name: DungeonMiddleObject
     uniqueID: 1885656093
     locked: 0
@@ -63,6 +66,9 @@ TagManager:
     locked: 0
   - name: Wall
     uniqueID: 2626896471
+    locked: 0
+  - name: RoomOutline
+    uniqueID: 1357913579
     locked: 0
   - name: Default
     uniqueID: 0

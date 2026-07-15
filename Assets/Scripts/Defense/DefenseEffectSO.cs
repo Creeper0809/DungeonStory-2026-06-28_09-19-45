@@ -38,11 +38,12 @@ public class DefenseEffectSO : ScriptableObject
     }
 
     public void Apply(
-        Character target,
+        CharacterActor target,
         DefenseStatusRuntime statusRuntime,
         DefenseActivationReport report,
         DefenseFacilityData defense)
     {
         DefenseEffectResolver.ApplyEffect(effect, target, statusRuntime, report, defense);
     }
+
 }

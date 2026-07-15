@@ -7,7 +7,7 @@ public class ConsiderationRandom : Consideration
 {
     [SerializeField][Range(0,1)] private float maxNum;
     [SerializeField][Range(0, 1)] private float minNum;
-    public override float ScoreConsideration(Character character)
+    public override float ScoreConsideration(CharacterActor actor)
     {
         return Mathf.Clamp01(Random.Range(minNum, maxNum));
     }

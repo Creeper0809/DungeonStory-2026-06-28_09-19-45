@@ -16,65 +16,15 @@ MonoBehaviour:
     SerializedFormat: 2
     SerializedBytes: 
     ReferencedUnityObjects:
-    - {fileID: 21300000, guid: 7c0e58c4f8081a144ab3861b0e09e57c, type: 3}
     - {fileID: 11400000, guid: 2edba297587c237489e87bacdcc549a5, type: 2}
     SerializedBytesString: 
     Prefab: {fileID: 0}
     PrefabModificationsReferencedUnityObjects: []
     PrefabModifications: []
     SerializationNodes:
-    - Name: id
-      Entry: 3
-      Data: 1
-    - Name: objectName
-      Entry: 1
-      Data: "\uBB38"
-    - Name: width
-      Entry: 3
-      Data: 3
-    - Name: height
-      Entry: 3
-      Data: 1
-    - Name: maintenance
-      Entry: 3
-      Data: 0
-    - Name: sprite
-      Entry: 10
-      Data: 0
-    - Name: icon
-      Entry: 10
-      Data: 0
-    - Name: layer
-      Entry: 3
-      Data: 1
-    - Name: category
-      Entry: 3
-      Data: 0
-    - Name: horizontalDraggable
-      Entry: 5
-      Data: false
-    - Name: verticalDraggable
-      Entry: 5
-      Data: false
-    - Name: OnBuildCondition
-      Entry: 7
-      Data: 0|System.Collections.Generic.List`1[[IBuildingCondition, Assembly-CSharp]],
-        mscorlib
-    - Name: 
-      Entry: 12
-      Data: 0
-    - Name: 
-      Entry: 13
-      Data: 
-    - Name: 
-      Entry: 8
-      Data: 
-    - Name: unlocked
-      Entry: 5
-      Data: false
     - Name: type
       Entry: 7
-      Data: 1|System.RuntimeType, mscorlib
+      Data: 0|System.RuntimeType, mscorlib
     - Name: 
       Entry: 1
       Data: Door, Assembly-CSharp
@@ -83,12 +33,12 @@ MonoBehaviour:
       Data: 
     - Name: tiles
       Entry: 7
-      Data: 2|System.Collections.Generic.Dictionary`2[[GridTexture+TilemapLayer,
+      Data: 1|System.Collections.Generic.Dictionary`2[[GridTexture+TilemapLayer,
         Assembly-CSharp],[UnityEngine.Tilemaps.Tile, UnityEngine.TilemapModule]],
         mscorlib
     - Name: comparer
       Entry: 7
-      Data: 3|System.Collections.Generic.EnumEqualityComparer`1[[GridTexture+TilemapLayer,
+      Data: 2|System.Collections.Generic.EnumEqualityComparer`1[[GridTexture+TilemapLayer,
         Assembly-CSharp]], mscorlib
     - Name: 
       Entry: 12
@@ -110,7 +60,7 @@ MonoBehaviour:
       Data: 3
     - Name: $v
       Entry: 10
-      Data: 1
+      Data: 0
     - Name: 
       Entry: 8
       Data: 
@@ -120,3 +70,100 @@ MonoBehaviour:
     - Name: 
       Entry: 8
       Data: 
+    - Name: OnBuildCondition
+      Entry: 7
+      Data: 3|System.Collections.Generic.List`1[[IBuildingCondition, Assembly-CSharp]],
+        mscorlib
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+  id: 1
+  objectName: "\uBB38"
+  sprite: {fileID: 21300000, guid: 7c0e58c4f8081a144ab3861b0e09e57c, type: 3}
+  icon: {fileID: 21300000, guid: 7c0e58c4f8081a144ab3861b0e09e57c, type: 3}
+  width: 3
+  height: 1
+  layer: 1
+  category: 0
+  horizontalDraggable: 0
+  verticalDraggable: 0
+  movementAnchorOffset: {x: 0, y: 0}
+  movementTravelTime: 2
+  facilityAnchors:
+    overrideUseOffset: 0
+    useOffset: {x: 0, y: 0}
+    overrideWorkOffset: 0
+    workOffset: {x: 0, y: 0}
+    overrideCheckoutOffset: 0
+    checkoutOffset: {x: 0, y: 0}
+    overrideExitOffset: 0
+    exitOffset: {x: 0, y: 0}
+  maintenance: 0
+  facility:
+    roles: 0
+    capacity: 1
+    useDuration: 1
+    internalStockMax: 0
+    restockRequestThreshold: 0
+    requiredWorkers: 0
+    supportedWorkTypes: 0
+    preferredSpeciesTags: []
+    dislikedSpeciesTags: []
+    disabledWhenDamaged: 1
+    requiresStock: 0
+    requiresRoomRole: 0
+    requiresStaffedService: 0
+    selfContainedRoom: 0
+    baseCrimePressure: 0.01
+    unstaffedSupervisionRisk: 0.07
+    staffedSupervisionReduction: 0.03
+    lowMoodCrimeRiskWeight: 0.08
+    unmetNeedCrimeRiskWeight: 0.05
+    crowdCrimeRiskWeight: 0.04
+    highValueCrimeRiskWeight: 0.05
+    damagedFacilityCrimeRiskWeight: 0.05
+  defense:
+    enabled: 0
+    concept: 0
+    triggerTimings: 0
+    targetRule: 0
+    cooldownSeconds: 0
+    periodicIntervalSeconds: 0
+    range: 0
+    star: 1
+    combatLogText: 
+    effectAssets: []
+    effects: []
+  evolution:
+    contributesToRoomProfile: 1
+    tags: []
+    scores: []
+    metrics: []
+  operational:
+    code: 
+    functions: 0
+    recovery:
+      sleep: 0
+      mood: 0
+      fun: 0
+      hunger: 0
+      excretion: 0
+      hygiene: 0
+    storageCategory: 1
+    storageCapacity: 0
+    seatCapacity: 0
+    tableCapacity: 0
+    serviceCapacity: 0
+    workOutputAmount: 0
+    constructionCost: 0
+    unlockPhase: 1
+    demolitionRefundRate: 0.5
+    lightIntensity: 0
+    lightRadius: 0
+  unlocked: 0

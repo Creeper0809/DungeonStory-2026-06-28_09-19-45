@@ -64,7 +64,7 @@ public static class FacilityShopDebugScenarios
 
     private static bool VerifyDailyOffersContainBuildingAndBlueprint()
     {
-        IReadOnlyList<FacilityShopOffer> offers = FacilityShopService.CreateDailyOffers(1);
+        IReadOnlyList<FacilityShopOffer> offers = CreateDailyOffersForScenario(1);
 
         return offers.Count >= 4
             && offers.Any((offer) => offer.Type == FacilityShopOfferType.Building && offer.Building != null)
@@ -79,7 +79,7 @@ public static class FacilityShopDebugScenarios
         bool sawNoRare = false;
         for (int day = 1; day <= 40; day++)
         {
-            IReadOnlyList<FacilityShopOffer> offers = FacilityShopService.CreateDailyOffers(day);
+            IReadOnlyList<FacilityShopOffer> offers = CreateDailyOffersForScenario(day);
             bool hasRare = offers.Any((offer) => offer.Rarity != FacilityShopRarity.Common);
             sawRare |= hasRare;
             sawNoRare |= !hasRare;
@@ -102,7 +102,9 @@ public static class FacilityShopDebugScenarios
 
         IReadOnlyList<FacilityShopOffer> offers = FacilityShopService.CreateBasicPurchaseOffers(
             new[] { oneStar, twoStar, threeStar },
-            state);
+            state,
+            Array.Empty<int>(),
+            DefaultBuildingCostMultiplier);
 
         bool valid = oneUnlocked
             && twoUnlocked
@@ -211,6 +213,45 @@ public static class FacilityShopDebugScenarios
     private static FacilityBlueprintSO LoadBlueprint(string assetName)
     {
         return AssetDatabase.LoadAssetAtPath<FacilityBlueprintSO>($"Assets/Resources/SO/Blueprint/P1/{assetName}.asset");
+    }
+
+    private static IReadOnlyList<FacilityShopOffer> CreateDailyOffersForScenario(int day)
+    {
+        return FacilityShopService.CreateDailyOffers(
+            day,
+            LoadAllBuildings(),
+            LoadAllBlueprints(),
+            0,
+            DefaultBuildingCostMultiplier,
+            DefaultBlueprintCostMultiplier);
+    }
+
+    private static IReadOnlyList<BuildingSO> LoadAllBuildings()
+    {
+        return AssetDatabase.FindAssets("t:BuildingSO", new[] { "Assets/Resources/SO/Building" })
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Select(AssetDatabase.LoadAssetAtPath<BuildingSO>)
+            .Where((building) => building != null)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FacilityBlueprintSO> LoadAllBlueprints()
+    {
+        return AssetDatabase.FindAssets("t:FacilityBlueprintSO", new[] { "Assets/Resources/SO/Blueprint" })
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Select(AssetDatabase.LoadAssetAtPath<FacilityBlueprintSO>)
+            .Where((blueprint) => blueprint != null)
+            .ToArray();
+    }
+
+    private static float DefaultBuildingCostMultiplier(BuildingSO building)
+    {
+        return 1f;
+    }
+
+    private static float DefaultBlueprintCostMultiplier(FacilityBlueprintSO blueprint)
+    {
+        return 1f;
     }
 
     private static BuildingSO CreateSyntheticDefenseBuilding(int id, string objectName, int star)

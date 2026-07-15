@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8b7e9edfd92e49c0b2182f0e785a1aaf, type: 3}
+  m_Name: Toilet
+  m_EditorClassIdentifier: Assembly-CSharp::AIFacilityRoleAction
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  actionName: "\uBC30\uBCC0"
+  <considerations>k__BackingField:
+  - {fileID: 11400000, guid: c72c9d1f9cc64c9b90efb913da5f1012, type: 2}
+  role: 128

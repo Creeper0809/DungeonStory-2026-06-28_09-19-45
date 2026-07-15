@@ -36,7 +36,7 @@ public static class P1FacilityShopAssetBuilder
             FacilityShopRarity.Common,
             130,
             20f,
-            new[] { "P1_Warehouse", "P1_TrainingRoom", "P1_ResearchLab" }),
+            new[] { "P1_Warehouse", "P1_RestRoom", "P1_Toilet", "P1_Washroom", "P1_TrainingRoom", "P1_ResearchLab" }),
         new BlueprintSpec(
             6104,
             "BP_ArcaneBasics",

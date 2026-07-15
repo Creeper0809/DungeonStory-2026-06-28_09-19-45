@@ -47,6 +47,7 @@ MonoBehaviour:
   horizontalDraggable: 0
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
+  movementTravelTime: 2
   maintenance: 4
   facility:
     roles: 5
@@ -62,6 +63,17 @@ MonoBehaviour:
     dislikedSpeciesTags: []
     disabledWhenDamaged: 1
     requiresStock: 1
+    requiresRoomRole: 1
+    requiresStaffedService: 0
+    selfContainedRoom: 0
+    baseCrimePressure: 0.01
+    unstaffedSupervisionRisk: 0.07
+    staffedSupervisionReduction: 0.03
+    lowMoodCrimeRiskWeight: 0.08
+    unmetNeedCrimeRiskWeight: 0.05
+    crowdCrimeRiskWeight: 0.04
+    highValueCrimeRiskWeight: 0.05
+    damagedFacilityCrimeRiskWeight: 0.05
   defense:
     enabled: 0
     concept: 0
@@ -74,4 +86,31 @@ MonoBehaviour:
     combatLogText: 
     effectAssets: []
     effects: []
+  evolution:
+    contributesToRoomProfile: 1
+    tags:
+    - Dining
+    - Meat
+    - Luxury
+    - Quiet
+    scores:
+    - key: Dining
+      value: 32
+    - key: Cooking
+      value: 18
+    - key: Meat
+      value: 18
+    - key: Luxury
+      value: 24
+    - key: Service
+      value: 14
+    - key: Rest
+      value: 10
+    metrics:
+    - key: SeatCount
+      value: 3
+    - key: TableCount
+      value: 1
+    - key: PrivateSeatCount
+      value: 2
   unlocked: 0

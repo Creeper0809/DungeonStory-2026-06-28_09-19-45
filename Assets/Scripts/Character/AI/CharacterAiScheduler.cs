@@ -1,16 +1,20 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using BehaviorDesigner.Runtime;
 using Unity.Profiling;
 using UnityEngine;
+using VContainer;
 
 public sealed class CharacterAiScheduler : MonoBehaviour
 {
     private static readonly ProfilerMarker ProcessAiBudgetMarker =
         new ProfilerMarker("CharacterAiScheduler.ProcessAiBudget");
 
-    private static CharacterAiScheduler instance;
-
     [SerializeField] private bool driveCharacterUpdates = true;
+    [SerializeField] private bool driveBehaviorDesignerTrees = true;
+    [SerializeField] private bool requireBehaviorTreeOnCharacters = true;
+    [SerializeField] private ExternalBehaviorTree characterAiExternalBehavior;
     [SerializeField] private bool limitPathSearches = true;
     [SerializeField] private bool limitFeedbackToVisibleCharacters = true;
     [SerializeField] private bool adaptBudgetsToFrameCost = true;
@@ -26,8 +30,10 @@ public sealed class CharacterAiScheduler : MonoBehaviour
     [SerializeField, Min(0f)] private float viewportMargin = 0.15f;
     [SerializeField, Range(1, 8)] private int offscreenMovementFrameStride = 3;
 
-    private readonly List<Character> characters = new List<Character>();
-    private readonly Dictionary<Character, float> nextDecisionTime = new Dictionary<Character, float>();
+    private readonly List<CharacterActor> actors = new List<CharacterActor>();
+    private readonly Dictionary<CharacterActor, float> nextDecisionTime = new Dictionary<CharacterActor, float>();
+    private readonly HashSet<CharacterActor> missingBehaviorTreeLogged = new HashSet<CharacterActor>();
+    private readonly HashSet<CharacterActor> missingExternalBehaviorLogged = new HashSet<CharacterActor>();
     private int cursor;
     private int pathBudgetFrame = -1;
     private int pathSearchesThisFrame;
@@ -35,40 +41,56 @@ public sealed class CharacterAiScheduler : MonoBehaviour
     private int currentPathSearchBudget;
     private int adaptiveCooldownFrames;
     private float manualTime;
+    private IDungeonSceneComponentQuery sceneQuery;
+    private IMainCameraProvider mainCameraProvider;
+    private ICharacterBehaviorTreeRuntimeConfigurator behaviorTreeConfigurator;
 
-    public static bool IsDrivingAi => instance != null
-        && instance.enabled
-        && instance.driveCharacterUpdates;
-
-    public int RegisteredCharacterCount => characters.Count;
+    public int RegisteredCharacterCount => actors.Count;
     public int LastProcessedDecisionCount { get; private set; }
+    public int LastBehaviorTreeTickCount { get; private set; }
     public int LastPathSearchCount { get; private set; }
     public double LastProcessingMilliseconds { get; private set; }
+    public ExternalBehaviorTree CharacterAiExternalBehavior => characterAiExternalBehavior;
+    public bool IsDrivingAi => enabled && driveCharacterUpdates;
     public int CurrentDecisionBudget => Mathf.Max(1, currentDecisionBudget);
     public int CurrentPathSearchBudget => Mathf.Max(1, currentPathSearchBudget);
-    public bool IsPathBudgetActiveForDebug => instance == this
-        && enabled
+    public bool IsPathBudgetActiveForDebug => enabled
         && driveCharacterUpdates
         && limitPathSearches;
 
     private void Awake()
     {
-        instance = this;
-        RegisterExistingCharacters();
+        ConfigureBehaviorManagerForManualTick();
     }
 
     private void OnEnable()
     {
-        instance = this;
-        RegisterExistingCharacters();
+        ConfigureBehaviorManagerForManualTick();
+        RegisterExistingCharactersIfInjected();
     }
 
-    private void OnDisable()
+    [Inject]
+    public void Construct(
+        IDungeonSceneComponentQuery sceneQuery,
+        IMainCameraProvider mainCameraProvider,
+        ICharacterBehaviorTreeRuntimeConfigurator behaviorTreeConfigurator)
     {
-        if (instance == this)
+        this.sceneQuery = sceneQuery
+            ?? throw new ArgumentNullException(nameof(sceneQuery));
+        this.mainCameraProvider = mainCameraProvider
+            ?? throw new ArgumentNullException(nameof(mainCameraProvider));
+        this.behaviorTreeConfigurator = behaviorTreeConfigurator
+            ?? throw new ArgumentNullException(nameof(behaviorTreeConfigurator));
+
+        if (isActiveAndEnabled)
         {
-            instance = null;
+            RegisterExistingCharacters();
         }
+    }
+
+    private void Start()
+    {
+        RegisterExistingCharacters();
     }
 
     private void Update()
@@ -76,74 +98,68 @@ public sealed class CharacterAiScheduler : MonoBehaviour
         ProcessAiBudget(Time.time);
     }
 
-    public static void Register(Character character)
+    public void RegisterActor(CharacterActor actor)
     {
-        if (instance == null || character == null)
+        if (actor == null)
         {
             return;
         }
 
-        instance.RegisterInternal(character);
+        RegisterInternal(actor);
     }
 
-    public static void Unregister(Character character)
+    public void UnregisterActor(CharacterActor actor)
     {
-        if (instance == null || character == null)
+        if (actor == null)
         {
             return;
         }
 
-        instance.UnregisterInternal(character);
+        UnregisterInternal(actor);
     }
 
-    public static void RequestImmediateDecision(Character character)
+    public void RequestImmediateDecisionFor(CharacterActor actor)
     {
-        if (instance == null || character == null)
+        if (actor == null)
         {
             return;
         }
 
-        instance.RegisterInternal(character);
-        instance.nextDecisionTime[character] = 0f;
+        RegisterInternal(actor);
+        nextDecisionTime[actor] = 0f;
     }
 
-    public static bool TryConsumePathSearchBudget()
+    public bool TryConsumePathSearchBudget()
     {
-        if (instance == null
-            || !instance.enabled
-            || !instance.driveCharacterUpdates
-            || !instance.limitPathSearches)
+        if (!enabled || !driveCharacterUpdates || !limitPathSearches)
         {
             return true;
         }
 
-        return instance.TryConsumePathSearchBudgetInternal();
+        return TryConsumePathSearchBudgetInternal();
     }
 
-    public static bool ShouldShowCharacterFeedback(Character character)
+    public bool ShouldShowCharacterFeedbackFor(CharacterActor actor)
     {
-        if (instance == null
-            || !instance.enabled
-            || !instance.limitFeedbackToVisibleCharacters)
+        if (!enabled || !limitFeedbackToVisibleCharacters)
         {
             return true;
         }
 
-        return instance.IsHighDetailCharacter(character);
+        return IsHighDetailCharacter(actor);
     }
 
-    public static int GetMovementFrameStride(Character character)
+    public int GetMovementFrameStrideFor(CharacterActor actor)
     {
-        if (instance == null
-            || !instance.enabled
-            || !instance.driveCharacterUpdates
-            || instance.offscreenMovementFrameStride <= 1
-            || instance.IsHighDetailCharacter(character))
+        if (!enabled
+            || !driveCharacterUpdates
+            || offscreenMovementFrameStride <= 1
+            || IsHighDetailCharacter(actor))
         {
             return 1;
         }
 
-        return instance.offscreenMovementFrameStride;
+        return offscreenMovementFrameStride;
     }
 
     public void RunManualTick(float deltaTime)
@@ -154,12 +170,21 @@ public sealed class CharacterAiScheduler : MonoBehaviour
 
     public void ClearRegistrationsForDebug()
     {
-        instance = this;
         ResetAdaptiveBudgets();
         manualTime = Time.time;
-        characters.Clear();
+        actors.Clear();
         nextDecisionTime.Clear();
+        missingBehaviorTreeLogged.Clear();
+        missingExternalBehaviorLogged.Clear();
         cursor = 0;
+    }
+
+    public void ResetPathSearchBudgetForDebugInstance()
+    {
+        pathBudgetFrame = -1;
+        pathSearchesThisFrame = 0;
+        LastPathSearchCount = 0;
+        EnsureAdaptiveBudgetsInitialized();
     }
 
     private void ProcessAiBudget(float now)
@@ -171,26 +196,27 @@ public sealed class CharacterAiScheduler : MonoBehaviour
             {
                 BeginPathBudgetWindow();
                 LastProcessedDecisionCount = 0;
+                LastBehaviorTreeTickCount = 0;
 
-                if (characters.Count == 0)
+                if (actors.Count == 0)
                 {
                     LastPathSearchCount = 0;
                     return;
                 }
 
                 int inspected = 0;
-                int initialCount = characters.Count;
-                while (characters.Count > 0
+                int initialCount = actors.Count;
+                while (actors.Count > 0
                     && inspected < initialCount
                     && LastProcessedDecisionCount < GetDecisionBudgetForFrame())
                 {
-                    if (cursor >= characters.Count)
+                    if (cursor >= actors.Count)
                     {
                         cursor = 0;
                     }
 
-                    Character character = characters[cursor];
-                    if (character == null)
+                    CharacterActor actor = actors[cursor];
+                    if (actor == null)
                     {
                         RemoveAt(cursor);
                         initialCount--;
@@ -200,21 +226,32 @@ public sealed class CharacterAiScheduler : MonoBehaviour
                     cursor++;
                     inspected++;
 
-                    if (!character.IsAiDecisionPending)
+                    BehaviorTree behaviorTree = ConfigureCharacterBehaviorTree(actor);
+                    behaviorTree?.DungeonStoryRefreshVisualStatus(actor);
+                    bool needsInitialTreeTick = behaviorTree != null
+                        && behaviorTree.ExternalBehavior != null
+                        && behaviorTree.DungeonStoryTickCount == 0;
+
+                    if (!actor.IsAiDecisionPending && !needsInitialTreeTick)
                     {
                         continue;
                     }
 
-                    if (nextDecisionTime.TryGetValue(character, out float dueTime) && now < dueTime)
+                    if (!needsInitialTreeTick
+                        && nextDecisionTime.TryGetValue(actor, out float dueTime)
+                        && now < dueTime)
                     {
                         continue;
                     }
 
-                    bool decided = character.TryRunAiDecision();
-                    nextDecisionTime[character] = now + (decided ? GetDecisionInterval(character) : retryDelay);
+                    bool decided = TryRunScheduledDecision(actor);
+                    nextDecisionTime[actor] = now + (decided ? GetDecisionInterval(actor) : retryDelay);
                     LastProcessedDecisionCount++;
                 }
 
+#if UNITY_EDITOR
+                RefreshBehaviorDesignerVisualsForEditor();
+#endif
                 LastPathSearchCount = pathSearchesThisFrame;
             }
             finally
@@ -226,34 +263,125 @@ public sealed class CharacterAiScheduler : MonoBehaviour
         }
     }
 
+#if UNITY_EDITOR
+    private void RefreshBehaviorDesignerVisualsForEditor()
+    {
+        if (!driveBehaviorDesignerTrees)
+        {
+            return;
+        }
+
+        for (int i = 0; i < actors.Count; i++)
+        {
+            CharacterActor actor = actors[i];
+            if (actor == null)
+            {
+                continue;
+            }
+
+            BehaviorTree behaviorTree = ConfigureCharacterBehaviorTree(actor);
+            behaviorTree?.DungeonStoryRefreshVisualStatus(actor);
+        }
+    }
+#endif
+
     private void RegisterExistingCharacters()
     {
-        foreach (Character character in FindObjectsByType<Character>(
-            FindObjectsInactive.Exclude,
-            FindObjectsSortMode.None))
+        foreach (CharacterActor actor in RequireSceneQuery().All<CharacterActor>())
         {
-            RegisterInternal(character);
+            RegisterInternal(actor);
         }
     }
 
-    private void RegisterInternal(Character character)
+    private void RegisterExistingCharactersIfInjected()
     {
-        if (character == null || characters.Contains(character))
+        if (sceneQuery != null)
+        {
+            RegisterExistingCharacters();
+        }
+    }
+
+    private IDungeonSceneComponentQuery RequireSceneQuery()
+    {
+        if (sceneQuery == null)
+        {
+            throw new InvalidOperationException($"{nameof(CharacterAiScheduler)} requires {nameof(IDungeonSceneComponentQuery)} injection.");
+        }
+
+        return sceneQuery;
+    }
+
+    private void RegisterInternal(CharacterActor actor)
+    {
+        if (actor == null || actors.Contains(actor))
         {
             return;
         }
 
         EnsureAdaptiveBudgetsInitialized();
-        characters.Add(character);
-        nextDecisionTime[character] = Time.time + Random.Range(0f, visibleDecisionInterval);
+        ConfigureCharacterBehaviorTree(actor);
+        actors.Add(actor);
+        nextDecisionTime[actor] = 0f;
     }
 
-    private void UnregisterInternal(Character character)
+    private bool TryRunScheduledDecision(CharacterActor actor)
     {
-        int index = characters.IndexOf(character);
+        if (actor == null)
+        {
+            return false;
+        }
+
+        if (!driveBehaviorDesignerTrees)
+        {
+            return TryRunFallbackDecision(actor);
+        }
+
+        BehaviorTree behaviorTree = ConfigureCharacterBehaviorTree(actor);
+        if (behaviorTree == null)
+        {
+            return TryRunFallbackDecision(actor);
+        }
+
+        if (behaviorTree.ExternalBehavior == null)
+        {
+            return TryRunFallbackDecision(actor);
+        }
+
+        LastBehaviorTreeTickCount++;
+        return behaviorTree.DungeonStoryManualTick(actor);
+    }
+
+    private static bool TryRunFallbackDecision(CharacterActor actor)
+    {
+        AIBrain brain = actor != null ? actor.ai ?? actor.GetComponent<AIBrain>() : null;
+        return brain != null && brain.DecideAction();
+    }
+
+    private static void ConfigureBehaviorManagerForManualTick()
+    {
+        if (BehaviorManager.instance == null)
+        {
+            Behavior.CreateBehaviorManager();
+        }
+
+        if (BehaviorManager.instance != null)
+        {
+            // DungeonStory patch: scheduler owns character BT cadence.
+            BehaviorManager.instance.UpdateInterval = UpdateIntervalType.Manual;
+        }
+    }
+
+    private BehaviorTree ConfigureCharacterBehaviorTree(CharacterActor actor)
+    {
+        return RequireBehaviorTreeConfigurator().Configure(actor, characterAiExternalBehavior);
+    }
+
+    private void UnregisterInternal(CharacterActor actor)
+    {
+        int index = actors.IndexOf(actor);
         if (index < 0)
         {
-            nextDecisionTime.Remove(character);
+            nextDecisionTime.Remove(actor);
             return;
         }
 
@@ -262,51 +390,51 @@ public sealed class CharacterAiScheduler : MonoBehaviour
 
     private void RemoveAt(int index)
     {
-        if (index < 0 || index >= characters.Count)
+        if (index < 0 || index >= actors.Count)
         {
             return;
         }
 
-        Character character = characters[index];
-        nextDecisionTime.Remove(character);
-        characters.RemoveAt(index);
+        CharacterActor actor = actors[index];
+        nextDecisionTime.Remove(actor);
+        actors.RemoveAt(index);
         if (cursor > index)
         {
             cursor--;
         }
     }
 
-    private float GetDecisionInterval(Character character)
+    private float GetDecisionInterval(CharacterActor actor)
     {
-        if (character != null && character.IsOwner)
+        if (actor != null && actor.IsOwner)
         {
             return ownerDecisionInterval;
         }
 
-        return IsHighDetailCharacter(character)
+        return IsHighDetailCharacter(actor)
             ? visibleDecisionInterval
             : offscreenDecisionInterval;
     }
 
-    private bool IsHighDetailCharacter(Character character)
+    private bool IsHighDetailCharacter(CharacterActor actor)
     {
-        if (character == null)
+        if (actor == null)
         {
             return false;
         }
 
-        if (character.IsOwner)
+        if (actor.IsOwner)
         {
             return true;
         }
 
-        Camera camera = Camera.main;
+        Camera camera = RequireMainCameraProvider().Camera;
         if (camera == null)
         {
             return true;
         }
 
-        Vector3 viewport = camera.WorldToViewportPoint(character.transform.position);
+        Vector3 viewport = camera.WorldToViewportPoint(actor.transform.position);
         return viewport.z >= 0f
             && viewport.x >= -viewportMargin
             && viewport.x <= 1f + viewportMargin
@@ -373,7 +501,7 @@ public sealed class CharacterAiScheduler : MonoBehaviour
 
     private void UpdateAdaptiveBudgets()
     {
-        if (!adaptBudgetsToFrameCost || characters.Count == 0)
+        if (!adaptBudgetsToFrameCost || actors.Count == 0)
         {
             return;
         }
@@ -404,5 +532,17 @@ public sealed class CharacterAiScheduler : MonoBehaviour
             currentPathSearchBudget = Mathf.Min(Mathf.Max(1, maxPathSearchesPerFrame), currentPathSearchBudget + 1);
             adaptiveCooldownFrames = 30;
         }
+    }
+
+    private IMainCameraProvider RequireMainCameraProvider()
+    {
+        return mainCameraProvider
+            ?? throw new InvalidOperationException($"{nameof(CharacterAiScheduler)} requires {nameof(IMainCameraProvider)} injection.");
+    }
+
+    private ICharacterBehaviorTreeRuntimeConfigurator RequireBehaviorTreeConfigurator()
+    {
+        return behaviorTreeConfigurator
+            ?? throw new InvalidOperationException($"{nameof(CharacterAiScheduler)} requires {nameof(ICharacterBehaviorTreeRuntimeConfigurator)} injection.");
     }
 }

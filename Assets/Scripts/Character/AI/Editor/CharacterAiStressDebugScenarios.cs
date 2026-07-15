@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using BehaviorDesigner.Runtime;
 using UnityEditor;
 using Unity.Profiling;
 using UnityEngine;
@@ -12,6 +13,7 @@ using Object = UnityEngine.Object;
 public static class CharacterAiStressDebugScenarios
 {
     private const int NpcCount = 500;
+    private static readonly int[] ScaleNpcCounts = { 100, 300, NpcCount };
     private const int SimulationFrames = 180;
     private const int DecisionBudget = 16;
     private const int PathBudget = 8;
@@ -25,6 +27,7 @@ public static class CharacterAiStressDebugScenarios
     private const string ProfilerLogPath = "Temp/DungeonStory-500NpcProfile.raw";
 
     public static string LastReport { get; private set; } = string.Empty;
+    public static string LastScaleReport { get; private set; } = string.Empty;
     public static string LastPlayModeProfileReport => SessionState.GetString(PlayModeProfileReportKey, string.Empty);
     public static bool IsPlayModeProfileRunning => SessionState.GetBool(PlayModeProfileRequestedKey, false);
 
@@ -41,6 +44,16 @@ public static class CharacterAiStressDebugScenarios
         if (!success)
         {
             UnityEngine.Debug.LogError("500 NPC AI stress scenario failed.");
+        }
+    }
+
+    [MenuItem("DungeonStory/Debug/AI/Run 100 300 500 NPC AI Stress Suite")]
+    public static void RunScaleSuiteFromMenu()
+    {
+        bool success = RunScaleSuite(true);
+        if (!success)
+        {
+            UnityEngine.Debug.LogError("100/300/500 NPC AI stress suite failed.");
         }
     }
 
@@ -66,23 +79,52 @@ public static class CharacterAiStressDebugScenarios
 
     public static bool RunAll(bool logSuccess)
     {
+        return RunForCount(NpcCount, logSuccess);
+    }
+
+    public static bool RunScaleSuite(bool logSuccess)
+    {
+        List<string> reports = new List<string>();
+        bool valid = true;
+        foreach (int npcCount in ScaleNpcCounts)
+        {
+            valid &= RunForCount(npcCount, logSuccess);
+            reports.Add($"{npcCount}: {LastReport}");
+        }
+
+        LastScaleReport = string.Join("\n", reports);
+        if (logSuccess || !valid)
+        {
+            UnityEngine.Debug.Log($"100/300/500 NPC AI stress suite valid={valid}\n{LastScaleReport}");
+        }
+
+        return valid;
+    }
+
+    public static bool RunForCount(int npcCount, bool logSuccess)
+    {
+        npcCount = Mathf.Max(1, npcCount);
         using StressWorld world = new StressWorld();
         world.PlaceFacilities();
-        world.CreateCustomers(NpcCount);
+        world.CreateCustomers(npcCount);
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         int maxDecisions = 0;
         int maxPathSearches = 0;
+        int maxBehaviorTreeTicks = 0;
         int totalDecisions = 0;
         int totalPathSearches = 0;
+        int totalBehaviorTreeTicks = 0;
 
         for (int frame = 0; frame < SimulationFrames; frame++)
         {
             world.Scheduler.RunManualTick(1f / 60f);
             maxDecisions = Mathf.Max(maxDecisions, world.Scheduler.LastProcessedDecisionCount);
             maxPathSearches = Mathf.Max(maxPathSearches, world.Scheduler.LastPathSearchCount);
+            maxBehaviorTreeTicks = Mathf.Max(maxBehaviorTreeTicks, world.Scheduler.LastBehaviorTreeTickCount);
             totalDecisions += world.Scheduler.LastProcessedDecisionCount;
             totalPathSearches += world.Scheduler.LastPathSearchCount;
+            totalBehaviorTreeTicks += world.Scheduler.LastBehaviorTreeTickCount;
         }
 
         stopwatch.Stop();
@@ -97,25 +139,50 @@ public static class CharacterAiStressDebugScenarios
             && character.ai != null
             && character.ai.availableActions != null
             && character.ai.availableActions.Length > 0);
-        bool gridReady = GridSystemManager.Instance != null && GridSystemManager.Instance.grid == world.Grid;
+        int tickedTrees = world.Characters.Count((character) =>
+            character != null
+            && character.BehaviorTree != null
+            && character.BehaviorTree.DungeonStoryTickCount > 0);
+        string branches = string.Join(
+            ",",
+            world.Characters
+                .Where((character) => character != null && character.Blackboard != null)
+                .GroupBy((character) => character.Blackboard.CurrentBranch)
+                .OrderByDescending((group) => group.Count())
+                .Select((group) => $"{group.Key}:{group.Count()}"));
+        string samples = string.Join(
+            " | ",
+            world.Characters
+                .Where((character) => character != null && character.Blackboard != null)
+                .Take(5)
+                .Select((character) =>
+                    $"{character.name}:{character.Blackboard.CurrentBranch}/{character.Blackboard.CurrentTask}"
+                    + $"/route={character.Blackboard.LastDecisionRouteSummary}"
+                    + $"/brain={character.ai?.GetDebugSummary(1)}"));
+        GridSystemManager gridSystemManager = Object.FindFirstObjectByType<GridSystemManager>();
+        bool gridReady = gridSystemManager != null && gridSystemManager.grid == world.Grid;
 
-        bool valid = world.Scheduler.RegisteredCharacterCount == NpcCount
-            && touchedCharacters >= Mathf.Min(NpcCount, DecisionBudget * SimulationFrames)
+        bool valid = world.Scheduler.RegisteredCharacterCount == npcCount
+            && touchedCharacters >= Mathf.Min(npcCount, DecisionBudget * SimulationFrames)
+            && tickedTrees == npcCount
             && maxDecisions <= DecisionBudget
             && maxPathSearches <= PathBudget
             && totalDecisions > 0
+            && totalBehaviorTreeTicks > 0
             && totalPathSearches > 0;
 
         LastReport =
             $"valid={valid}, registered={world.Scheduler.RegisteredCharacterCount}, " +
-            $"pending={pendingCharacters}, withActions={withActions}, gridReady={gridReady}, " +
+            $"pending={pendingCharacters}, withActions={withActions}, tickedTrees={tickedTrees}, gridReady={gridReady}, " +
             $"pathBudgetActive={world.Scheduler.IsPathBudgetActiveForDebug}, touched={touchedCharacters}, " +
             $"totalDecisions={totalDecisions}, maxDecisions/frame={maxDecisions}, " +
-            $"totalPathSearches={totalPathSearches}, maxPathSearches/frame={maxPathSearches}, elapsedMs={stopwatch.Elapsed.TotalMilliseconds:0.0}";
+            $"totalBtTicks={totalBehaviorTreeTicks}, maxBtTicks/frame={maxBehaviorTreeTicks}, " +
+            $"totalPathSearches={totalPathSearches}, maxPathSearches/frame={maxPathSearches}, " +
+            $"branches={branches}, samples={samples}, elapsedMs={stopwatch.Elapsed.TotalMilliseconds:0.0}";
 
         if (logSuccess || !valid)
         {
-            UnityEngine.Debug.Log($"500 NPC AI stress: {LastReport}");
+            UnityEngine.Debug.Log($"{npcCount} NPC AI stress: {LastReport}");
         }
 
         return valid;
@@ -613,15 +680,18 @@ public static class CharacterAiStressDebugScenarios
         private static readonly FieldInfo GridField =
             typeof(GridSystemManager).GetField("<grid>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo CharacterAwakeMethod =
-            typeof(Character).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(CharacterActor).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly GridSystemManager previousGridSystem;
+        private readonly Grid previousGrid;
+        private readonly ExternalBehaviorTree externalBehavior;
         private readonly List<GameObject> objects = new List<GameObject>();
         private readonly List<ScriptableObject> scriptableObjects = new List<ScriptableObject>();
 
         public StressWorld()
         {
             previousGridSystem = GridSystemInstanceField?.GetValue(null) as GridSystemManager;
+            previousGrid = previousGridSystem != null ? previousGridSystem.grid : null;
             Grid = new Grid(96, 3);
             for (int y = 0; y < Grid.height; y++)
             {
@@ -638,16 +708,23 @@ public static class CharacterAiStressDebugScenarios
             RegisterStressStair(0);
             RegisterStressStair(Grid.width - 1);
 
-            GameObject gridSystemObject = new GameObject("500 NPC Stress GridSystemManager");
-            objects.Add(gridSystemObject);
-            GridSystemManager manager = gridSystemObject.AddComponent<GridSystemManager>();
+            GridSystemManager manager = previousGridSystem;
+            if (manager == null)
+            {
+                GameObject gridSystemObject = new GameObject("500 NPC Stress GridSystemManager");
+                objects.Add(gridSystemObject);
+                manager = gridSystemObject.AddComponent<GridSystemManager>();
+            }
+
             GridField?.SetValue(manager, Grid);
             GridSystemInstanceField?.SetValue(null, manager);
 
             GameObject schedulerObject = new GameObject("500 NPC Stress CharacterAiScheduler");
             objects.Add(schedulerObject);
+            externalBehavior = CharacterAiBehaviorDesignerGraphBuilder.EnsureCharacterAiExternalBehavior();
             Scheduler = schedulerObject.AddComponent<CharacterAiScheduler>();
             Scheduler.ClearRegistrationsForDebug();
+            SetPrivateField(Scheduler, "characterAiExternalBehavior", externalBehavior);
             SetPrivateField(Scheduler, "maxDecisionsPerFrame", DecisionBudget);
             SetPrivateField(Scheduler, "maxPathSearchesPerFrame", PathBudget);
             SetPrivateField(Scheduler, "visibleDecisionInterval", 0.01f);
@@ -658,7 +735,7 @@ public static class CharacterAiStressDebugScenarios
 
         public Grid Grid { get; }
         public CharacterAiScheduler Scheduler { get; }
-        public List<Character> Characters { get; } = new List<Character>();
+        public List<CharacterActor> Characters { get; } = new List<CharacterActor>();
 
         public void PlaceFacilities()
         {
@@ -687,7 +764,7 @@ public static class CharacterAiStressDebugScenarios
             string[] species = { "Slime", "Orc", "Vampire" };
             for (int i = 0; i < count; i++)
             {
-                Character character = CreateCustomer(
+                CharacterActor character = CreateCustomer(
                     species[i % species.Length],
                     GetCustomerPosition(i),
                     20f + (i % 70),
@@ -695,7 +772,7 @@ public static class CharacterAiStressDebugScenarios
                     20f + ((i * 5) % 70),
                     20f + ((i * 7) % 70));
                 Characters.Add(character);
-                CharacterAiScheduler.Register(character);
+                Scheduler.RegisterActor(character);
             }
         }
 
@@ -728,6 +805,11 @@ public static class CharacterAiStressDebugScenarios
 
         public void Dispose()
         {
+            if (previousGridSystem != null)
+            {
+                GridField?.SetValue(previousGridSystem, previousGrid);
+            }
+
             GridSystemInstanceField?.SetValue(null, previousGridSystem);
             FacilityCandidateCache.Clear();
 
@@ -791,7 +873,7 @@ public static class CharacterAiStressDebugScenarios
             return building;
         }
 
-        private Character CreateCustomer(
+        private CharacterActor CreateCustomer(
             string speciesTag,
             Vector2Int position,
             float hunger,
@@ -806,7 +888,10 @@ public static class CharacterAiStressDebugScenarios
             obj.AddComponent<AbilityShopping>();
             AIBrain brain = obj.AddComponent<AIBrain>();
             brain.availableActions = AiDebugScenarioActionFactory.CreateCustomerActions();
-            Character character = obj.AddComponent<Character>();
+            BehaviorTree behaviorTree = obj.AddComponent<BehaviorTree>();
+            behaviorTree.StartWhenEnabled = false;
+            behaviorTree.ExternalBehavior = externalBehavior;
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             CharacterAwakeMethod?.Invoke(character, null);
 
             CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
@@ -819,14 +904,37 @@ public static class CharacterAiStressDebugScenarios
             data.characterName = speciesTag;
             data.speciesTag = speciesTag;
 
+            ApplyStressPersona(obj.GetComponent<CustomerPersonaRuntime>(), speciesTag);
             obj.transform.position = Grid.GetWorldPos(position);
             character.Initialization(data);
-            character.SetLifecycleState(Character.LifecycleState.Active);
-            character.stats[Character.Condition.HUNGER] = hunger;
-            character.stats[Character.Condition.SLEEP] = sleep;
-            character.stats[Character.Condition.FUN] = fun;
-            character.stats[Character.Condition.MOOD] = mood;
+            character.SetLifecycleState(CharacterLifecycleState.Active);
+            character.stats[CharacterCondition.HUNGER] = hunger;
+            character.stats[CharacterCondition.SLEEP] = sleep;
+            character.stats[CharacterCondition.FUN] = fun;
+            character.stats[CharacterCondition.MOOD] = mood;
             return character;
+        }
+
+        private static void ApplyStressPersona(CustomerPersonaRuntime personaRuntime, string speciesTag)
+        {
+            if (personaRuntime == null)
+            {
+                return;
+            }
+
+            personaRuntime.ApplyGeneratedPersona(new CustomerPersonaData
+            {
+                traitName = $"Stress {speciesTag}",
+                flavorText = "Deterministic stress-test persona.",
+                selfCareMultiplier = 1f,
+                curiosityMultiplier = 1f,
+                shoppingMultiplier = 1f,
+                patienceMultiplier = 1f,
+                hungerCurveMultiplier = 1f,
+                funCurveMultiplier = 1f,
+                moodCurveMultiplier = 1f,
+                preferredFacilityTags = Array.Empty<string>()
+            });
         }
 
         private static void SetPrivateField(object target, string fieldName, object value)

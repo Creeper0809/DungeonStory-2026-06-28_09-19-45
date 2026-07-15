@@ -1,9 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using VContainer;
 
 public class UITabManager : MonoBehaviour
 {
@@ -14,10 +15,18 @@ public class UITabManager : MonoBehaviour
     [SerializeField] private bool autoCreateMissingTabs = true;
 
     private const float BottomTabBarHeight = 60f;
-    private const float GeneratedPanelBottomOffset = 64f;
-    private const float GeneratedPanelHeight = 420f;
+    private const int HudCanvasSortingOrder = 300;
 
     private readonly Dictionary<int, TMP_Text> generatedTabBodies = new Dictionary<int, TMP_Text>();
+    private IUITabContentTextProvider contentTextProvider;
+    private IUiPopupService popupService;
+    private ITmpKoreanFontService tmpKoreanFontService;
+    private IUITabGeneratedPanelFactory generatedPanelFactory;
+    private IStaffWorkPriorityPanelFactory staffWorkPriorityPanelFactory;
+    private IP0FeatureSurfacePanelFactory p0FeatureSurfacePanelFactory;
+    private IUITabTopButtonFactory topButtonFactory;
+    private IDungeonGridBuildingControllerProvider buildingControllerProvider;
+    private DungeonUiThemeRuntime themeRuntime;
     private bool isConfigured;
 
     private static readonly KeyValuePair<int, string>[] TopTabs =
@@ -63,14 +72,44 @@ public class UITabManager : MonoBehaviour
         ConfigureTopTabs();
     }
 
+    [Inject]
+    public void Construct(
+        IUITabContentTextProvider contentTextProvider,
+        IUiPopupService popupService,
+        ITmpKoreanFontService tmpKoreanFontService,
+        IUITabGeneratedPanelFactory generatedPanelFactory,
+        IStaffWorkPriorityPanelFactory staffWorkPriorityPanelFactory,
+        IP0FeatureSurfacePanelFactory p0FeatureSurfacePanelFactory,
+        IUITabTopButtonFactory topButtonFactory,
+        IDungeonGridBuildingControllerProvider buildingControllerProvider)
+    {
+        this.contentTextProvider = contentTextProvider
+            ?? throw new ArgumentNullException(nameof(contentTextProvider));
+        this.popupService = popupService
+            ?? throw new ArgumentNullException(nameof(popupService));
+        this.tmpKoreanFontService = tmpKoreanFontService
+            ?? throw new ArgumentNullException(nameof(tmpKoreanFontService));
+        this.generatedPanelFactory = generatedPanelFactory
+            ?? throw new ArgumentNullException(nameof(generatedPanelFactory));
+        this.staffWorkPriorityPanelFactory = staffWorkPriorityPanelFactory
+            ?? throw new ArgumentNullException(nameof(staffWorkPriorityPanelFactory));
+        this.p0FeatureSurfacePanelFactory = p0FeatureSurfacePanelFactory
+            ?? throw new ArgumentNullException(nameof(p0FeatureSurfacePanelFactory));
+        this.topButtonFactory = topButtonFactory
+            ?? throw new ArgumentNullException(nameof(topButtonFactory));
+        this.buildingControllerProvider = buildingControllerProvider
+            ?? throw new ArgumentNullException(nameof(buildingControllerProvider));
+    }
+
     public void ToggleSelectButton(int category)
     {
+        CancelActiveGridPlacement();
         ConfigureTopTabs();
         EnsureTopButtons();
         EnsureSpecializedTabContent(category);
         RefreshGeneratedTab(category);
 
-        UITab target = GetAllTabs().FirstOrDefault((tab) => tab.id == category);
+        UITab target = GetTopLevelTabs().FirstOrDefault((tab) => tab.id == category);
         bool shouldOpen = target != null && !target.gameObject.activeSelf;
 
         CloseAllTabsImmediate();
@@ -81,9 +120,20 @@ public class UITabManager : MonoBehaviour
             EnsureSpecializedTabContent(category);
         }
 
+        ResolveThemeRuntime()?.SetActiveTab(shouldOpen ? category : null);
+
         if (target == null)
         {
             Debug.LogWarning($"UITabManager.ToggleSelectButton() : id {category}에 해당하는 탭 패널이 없습니다.");
+        }
+    }
+
+    private void CancelActiveGridPlacement()
+    {
+        DungeonStoryGridBuildingController controller = buildingControllerProvider?.Controller;
+        if (controller != null && controller.GridSystem.Mode != GridMode.None)
+        {
+            controller.SetGridModeNone();
         }
     }
     public void ResgisterTab(UITab tab)
@@ -99,6 +149,8 @@ public class UITabManager : MonoBehaviour
 
     private void ConfigureTopTabs()
     {
+        EnsureHudCanvasRendersAboveWorld();
+
         if (isConfigured) return;
         isConfigured = true;
 
@@ -128,6 +180,21 @@ public class UITabManager : MonoBehaviour
         }
 
         CloseAllTabsForInitialState();
+        ResolveThemeRuntime()?.ApplyNow();
+    }
+
+    private void EnsureHudCanvasRendersAboveWorld()
+    {
+        Canvas canvas = GetComponentInParent<Canvas>();
+        if (canvas == null)
+        {
+            return;
+        }
+
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.overrideSorting = true;
+        canvas.sortingOrder = Mathf.Max(canvas.sortingOrder, HudCanvasSortingOrder);
+        themeRuntime = DungeonUiThemeRuntime.Ensure(canvas, tmpKoreanFontService);
     }
 
     private void RegisterExistingTabs()
@@ -148,7 +215,7 @@ public class UITabManager : MonoBehaviour
 
     private void EnsureSpecializedTabContent()
     {
-        foreach (UITab tab in GetAllTabs())
+        foreach (UITab tab in GetTopLevelTabs())
         {
             EnsureSpecializedTabContent(tab);
         }
@@ -156,53 +223,43 @@ public class UITabManager : MonoBehaviour
 
     private void EnsureSpecializedTabContent(int id)
     {
-        if (id != 2)
+        if (id != 2 && !IsFeatureSurfaceTab(id))
         {
             return;
         }
 
-        foreach (UITab tab in GetAllTabs().Where((tab) => tab.id == id))
+        foreach (UITab tab in GetTopLevelTabs().Where((tab) => tab.id == id))
         {
             EnsureSpecializedTabContent(tab);
         }
     }
 
-    private static void EnsureSpecializedTabContent(UITab tab)
+    private void EnsureSpecializedTabContent(UITab tab)
     {
-        if (tab == null || tab.id != 2)
+        if (tab == null)
         {
             return;
         }
 
-        StaffWorkPriorityPanel panel = EnsureStaffPriorityPanel(tab.gameObject);
-        if (panel != null)
+        if (tab.id == 2)
         {
-            panel.Refresh();
-        }
-    }
+            StaffWorkPriorityPanel panel = RequireStaffWorkPriorityPanelFactory().Ensure(tab.gameObject);
+            if (panel != null)
+            {
+                panel.Refresh();
+            }
 
-    private static StaffWorkPriorityPanel EnsureStaffPriorityPanel(GameObject panelObject)
-    {
-        if (panelObject == null)
-        {
-            return null;
+            return;
         }
 
-        StaffWorkPriorityPanel panel = panelObject.GetComponent<StaffWorkPriorityPanel>();
-        if (panel == null)
+        if (IsFeatureSurfaceTab(tab.id))
         {
-            panel = panelObject.AddComponent<StaffWorkPriorityPanel>();
+            P0FeatureSurfacePanel panel = RequireP0FeatureSurfacePanelFactory().Ensure(tab.gameObject, tab.id);
+            if (panel != null)
+            {
+                panel.Refresh();
+            }
         }
-
-        Transform body = panelObject.transform.Find("Body");
-        TMP_Text bodyText = body != null ? body.GetComponent<TMP_Text>() : null;
-        if (bodyText != null)
-        {
-            bodyText.text = string.Empty;
-            bodyText.enabled = false;
-        }
-
-        return panel;
     }
 
     private IEnumerable<UITab> GetAllTabs()
@@ -214,12 +271,14 @@ public class UITabManager : MonoBehaviour
             .Distinct();
     }
 
+    private IEnumerable<UITab> GetTopLevelTabs()
+    {
+        return GetAllTabs().Where((tab) => tab.transform.parent == transform);
+    }
+
     private void CloseAllTabsImmediate()
     {
-        if (UIManager.HasInstance)
-        {
-            UIManager.Instance.CloseAllPopup();
-        }
+        ResolvePopupService().CloseAll();
 
         foreach (UITab tab in GetAllTabs())
         {
@@ -236,6 +295,8 @@ public class UITabManager : MonoBehaviour
         {
             tab.gameObject.SetActive(false);
         }
+
+        ResolveThemeRuntime()?.SetActiveTab(null);
     }
 
     private static string GetPanelTitle(int id, string defaultTitle)
@@ -251,11 +312,11 @@ public class UITabManager : MonoBehaviour
         };
     }
 
-    private static void OpenTabImmediate(UITab tab)
+    private void OpenTabImmediate(UITab tab)
     {
         if (tab == null) return;
 
-        UIManager.Instance.OpenPopup(tab);
+        ResolvePopupService().Open(tab);
         tab.gameObject.SetActive(true);
     }
 
@@ -331,9 +392,6 @@ public class UITabManager : MonoBehaviour
             return;
         }
 
-        MoveRowButtonsBackToRoot(root, "TopTabPrimaryRow");
-        MoveRowButtonsBackToRoot(root, "TopTabSecondaryRow");
-
         Button template = root.GetComponentsInChildren<Button>(true)
             .FirstOrDefault((button) => TryGetTopTabId(GetButtonLabel(button), out _));
 
@@ -353,11 +411,7 @@ public class UITabManager : MonoBehaviour
                 return;
             }
 
-            Button button = Instantiate(template, root);
-
-            button.name = $"TopTabButton_{tab.Key}_{tab.Value.Replace("/", string.Empty)}";
-            button.onClick = new Button.ButtonClickedEvent();
-            SetButtonLabel(button, tab.Value);
+            RequireTopButtonFactory().CreateButton(template, root, tab.Key, tab.Value);
         }
 
         NormalizeTopButtons(root);
@@ -371,52 +425,14 @@ public class UITabManager : MonoBehaviour
         }
     }
 
-    private static void ArrangeTopButtonsInSingleRow(Transform root)
+    private void ArrangeTopButtonsInSingleRow(Transform root)
     {
-        if (root is RectTransform rootRect)
-        {
-            rootRect.sizeDelta = new Vector2(rootRect.sizeDelta.x, BottomTabBarHeight);
-            rootRect.anchoredPosition = new Vector2(rootRect.anchoredPosition.x, BottomTabBarHeight * 0.5f);
-        }
-
-        MoveRowButtonsBackToRoot(root, "TopTabPrimaryRow");
-        MoveRowButtonsBackToRoot(root, "TopTabSecondaryRow");
-
-        VerticalLayoutGroup oldVertical = root.GetComponent<VerticalLayoutGroup>();
-        if (oldVertical != null)
-        {
-            oldVertical.enabled = false;
-        }
-
-        HorizontalLayoutGroup horizontal = root.GetComponent<HorizontalLayoutGroup>();
-        if (horizontal == null)
-        {
-            horizontal = root.gameObject.AddComponent<HorizontalLayoutGroup>();
-        }
-
-        horizontal.enabled = true;
-        horizontal.padding = new RectOffset(0, 0, 0, 0);
-        horizontal.spacing = 1f;
-        horizontal.childAlignment = TextAnchor.MiddleCenter;
-        horizontal.childControlWidth = true;
-        horizontal.childControlHeight = true;
-        horizontal.childForceExpandWidth = true;
-        horizontal.childForceExpandHeight = true;
-
+        RequireTopButtonFactory().EnsureSingleRowLayout(
+            root,
+            BottomTabBarHeight,
+            "TopTabPrimaryRow",
+            "TopTabSecondaryRow");
         OrderTopButtons(root);
-    }
-
-    private static void MoveRowButtonsBackToRoot(Transform root, string rowName)
-    {
-        Transform row = root.Find(rowName);
-        if (row == null) return;
-
-        while (row.childCount > 0)
-        {
-            row.GetChild(0).SetParent(root, false);
-        }
-
-        row.gameObject.SetActive(false);
     }
 
     private static void OrderTopButtons(Transform root)
@@ -449,7 +465,7 @@ public class UITabManager : MonoBehaviour
         return null;
     }
 
-    private static void NormalizeTopButtons(Transform root)
+    private void NormalizeTopButtons(Transform root)
     {
         Button[] buttons = root.GetComponentsInChildren<Button>(true)
             .Where((button) => button.transform.parent == root)
@@ -481,21 +497,21 @@ public class UITabManager : MonoBehaviour
         }
     }
 
-    private static void SetButtonLabel(Button button, string title)
+    private void SetButtonLabel(Button button, string title)
     {
         TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
         if (label == null) return;
 
-        TMPKoreanFont.Apply(label);
+        RequireTmpKoreanFontService().Apply(label);
         label.text = title;
     }
 
-    private static void PolishTopButton(Button button)
+    private void PolishTopButton(Button button)
     {
         TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
         if (label == null) return;
 
-        TMPKoreanFont.Apply(label);
+        RequireTmpKoreanFontService().Apply(label);
         label.enableAutoSizing = true;
         label.fontSizeMin = 10f;
         label.fontSizeMax = 24f;
@@ -505,67 +521,16 @@ public class UITabManager : MonoBehaviour
 
     private void EnsureGeneratedTab(int id, string title)
     {
-        if (tabList.Any((tab) => tab != null && tab.id == id))
+        if (GetTopLevelTabs().Any((tab) => tab.id == id))
         {
             return;
         }
 
         string panelTitle = GetPanelTitle(id, title);
-        GameObject panelObject = new GameObject($"{panelTitle}Tab", typeof(RectTransform), typeof(Image));
-        panelObject.transform.SetParent(transform, false);
-
-        RectTransform rect = panelObject.GetComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0f, 0f);
-        rect.anchorMax = new Vector2(1f, 0f);
-        rect.pivot = new Vector2(0.5f, 0f);
-        rect.anchoredPosition = new Vector2(0f, GeneratedPanelBottomOffset);
-        rect.sizeDelta = new Vector2(0f, GeneratedPanelHeight);
-
-        Image background = panelObject.GetComponent<Image>();
-        background.color = new Color(0.06f, 0.07f, 0.08f, 0.92f);
-
-        GameObject titleObject = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI));
-        titleObject.transform.SetParent(panelObject.transform, false);
-        RectTransform titleRect = titleObject.GetComponent<RectTransform>();
-        titleRect.anchorMin = new Vector2(0f, 1f);
-        titleRect.anchorMax = new Vector2(1f, 1f);
-        titleRect.pivot = new Vector2(0.5f, 1f);
-        titleRect.anchoredPosition = new Vector2(0f, -20f);
-        titleRect.sizeDelta = new Vector2(-48f, 42f);
-
-        TMP_Text titleText = titleObject.GetComponent<TMP_Text>();
-        TMPKoreanFont.Apply(titleText);
-        titleText.text = panelTitle;
-        titleText.fontSize = 30f;
-        titleText.color = Color.white;
-        titleText.alignment = TextAlignmentOptions.Left;
-
-        GameObject bodyObject = new GameObject("Body", typeof(RectTransform), typeof(TextMeshProUGUI));
-        bodyObject.transform.SetParent(panelObject.transform, false);
-        RectTransform bodyRect = bodyObject.GetComponent<RectTransform>();
-        bodyRect.anchorMin = new Vector2(0f, 0f);
-        bodyRect.anchorMax = new Vector2(1f, 1f);
-        bodyRect.offsetMin = new Vector2(24f, 24f);
-        bodyRect.offsetMax = new Vector2(-24f, -76f);
-
-        TMP_Text bodyText = bodyObject.GetComponent<TMP_Text>();
-        TMPKoreanFont.Apply(bodyText);
-        bodyText.fontSize = 22f;
-        bodyText.color = new Color(0.9f, 0.94f, 0.96f, 1f);
-        bodyText.alignment = TextAlignmentOptions.TopLeft;
-        bodyText.textWrappingMode = TextWrappingModes.Normal;
-
-        if (id == 2)
-        {
-            EnsureStaffPriorityPanel(panelObject);
-        }
-
-        UITab tab = panelObject.AddComponent<UITab>();
-        tab.id = id;
-        panelObject.SetActive(false);
-
-        tabList.Add(tab);
-        generatedTabBodies[id] = bodyText;
+        GeneratedUITabPanel generatedPanel = RequireGeneratedPanelFactory()
+            .Create(transform, id, panelTitle);
+        tabList.Add(generatedPanel.Tab);
+        generatedTabBodies[id] = generatedPanel.BodyText;
     }
 
     private void RefreshGeneratedTab(int id)
@@ -581,286 +546,92 @@ public class UITabManager : MonoBehaviour
             return;
         }
 
-        body.text = id switch
-        {
-            1 => BuildBuildingManagementText(),
-            2 => BuildStaffManagementText(),
-            3 => BuildShopText(),
-            4 => BuildWarehouseText(),
-            5 => BuildOperationText(),
-            6 => BuildInvasionDefenseText(),
-            7 => BuildOffenseText(),
-            8 => BuildResearchCraftingText(),
-            9 => BuildCodexRecordText(),
-            _ => string.Empty
-        };
+        body.text = BuildTabContent(id);
     }
 
-    private static string BuildBuildingManagementText()
+    private string BuildTabContent(int id)
     {
-        BuildableObject[] buildings = UnityEngine.Object.FindObjectsByType<BuildableObject>(
-            FindObjectsInactive.Exclude,
-            FindObjectsSortMode.None);
-
-        int damaged = buildings.Count((building) => building != null && building.IsDamaged);
-        int visitorFacilities = buildings.Count((building) => building != null && building.Facility != null && building.Facility.IsVisitorFacility);
-        int workableFacilities = buildings.Count((building) => building != null && building.Facility != null && building.Facility.supportedWorkTypes != FacilityWorkType.None);
-
-        return string.Join("\n", new[]
+        if (contentTextProvider == null)
         {
-            $"총 건물: {buildings.Length}",
-            $"방문 가능 시설: {visitorFacilities}",
-            $"직원 작업 가능 시설: {workableFacilities}",
-            $"수리 필요: {damaged}",
-            string.Empty,
-            "다음 UI 연결 후보",
-            "- 선택 건물 상세: 레벨, 내구/손상, 수용 인원, 담당 직원",
-            "- 일괄 수리/업그레이드/철거",
-            "- 보충 필요 시설과 연구 가능 시설 필터"
-        });
-    }
-
-    private static string BuildStaffManagementText()
-    {
-        Character[] characters = UnityEngine.Object.FindObjectsByType<Character>(
-            FindObjectsInactive.Exclude,
-            FindObjectsSortMode.None);
-
-        int staffCount = 0;
-        int offDutyCount = 0;
-        int workingCount = 0;
-        int expeditionCount = 0;
-
-        foreach (Character character in characters)
-        {
-            if (character == null || !character.TryGetAbility(out AbilityWork work)) continue;
-
-            staffCount++;
-            if (work.IsOffDuty) offDutyCount++;
-            if (work.isWorking) workingCount++;
-            if (character.IsOnExpedition) expeditionCount++;
+            throw new InvalidOperationException(
+                $"{nameof(UITabManager)} requires VContainer injection of {nameof(IUITabContentTextProvider)}.");
         }
 
-        return string.Join("\n", new[]
-        {
-            $"직원 수: {staffCount}",
-            $"근무 중: {workingCount}",
-            $"비번/휴식 보호: {offDutyCount}",
-            $"원정 중: {expeditionCount}",
-            string.Empty,
-            "다음 UI 연결 후보",
-            "- 직원별 업무 우선순위",
-            "- 불만도/피로도/기분 위험 목록",
-            "- 특정 시설 우선 배치와 침입자 제압 명령"
-        });
+        return contentTextProvider.Build(id);
     }
 
-    private static string BuildShopText()
+    private static bool IsFeatureSurfaceTab(int id)
     {
-        Shop[] shops = UnityEngine.Object.FindObjectsByType<Shop>(
-            FindObjectsInactive.Exclude,
-            FindObjectsSortMode.None);
-
-        int stocked = shops.Count((shop) => shop != null && shop.HasAvailableStock);
-        int empty = shops.Length - stocked;
-
-        return string.Join("\n", new[]
-        {
-            $"상점 수: {shops.Length}",
-            $"판매 가능: {stocked}",
-            $"품절/보충 필요: {empty}",
-            string.Empty,
-            "다음 UI 연결 후보",
-            "- 오늘의 시설 상점 상품",
-            "- 판매 재고/가격/품절 위험",
-            "- 창고에서 수동 보충 요청",
-            "- 구매한 설계도와 연구 잠금 상태"
-        });
+        return id == 1
+            || id == 3
+            || id == 4
+            || id == 5
+            || id == 6
+            || id == 7
+            || id == 8
+            || id == 9;
     }
 
-    private static string BuildWarehouseText()
+    private IUiPopupService ResolvePopupService()
     {
-        IWarehouseFacility[] warehouses = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
-                FindObjectsInactive.Exclude,
-                FindObjectsSortMode.None)
-            .OfType<IWarehouseFacility>()
-            .Where((warehouse) => warehouse.HasWarehouseInventory && warehouse.Inventory != null)
-            .ToArray();
+        if (popupService == null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(UITabManager)} requires VContainer injection of {nameof(IUiPopupService)}.");
+        }
 
-        int totalStock = warehouses.Sum((warehouse) => warehouse.Inventory.TotalStock);
-        int totalCapacity = warehouses.Any((warehouse) => warehouse.Inventory.HasCapacityLimit)
-            ? warehouses.Sum((warehouse) => warehouse.Inventory.HasCapacityLimit ? warehouse.Inventory.MaxCapacity : 0)
-            : 0;
-
-        StringBuilder builder = new StringBuilder();
-        builder.AppendLine($"창고 시설: {warehouses.Length}");
-        builder.AppendLine(totalCapacity > 0 ? $"총 재고: {totalStock} / {totalCapacity}" : $"총 재고: {totalStock}");
-        builder.AppendLine($"식재료: {warehouses.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.Food))}");
-        builder.AppendLine($"잡화: {warehouses.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.General))}");
-        builder.AppendLine($"무기: {warehouses.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.Weapon))}");
-        builder.AppendLine($"마력: {warehouses.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.Mana))}");
-        builder.AppendLine();
-        builder.AppendLine("창고 탭에 들어가야 할 핵심");
-        builder.AppendLine("- 카테고리별 보유량과 남은 용량");
-        builder.AppendLine("- 상점 보충 예약/수동 보충");
-        builder.AppendLine("- 원정 보상 입고와 시설 생산 입고 로그");
-        builder.AppendLine("- 품절 위험 품목과 하루 예상 소모량");
-        builder.AppendLine("- 창고별 우선순위: 식재료/무기/마력 전용화");
-        return builder.ToString();
+        return popupService;
     }
 
-    private static string BuildOperationText()
+    private ITmpKoreanFontService RequireTmpKoreanFontService()
     {
-        UIManager uiManager = UIManager.TryGetInstance();
-        GameData gameData = uiManager != null ? uiManager.gameData : null;
-        OperatingDaySettlementRuntime settlement = Object.FindFirstObjectByType<OperatingDaySettlementRuntime>();
-        EventAlertRuntime alerts = Object.FindFirstObjectByType<EventAlertRuntime>();
-        RunVariableRuntime runVariables = RunVariableRuntime.Instance;
-
-        StringBuilder builder = new StringBuilder();
-        if (gameData != null)
-        {
-            builder.AppendLine($"날짜: Day {gameData.day.Value} / {gameData.hour.Value}:00");
-            builder.AppendLine($"보유 자금: {gameData.holdingMoney.Value}");
-            builder.AppendLine($"게임 속도: x{gameData.gameSpeed.Value}");
-        }
-        else
-        {
-            builder.AppendLine("날짜/자금 데이터: 연결 필요");
-        }
-
-        builder.AppendLine($"이벤트 알림: {(alerts != null ? alerts.EventLog.Count : 0)}");
-        builder.AppendLine($"최근 정산 보고서: {(settlement != null && settlement.LatestReport != null ? $"Day {settlement.LatestReport.day}" : "없음")}");
-        builder.AppendLine($"런 변수: {(runVariables != null ? "활성" : "없음")}");
-        builder.AppendLine();
-        builder.AppendLine("운영 탭에 들어갈 핵심");
-        builder.AppendLine("- 일일 정산, 매출, 유지비, 순이익");
-        builder.AppendLine("- 방문자 수, 평균 만족도, 단골 변화");
-        builder.AppendLine("- 당일 사건/알림 로그와 선택지");
-        builder.AppendLine("- 다음 운영일 진행 버튼");
-        return builder.ToString();
+        return tmpKoreanFontService
+            ?? throw new InvalidOperationException(
+                $"{nameof(UITabManager)} requires VContainer injection of {nameof(ITmpKoreanFontService)}.");
     }
 
-    private static string BuildInvasionDefenseText()
+    private IUITabGeneratedPanelFactory RequireGeneratedPanelFactory()
     {
-        InvasionThreatRuntime threat = InvasionThreatRuntime.Instance;
-        InvasionDirectorRuntime director = Object.FindFirstObjectByType<InvasionDirectorRuntime>();
-        InvasionCombatReportRuntime reportRuntime = Object.FindFirstObjectByType<InvasionCombatReportRuntime>();
-        BuildableObject[] buildings = Object.FindObjectsByType<BuildableObject>(
-            FindObjectsInactive.Exclude,
-            FindObjectsSortMode.None);
-
-        int defenseFacilities = buildings.Count((building) => building != null && building.BuildingData != null && building.BuildingData.Defense.IsDefenseFacility);
-        int damagedFacilities = buildings.Count((building) => building != null && building.IsDamaged);
-        int activeIntruders = director != null ? director.ActiveIntruders.Count : 0;
-
-        StringBuilder builder = new StringBuilder();
-        if (threat != null)
-        {
-            builder.AppendLine($"위협도: {threat.CurrentThreat:0.#}");
-            builder.AppendLine($"단계: {threat.CurrentStage}");
-            builder.AppendLine($"안전 시간: {threat.SafetyRemaining:0.#}초");
-            builder.AppendLine($"침공 후보 대기: {(threat.IsCandidatePending ? "예" : "아니오")}");
-        }
-        else
-        {
-            builder.AppendLine("위협도 런타임: 없음");
-        }
-
-        builder.AppendLine($"활성 침입자: {activeIntruders}");
-        builder.AppendLine($"방어 시설: {defenseFacilities}");
-        builder.AppendLine($"손상 시설: {damagedFacilities}");
-        builder.AppendLine($"최근 전투 보고서: {(reportRuntime != null && reportRuntime.CurrentReport != null ? "있음" : "없음")}");
-        builder.AppendLine();
-        builder.AppendLine("침공/방어 탭에 들어갈 핵심");
-        builder.AppendLine("- 위협도 게이지와 침공 예고");
-        builder.AppendLine("- 활성 침입자 위치/상태");
-        builder.AppendLine("- 방어 시설 발동 로그와 파손 목록");
-        builder.AppendLine("- 전투 결과 리포트");
-        return builder.ToString();
+        return generatedPanelFactory
+            ?? throw new InvalidOperationException(
+                $"{nameof(UITabManager)} requires VContainer injection of {nameof(IUITabGeneratedPanelFactory)}.");
     }
 
-    private static string BuildOffenseText()
+    private IStaffWorkPriorityPanelFactory RequireStaffWorkPriorityPanelFactory()
     {
-        OffenseWorldMapRuntime worldMap = OffenseWorldMapRuntime.Instance;
-        OffenseExpeditionRuntime expedition = OffenseExpeditionRuntime.Instance;
-        OffenseRewardRuntime rewards = OffenseRewardRuntime.Instance;
-
-        StringBuilder builder = new StringBuilder();
-        if (worldMap != null)
-        {
-            builder.AppendLine($"정찰 레벨: {worldMap.State.ReconLevel}");
-            builder.AppendLine($"정찰 범위: {worldMap.CurrentScanRange:0.#}");
-            builder.AppendLine($"발견 목표: {worldMap.VisibleTargets.Count}");
-            builder.AppendLine($"선택 목표: {(string.IsNullOrWhiteSpace(worldMap.State.SelectedTargetId) ? "없음" : worldMap.State.SelectedTargetId)}");
-        }
-        else
-        {
-            builder.AppendLine("월드맵 런타임: 없음");
-        }
-
-        builder.AppendLine($"진행 중 원정: {(expedition != null ? expedition.ActiveExpeditions.Count : 0)}");
-        builder.AppendLine($"누적 원정 자금: {(rewards != null ? rewards.State.MoneyEarned : 0)}");
-        builder.AppendLine($"포로/후보: {(rewards != null ? $"{rewards.State.PrisonerCount}/{rewards.State.RecruitCandidateCount}" : "0/0")}");
-        builder.AppendLine();
-        builder.AppendLine("원정 탭에 들어갈 핵심");
-        builder.AppendLine("- 월드맵 목표 선택");
-        builder.AppendLine("- 파티 편성, 요구 전투력, 성공 확률");
-        builder.AppendLine("- 진행 중 원정 타이머");
-        builder.AppendLine("- 보상 수령과 창고 입고 내역");
-        return builder.ToString();
+        return staffWorkPriorityPanelFactory
+            ?? throw new InvalidOperationException(
+                $"{nameof(UITabManager)} requires VContainer injection of {nameof(IStaffWorkPriorityPanelFactory)}.");
     }
 
-    private static string BuildResearchCraftingText()
+    private IP0FeatureSurfacePanelFactory RequireP0FeatureSurfacePanelFactory()
     {
-        BlueprintResearchRuntime research = BlueprintResearchRuntime.Instance;
-        FacilitySynthesisRuntime synthesis = FacilitySynthesisRuntime.Instance;
-
-        BlueprintResearchTask activeTask = null;
-        if (research != null)
-        {
-            research.State.TryGetActiveTask(out activeTask);
-        }
-
-        StringBuilder builder = new StringBuilder();
-        builder.AppendLine($"연구 작업 수: {(research != null ? research.State.Tasks.Count : 0)}");
-        builder.AppendLine($"완료 설계도: {(research != null ? research.State.CompletedBlueprintIds.Count : 0)}");
-        builder.AppendLine(activeTask != null
-            ? $"진행 중 연구: {activeTask.Blueprint.DisplayName} {activeTask.ProgressRatio:P0}"
-            : "진행 중 연구: 없음");
-        builder.AppendLine($"선택 합성 재료: {(synthesis != null ? synthesis.SelectedMaterials.Count : 0)}");
-        builder.AppendLine($"보이는 합성식: {(synthesis != null ? synthesis.VisibleRecipes.Count : 0)}");
-        builder.AppendLine();
-        builder.AppendLine("연구/제작 탭에 들어갈 핵심");
-        builder.AppendLine("- 설계도 연구 큐와 진행률");
-        builder.AppendLine("- 연구 완료 보상/해금 시설");
-        builder.AppendLine("- 시설 합성 재료 선택");
-        builder.AppendLine("- 결과 시설 미리보기와 합성 확정");
-        return builder.ToString();
+        return p0FeatureSurfacePanelFactory
+            ?? throw new InvalidOperationException(
+                $"{nameof(UITabManager)} requires VContainer injection of {nameof(IP0FeatureSurfacePanelFactory)}.");
     }
 
-    private static string BuildCodexRecordText()
+    private IUITabTopButtonFactory RequireTopButtonFactory()
     {
-        CodexRuntime codex = CodexRuntime.Instance;
-        OperatingDaySettlementRuntime settlement = Object.FindFirstObjectByType<OperatingDaySettlementRuntime>();
-        EventAlertRuntime alerts = Object.FindFirstObjectByType<EventAlertRuntime>();
+        return topButtonFactory
+            ?? throw new InvalidOperationException(
+                $"{nameof(UITabManager)} requires VContainer injection of {nameof(IUITabTopButtonFactory)}.");
+    }
 
-        int monsterEntries = codex != null ? codex.GetEntries(CodexEntryCategory.Monster).Count : 0;
-        int invasionEntries = codex != null ? codex.GetEntries(CodexEntryCategory.Invasion).Count : 0;
-        int facilityEntries = codex != null ? codex.GetEntries(CodexEntryCategory.Facility).Count : 0;
+    private DungeonUiThemeRuntime ResolveThemeRuntime()
+    {
+        if (themeRuntime != null)
+        {
+            return themeRuntime;
+        }
 
-        StringBuilder builder = new StringBuilder();
-        builder.AppendLine($"몬스터 도감: {monsterEntries}");
-        builder.AppendLine($"침공 도감: {invasionEntries}");
-        builder.AppendLine($"시설 도감: {facilityEntries}");
-        builder.AppendLine($"이벤트 기록: {(alerts != null ? alerts.EventLog.Count : 0)}");
-        builder.AppendLine($"최근 운영 보고서: {(settlement != null && settlement.LatestReport != null ? $"Day {settlement.LatestReport.day}" : "없음")}");
-        builder.AppendLine();
-        builder.AppendLine("도감/기록 탭에 들어갈 핵심");
-        builder.AppendLine("- 몬스터/침입자/시설 도감");
-        builder.AppendLine("- 발견 조건과 새 정보 표시");
-        builder.AppendLine("- 운영일 보고서 히스토리");
-        builder.AppendLine("- 침공 전투 리포트 아카이브");
-        return builder.ToString();
+        Canvas canvas = GetComponentInParent<Canvas>();
+        if (canvas == null)
+        {
+            return null;
+        }
+
+        themeRuntime = DungeonUiThemeRuntime.Ensure(canvas, tmpKoreanFontService);
+        return themeRuntime;
     }
 }

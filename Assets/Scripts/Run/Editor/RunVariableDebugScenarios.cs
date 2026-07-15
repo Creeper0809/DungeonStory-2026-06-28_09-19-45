@@ -126,13 +126,25 @@ public static class RunVariableDebugScenarios
         BuildingSO generalBuilding = CreateBuilding(8401, "일반 시설", false);
         FacilityBlueprintSO blueprint = CreateBlueprint(8402, "가격 테스트 설계도", 200);
 
-        int baseFoodCost = StockSupplyService.CreateDailyDeliveryOffers(1)
+        int baseFoodCost = StockSupplyService.CreateDailyDeliveryOffers(1, scenario.Runtime.GetStockCostMultiplier)
             .First((offer) => offer.category == StockCategory.Food)
             .cost;
-        int baseBuildingCost = FacilityShopService.CreateDailyOffers(1, new[] { generalBuilding }, Array.Empty<FacilityBlueprintSO>())
+        int baseBuildingCost = FacilityShopService.CreateDailyOffers(
+                1,
+                new[] { generalBuilding },
+                Array.Empty<FacilityBlueprintSO>(),
+                0,
+                scenario.Runtime.GetFacilityShopCostMultiplier,
+                scenario.Runtime.GetBlueprintCostMultiplier)
             .First((offer) => offer.Type == FacilityShopOfferType.Building)
             .Cost;
-        int baseBlueprintCost = FacilityShopService.CreateDailyOffers(1, Array.Empty<BuildingSO>(), new[] { blueprint })
+        int baseBlueprintCost = FacilityShopService.CreateDailyOffers(
+                1,
+                Array.Empty<BuildingSO>(),
+                new[] { blueprint },
+                0,
+                scenario.Runtime.GetFacilityShopCostMultiplier,
+                scenario.Runtime.GetBlueprintCostMultiplier)
             .First((offer) => offer.Type == FacilityShopOfferType.Blueprint)
             .Cost;
 
@@ -140,13 +152,25 @@ public static class RunVariableDebugScenarios
         scenario.Runtime.ActivateOperationVariable(RunVariableId.VisitingMerchant, 1, false);
         scenario.Runtime.ActivateOperationVariable(RunVariableId.BlueprintRumor, 1, false);
 
-        int eventFoodCost = StockSupplyService.CreateDailyDeliveryOffers(1)
+        int eventFoodCost = StockSupplyService.CreateDailyDeliveryOffers(1, scenario.Runtime.GetStockCostMultiplier)
             .First((offer) => offer.category == StockCategory.Food)
             .cost;
-        int eventBuildingCost = FacilityShopService.CreateDailyOffers(1, new[] { generalBuilding }, Array.Empty<FacilityBlueprintSO>())
+        int eventBuildingCost = FacilityShopService.CreateDailyOffers(
+                1,
+                new[] { generalBuilding },
+                Array.Empty<FacilityBlueprintSO>(),
+                0,
+                scenario.Runtime.GetFacilityShopCostMultiplier,
+                scenario.Runtime.GetBlueprintCostMultiplier)
             .First((offer) => offer.Type == FacilityShopOfferType.Building)
             .Cost;
-        int eventBlueprintCost = FacilityShopService.CreateDailyOffers(1, Array.Empty<BuildingSO>(), new[] { blueprint })
+        int eventBlueprintCost = FacilityShopService.CreateDailyOffers(
+                1,
+                Array.Empty<BuildingSO>(),
+                new[] { blueprint },
+                0,
+                scenario.Runtime.GetFacilityShopCostMultiplier,
+                scenario.Runtime.GetBlueprintCostMultiplier)
             .First((offer) => offer.Type == FacilityShopOfferType.Blueprint)
             .Cost;
 

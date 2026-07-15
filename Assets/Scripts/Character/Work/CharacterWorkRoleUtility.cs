@@ -1,21 +1,22 @@
 public static class CharacterWorkRoleUtility
 {
-    public static bool TryGetWork(Character character, out AbilityWork work)
+    public static bool TryGetWork(CharacterActor actor, out AbilityWork work)
     {
         work = null;
-        return character != null
-            && character.TryGetAbility(out work)
+        return actor != null
+            && actor.TryGetAbility(out work)
             && work != null;
     }
 
-    public static bool IsWorker(Character character)
+    public static bool IsWorker(CharacterActor actor)
     {
-        return TryGetWork(character, out _);
+        return TryGetWork(actor, out _);
     }
 
-    public static bool IsOnDutyWorker(Character character)
+    public static bool IsOnDutyWorker(CharacterActor actor)
     {
-        return TryGetWork(character, out AbilityWork work)
+        return TryGetWork(actor, out AbilityWork work)
             && !work.IsOffDuty;
     }
+
 }

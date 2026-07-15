@@ -13,26 +13,6 @@ public enum GridMode
 
 public class GridSystemManager : MonoBehaviour
 {
-    private static GridSystemManager instance;
-
-    public static GridSystemManager Instance
-    {
-        get
-        {
-            if (instance == null)
-            {
-                instance = FindFirstObjectByType<GridSystemManager>();
-            }
-
-            if (instance != null)
-            {
-                instance.EnsureGridInitialized();
-            }
-
-            return instance;
-        }
-    }
-
     public Grid grid { get; private set; }
     public GridMode Mode { get; private set; } = GridMode.None;
 
@@ -56,22 +36,11 @@ public class GridSystemManager : MonoBehaviour
 
     protected virtual void Awake()
     {
-        if (instance != null && instance != this)
-        {
-            Debug.LogWarning($"Multiple {nameof(GridSystemManager)} instances found. Using the newest instance.");
-        }
-
-        instance = this;
         EnsureGridInitialized();
     }
 
     protected virtual void OnEnable()
     {
-        if (instance == null)
-        {
-            instance = this;
-        }
-
         EnsureGridInitialized();
     }
 
@@ -215,13 +184,5 @@ public class GridSystemManager : MonoBehaviour
         totalSelectedPos = totalSelectedPos.Where(gridPos => grid.IsValidGridPos(gridPos)).ToList();
         xCount = totalSelectedPos.GroupBy(gridPos => gridPos.x).Count();
         yCount = totalSelectedPos.GroupBy(gridPos => gridPos.y).Count();
-    }
-
-    protected virtual void OnDestroy()
-    {
-        if (instance == this)
-        {
-            instance = null;
-        }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -81,23 +81,23 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         try
         {
             AIAction missingSet = new AIAction();
-            bool nullActionSetScoresZero = NearlyEqual(missingSet.CalculateScore(null), 0f);
+            bool nullActionSetScoresZero = NearlyEqual(missingSet.CalculateScore((CharacterActor)null), 0f);
 
             SetConsiderations(actionSet);
-            bool emptyConsiderationsScoreOne = NearlyEqual(new AIAction { actionset = actionSet }.CalculateScore(null), 1f);
+            bool emptyConsiderationsScoreOne = NearlyEqual(new AIAction { actionset = actionSet }.CalculateScore((CharacterActor)null), 1f);
 
             SetConsiderations(actionSet, one, null);
             one.FixedScore = 1f;
-            bool nullConsiderationScoresZero = NearlyEqual(new AIAction { actionset = actionSet }.CalculateScore(null), 0f);
+            bool nullConsiderationScoresZero = NearlyEqual(new AIAction { actionset = actionSet }.CalculateScore((CharacterActor)null), 0f);
 
             zero.FixedScore = 0f;
             SetConsiderations(actionSet, one, zero);
-            bool zeroConsiderationScoresZero = NearlyEqual(new AIAction { actionset = actionSet }.CalculateScore(null), 0f);
+            bool zeroConsiderationScoresZero = NearlyEqual(new AIAction { actionset = actionSet }.CalculateScore((CharacterActor)null), 0f);
 
             overMax.FixedScore = 5f;
             half.FixedScore = 0.5f;
             SetConsiderations(actionSet, overMax, half);
-            float clampedScore = new AIAction { actionset = actionSet }.CalculateScore(null);
+            float clampedScore = new AIAction { actionset = actionSet }.CalculateScore((CharacterActor)null);
             bool overMaxIsClamped = NearlyEqual(clampedScore, ExpectedWeightedScore(1f, 0.5f));
 
             AIAction propertyClamp = new AIAction();
@@ -127,7 +127,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
     private static bool VerifyBrainSelectsNextActionAfterDestinationFailure()
     {
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
-        Character character = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor character = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         TestActionSet failingHighScore = CreateAction("Failing high score", 1f, requiresDestination: true, resolvesDestination: false);
         TestActionSet nextAction = CreateAction("Next action", 0.25f, requiresDestination: false, resolvesDestination: true);
 
@@ -155,7 +155,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
     private static bool VerifyBrainTieKeepsActionOrder()
     {
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
-        Character character = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor character = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         TestActionSet first = CreateAction("Tie first", 0.5f, requiresDestination: false, resolvesDestination: true);
         TestActionSet second = CreateAction("Tie second", 0.5f, requiresDestination: false, resolvesDestination: true);
 
@@ -184,7 +184,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
         BuildableObject damaged = world.Place("P1_RestRoom", new Vector2Int(2, 0));
         damaged.SetDamaged(true);
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AbilityWork work = owner.GetAbility<AbilityWork>();
         SetOnly(work);
 
@@ -200,7 +200,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
         BuildableObject damaged = world.Place("P1_RestRoom", new Vector2Int(2, 0));
         damaged.SetDamaged(true);
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AbilityWork work = owner.GetAbility<AbilityWork>();
         SetOnly(work);
 
@@ -217,7 +217,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
     {
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
         BuildableObject restRoom = world.Place("P1_RestRoom", new Vector2Int(2, 0));
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AbilityWork work = owner.GetAbility<AbilityWork>();
         SetOnly(work, FacilityWorkType.Operate, FacilityWorkType.Repair);
 
@@ -236,7 +236,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         priorityTarget.SetDamaged(true);
         alternateTarget.SetDamaged(true);
 
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AbilityWork work = owner.GetAbility<AbilityWork>();
         SetOnly(work, FacilityWorkType.Repair);
 
@@ -260,7 +260,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         near.SetDamaged(true);
         far.SetDamaged(true);
 
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AbilityWork work = owner.GetAbility<AbilityWork>();
         SetOnly(work, FacilityWorkType.Repair);
 
@@ -279,7 +279,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         damagedRepair.SetDamaged(true);
         ClearShopStock(restockShop);
 
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AbilityWork work = owner.GetAbility<AbilityWork>();
         SetAllOff(work);
         work.SetWorkPriority(FacilityWorkType.Restock, WorkPriorityLevel.Priority1);
@@ -320,11 +320,11 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         AIWait waitAction = ScriptableObject.CreateInstance<AIWait>();
         try
         {
-            Character character = obj.AddComponent<Character>();
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             data.aiPersonality.patience = 0.5f;
             character.data = data;
 
-            float score = new AIAction { actionset = waitAction }.CalculateScore(character);
+            float score = new AIAction { actionset = waitAction }.CalculateScore(CharacterActor.From(character));
             return NearlyEqual(score, 0.5f);
         }
         finally
@@ -339,14 +339,14 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
     {
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
         BuildableObject shop = world.Place("P1_LowFoodShop", new Vector2Int(2, 0));
-        Character first = world.CreateOwner("Owner_Slime", Vector2Int.zero);
-        Character second = world.CreateOwner("Owner_Slime", new Vector2Int(5, 0));
+        CharacterActor first = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor second = world.CreateOwner("Owner_Slime", new Vector2Int(5, 0));
         if (shop is not IWorkableFacility workable)
         {
             return false;
         }
 
-        IEnumerator allocation = workable.AllocateWorker(first);
+        IEnumerator allocation = workable.AllocateWorker(CharacterActor.From(first));
         allocation?.MoveNext();
 
         AbilityWork secondWork = second.GetAbility<AbilityWork>();
@@ -364,7 +364,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
     {
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
         BuildableObject shop = world.Place("P1_LowFoodShop", new Vector2Int(2, 0));
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AIWork workAction = ScriptableObject.CreateInstance<AIWork>();
         AIWait waitAction = ScriptableObject.CreateInstance<AIWait>();
         try
@@ -392,7 +392,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
     private static bool VerifyNoWorkTargetUsesExplicitWait()
     {
         using PriorityScenarioWorld world = new PriorityScenarioWorld();
-        Character owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
+        CharacterActor owner = world.CreateOwner("Owner_Slime", Vector2Int.zero);
         AIWork workAction = ScriptableObject.CreateInstance<AIWork>();
         AIWait waitAction = ScriptableObject.CreateInstance<AIWait>();
         try
@@ -532,7 +532,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
     {
         public float FixedScore { get; set; }
 
-        public override float ScoreConsideration(Character character)
+        public override float ScoreConsideration(CharacterActor actor)
         {
             return FixedScore;
         }
@@ -546,12 +546,12 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
 
         public override bool RequiresDestination => RequireDestination;
 
-        public override void Execute(Character character)
+        public override void Execute(CharacterActor actor)
         {
         }
 
         public override bool TryResolveDestination(
-            Character character,
+            CharacterActor actor,
             GridPathSearchResult searchResult,
             out BuildableObject destination,
             out string failureReason)
@@ -589,7 +589,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         private static readonly FieldInfo GridField =
             typeof(GridSystemManager).GetField("<grid>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo CharacterAwakeMethod =
-            typeof(Character).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(CharacterActor).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo CharacterAiSchedulerInstanceField =
             typeof(CharacterAiScheduler).GetField("instance", BindingFlags.Static | BindingFlags.NonPublic);
 
@@ -638,6 +638,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
             }
 
             objects.Add(building.gameObject);
+            CharacterAiEditorTestDependencies.Inject(building);
             building.SetGrid(Grid);
             building.Initialization(buildingData, position);
             bool registered = Grid.RegisterOccupant(
@@ -650,10 +651,15 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
                 throw new InvalidOperationException($"{assetName} could not be registered.");
             }
 
+            if (building is Shop shop)
+            {
+                CharacterAiEditorTestDependencies.InjectShop(shop);
+            }
+
             return building;
         }
 
-        public Character CreateOwner(string ownerAssetName, Vector2Int position)
+        public CharacterActor CreateOwner(string ownerAssetName, Vector2Int position)
         {
             CharacterSO data = AssetDatabase.LoadAssetAtPath<CharacterSO>(
                 $"Assets/Resources/SO/Character/Owners/{ownerAssetName}.asset");
@@ -666,17 +672,18 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
             objects.Add(obj);
             obj.transform.position = Grid.GetWorldPos(position);
             obj.AddComponent<SpriteRenderer>();
-            obj.AddComponent<Character>();
+            obj.AddComponent<CharacterActor>();
             obj.AddComponent<AbilityMove>();
             obj.AddComponent<AbilityShopping>();
             obj.AddComponent<AbilityWork>();
             obj.AddComponent<AIBrain>();
+            CharacterAiEditorTestDependencies.Inject(obj);
 
-            Character character = obj.GetComponent<Character>();
+            CharacterActor character = obj.GetComponent<CharacterActor>();
             CharacterAwakeMethod?.Invoke(character, null);
             character.RefreshAbilityCache();
             character.Initialization(data);
-            character.SetLifecycleState(Character.LifecycleState.Active);
+            character.SetLifecycleState(CharacterLifecycleState.Active);
             return character;
         }
 

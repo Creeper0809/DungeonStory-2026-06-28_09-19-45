@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using VContainer;
 
 [Serializable]
 public class FacilitySynthesisRecipeSnapshot
@@ -84,15 +85,10 @@ public struct FacilitySynthesisSelectionChangedEvent
 
 public static class FacilitySynthesisService
 {
-    public static IReadOnlyList<FacilitySynthesisRecipeSO> LoadAllRecipes()
-    {
-        return Resources.LoadAll<FacilitySynthesisRecipeSO>("SO/Synthesis")
-            .Where((recipe) => recipe != null && recipe.HasValidData)
-            .OrderBy((recipe) => recipe.id)
-            .ToList();
-    }
-
-    public static bool IsRecipeVisible(FacilitySynthesisRecipeSO recipe, BlueprintResearchState researchState)
+    public static bool IsRecipeVisible(
+        FacilitySynthesisRecipeSO recipe,
+        BlueprintResearchState researchState,
+        IMetaProgressionRuntimeReader metaProgressionReader)
     {
         if (recipe == null || !recipe.HasValidData)
         {
@@ -104,9 +100,9 @@ public static class FacilitySynthesisService
             return true;
         }
 
-        if (MetaProgressionRuntime.Instance != null
-            && (MetaProgressionRuntime.Instance.IsRecipePreserved(recipe.requiredResearchRecipeId)
-                || MetaProgressionRuntime.Instance.IsRecipePreserved(recipe.recipeId)))
+        if (metaProgressionReader != null
+            && (metaProgressionReader.IsRecipePreserved(recipe.requiredResearchRecipeId)
+                || metaProgressionReader.IsRecipePreserved(recipe.recipeId)))
         {
             return true;
         }
@@ -116,16 +112,10 @@ public static class FacilitySynthesisService
             && researchState.UnlockedRecipeIds.Contains(recipe.requiredResearchRecipeId);
     }
 
-    public static IReadOnlyList<FacilitySynthesisRecipeSO> GetVisibleRecipes(BlueprintResearchState researchState)
-    {
-        return LoadAllRecipes()
-            .Where((recipe) => IsRecipeVisible(recipe, researchState))
-            .ToList();
-    }
-
     public static FacilitySynthesisRecipeSnapshot ToSnapshot(
         FacilitySynthesisRecipeSO recipe,
-        BlueprintResearchState researchState)
+        BlueprintResearchState researchState,
+        IMetaProgressionRuntimeReader metaProgressionReader)
     {
         if (recipe == null)
         {
@@ -143,7 +133,7 @@ public static class FacilitySynthesisService
                 .ToArray()
                 ?? Array.Empty<string>(),
             special = recipe.IsSpecial,
-            visible = IsRecipeVisible(recipe, researchState)
+            visible = IsRecipeVisible(recipe, researchState, metaProgressionReader)
         };
     }
 
@@ -183,22 +173,46 @@ public class FacilitySynthesisRuntime : MonoBehaviour
 {
     private readonly List<BuildableObject> selectedMaterials = new List<BuildableObject>();
     private GridBuildingFactory buildingFactory;
+    private IBlueprintResearchStateService blueprintResearchStateService;
+    private IGridTextureProvider gridTextureProvider;
+    private IObjectResolver objectResolver;
+    private IFacilitySynthesisRecipeQuery recipeQuery;
+    private IGridBuildingObjectFactory gridBuildingObjectFactory;
 
-    public static FacilitySynthesisRuntime Instance => FindFirstObjectByType<FacilitySynthesisRuntime>();
     public IReadOnlyList<BuildableObject> SelectedMaterials => selectedMaterials;
+
+    [Inject]
+    public void ConstructFacilitySynthesisRuntime(
+        IBlueprintResearchStateService blueprintResearchStateService,
+        IGridTextureProvider gridTextureProvider,
+        IObjectResolver objectResolver,
+        IFacilitySynthesisRecipeQuery recipeQuery,
+        IGridBuildingObjectFactory gridBuildingObjectFactory)
+    {
+        this.blueprintResearchStateService = blueprintResearchStateService
+            ?? throw new ArgumentNullException(nameof(blueprintResearchStateService));
+        this.gridTextureProvider = gridTextureProvider
+            ?? throw new ArgumentNullException(nameof(gridTextureProvider));
+        this.objectResolver = objectResolver
+            ?? throw new ArgumentNullException(nameof(objectResolver));
+        this.recipeQuery = recipeQuery
+            ?? throw new ArgumentNullException(nameof(recipeQuery));
+        this.gridBuildingObjectFactory = gridBuildingObjectFactory
+            ?? throw new ArgumentNullException(nameof(gridBuildingObjectFactory));
+        buildingFactory = null;
+    }
 
     public BlueprintResearchState ResearchState
     {
-        get
-        {
-            BlueprintResearchRuntime researchRuntime = BlueprintResearchRuntime.Instance;
-            return researchRuntime != null ? researchRuntime.State : null;
-        }
+        get { return ResolveResearchStateService().GetState(); }
     }
 
-    public IReadOnlyList<FacilitySynthesisRecipeSO> VisibleRecipes => FacilitySynthesisService.GetVisibleRecipes(ResearchState);
+    public IReadOnlyList<FacilitySynthesisRecipeSO> VisibleRecipes => ResolveRecipeQuery().GetVisibleRecipes(ResearchState);
 
-    private GridBuildingFactory BuildingFactory => buildingFactory ??= new GridBuildingFactory(GridTexture.Instance);
+    private GridBuildingFactory BuildingFactory => buildingFactory ??= new GridBuildingFactory(
+        ResolveGridTextureProvider().Texture,
+        InjectCreatedBuilding,
+        ResolveGridBuildingObjectFactory());
 
     public void ToggleMaterialSelection(BuildableObject building)
     {
@@ -240,6 +254,11 @@ public class FacilitySynthesisRuntime : MonoBehaviour
     {
         FacilitySynthesisRecipeSO recipe = VisibleRecipes.FirstOrDefault((candidate) => candidate.recipeId == recipeId);
         return TrySynthesizeSelected(recipe, out result);
+    }
+
+    public FacilitySynthesisRecipeSnapshot ToSnapshot(FacilitySynthesisRecipeSO recipe)
+    {
+        return ResolveRecipeQuery().ToSnapshot(recipe, ResearchState);
     }
 
     public bool TrySynthesize(
@@ -313,7 +332,7 @@ public class FacilitySynthesisRuntime : MonoBehaviour
             return false;
         }
 
-        if (!FacilitySynthesisService.IsRecipeVisible(recipe, ResearchState))
+        if (!ResolveRecipeQuery().IsVisible(recipe, ResearchState))
         {
             errorMessage = "아직 해금되지 않은 조합식입니다";
             return false;
@@ -403,5 +422,45 @@ public class FacilitySynthesisRuntime : MonoBehaviour
             material.BuildingData.Placement.IsMovement);
         BuildingFactory.DeleteVisual(material.BuildingData, material.centerPos);
         material.DestroySelf();
+    }
+
+    private IBlueprintResearchStateService ResolveResearchStateService()
+    {
+        return blueprintResearchStateService
+            ?? throw new InvalidOperationException($"{nameof(FacilitySynthesisRuntime)} requires {nameof(IBlueprintResearchStateService)} injection.");
+    }
+
+    private IGridTextureProvider ResolveGridTextureProvider()
+    {
+        return gridTextureProvider
+            ?? throw new InvalidOperationException($"{nameof(FacilitySynthesisRuntime)} requires {nameof(IGridTextureProvider)} injection.");
+    }
+
+    private void InjectCreatedBuilding(BuildableObject building)
+    {
+        if (building == null)
+        {
+            return;
+        }
+
+        ResolveObjectResolver().Inject(building);
+    }
+
+    private IObjectResolver ResolveObjectResolver()
+    {
+        return objectResolver
+            ?? throw new InvalidOperationException($"{nameof(FacilitySynthesisRuntime)} requires {nameof(IObjectResolver)} injection.");
+    }
+
+    private IGridBuildingObjectFactory ResolveGridBuildingObjectFactory()
+    {
+        return gridBuildingObjectFactory
+            ?? throw new InvalidOperationException($"{nameof(FacilitySynthesisRuntime)} requires {nameof(IGridBuildingObjectFactory)} injection.");
+    }
+
+    private IFacilitySynthesisRecipeQuery ResolveRecipeQuery()
+    {
+        return recipeQuery
+            ?? throw new InvalidOperationException($"{nameof(FacilitySynthesisRuntime)} requires {nameof(IFacilitySynthesisRecipeQuery)} injection.");
     }
 }

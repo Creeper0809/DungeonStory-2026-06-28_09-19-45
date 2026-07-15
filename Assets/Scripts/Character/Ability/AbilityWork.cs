@@ -1,8 +1,21 @@
+using System;
 using System.Collections;
 using UnityEngine;
+using VContainer;
 
 public class AbilityWork : CharacterAbility
 {
+    private static readonly IBlueprintResearchWorkService FallbackBlueprintResearchWorkService =
+        new AbilityWorkNoopBlueprintResearchWorkService();
+    private static readonly IStaffDiscontentRuntimeService FallbackStaffDiscontentRuntimeService =
+        new AbilityWorkNoopStaffDiscontentRuntimeService();
+    private static readonly IFloatingIconFeedbackService FallbackFloatingIconFeedbackService =
+        new AbilityWorkNoopFloatingIconFeedbackService();
+    private static readonly IWorkGridResolver FallbackWorkGridResolver =
+        new AbilityWorkFallbackGridResolver();
+    private static readonly IFacilityCandidateCache FallbackFacilityCandidateCache =
+        new FacilityCandidateCacheStore();
+
     public enum DutyState
     {
         OnDuty,
@@ -35,6 +48,11 @@ public class AbilityWork : CharacterAbility
     private WorkTaskExecutor taskExecutor;
     private WorkDutyController dutyController;
     private WorkCommandHandler commandHandler;
+    private IBlueprintResearchWorkService blueprintResearchWorkService;
+    private IStaffDiscontentRuntimeService staffDiscontentRuntimeService;
+    private IFloatingIconFeedbackService floatingIconFeedbackService;
+    private IWorkGridResolver workGridResolver;
+    private IFacilityCandidateCache facilityCandidateCache;
     private bool isScheduleBound;
     private float routineOperateCooldownUntil;
     private Coroutine activeWorkRoutine;
@@ -42,7 +60,7 @@ public class AbilityWork : CharacterAbility
     private int activeWorkRunId;
 
     public BuildableObject PriorityWorkTarget => CommandHandler.PriorityWorkTarget;
-    public Character PrioritySuppressTarget => CommandHandler.PrioritySuppressTarget;
+    public CharacterActor PrioritySuppressActor => CommandHandler.PrioritySuppressActor;
     public bool HasPrioritySuppressTarget => CommandHandler.HasPrioritySuppressTarget;
     public FacilityWorkType PriorityWorkType => CommandHandler.PriorityWorkType;
     public WorkPriorityProfile WorkPriorities => workPriorities ??= WorkPriorityProfile.CreateDefault();
@@ -52,9 +70,24 @@ public class AbilityWork : CharacterAbility
     public bool IsOffDuty => DutyController.IsOffDuty;
     public WorkTargetCandidate LastRejectedWorkCandidate => TargetSelector.LastRejectedCandidate;
 
-    public Character WorkerCharacter => character;
+    public CharacterActor WorkerActor => actor;
     public AbilityMove WorkerMove => move;
     public Grid CachedGrid => grid;
+    internal IBlueprintResearchWorkService BlueprintResearchWorkService => blueprintResearchWorkService
+        ?? FallbackBlueprintResearchWorkService;
+    internal IStaffDiscontentRuntimeService StaffDiscontentRuntimeService => staffDiscontentRuntimeService
+        ?? GetFallbackStaffDiscontentRuntimeService();
+    internal IFloatingIconFeedbackService FloatingIconFeedbackService => floatingIconFeedbackService
+        ?? FallbackFloatingIconFeedbackService;
+    internal IWorkGridResolver WorkGridResolver => workGridResolver
+        ?? FallbackWorkGridResolver;
+    internal IFacilityCandidateCache FacilityCandidateCacheService => facilityCandidateCache
+        ?? FallbackFacilityCandidateCache;
+
+    private static IStaffDiscontentRuntimeService GetFallbackStaffDiscontentRuntimeService()
+    {
+        return FallbackStaffDiscontentRuntimeService;
+    }
 
     internal float RestProtectionSleepThreshold => restProtectionSleepThreshold;
     internal float RestProtectionResumeSleepThreshold => Mathf.Max(
@@ -113,6 +146,26 @@ public class AbilityWork : CharacterAbility
         base.Awake();
         EnsureWorkModules();
         TryBindScheduleEvents();
+    }
+
+    [Inject]
+    public void ConstructAbilityWork(
+        IBlueprintResearchWorkService blueprintResearchWorkService,
+        IStaffDiscontentRuntimeService staffDiscontentRuntimeService,
+        IFloatingIconFeedbackService floatingIconFeedbackService,
+        IWorkGridResolver workGridResolver,
+        IFacilityCandidateCache facilityCandidateCache)
+    {
+        this.blueprintResearchWorkService = blueprintResearchWorkService
+            ?? throw new ArgumentNullException(nameof(blueprintResearchWorkService));
+        this.staffDiscontentRuntimeService = staffDiscontentRuntimeService
+            ?? throw new ArgumentNullException(nameof(staffDiscontentRuntimeService));
+        this.floatingIconFeedbackService = floatingIconFeedbackService
+            ?? throw new ArgumentNullException(nameof(floatingIconFeedbackService));
+        this.workGridResolver = workGridResolver
+            ?? throw new ArgumentNullException(nameof(workGridResolver));
+        this.facilityCandidateCache = facilityCandidateCache
+            ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
     }
 
     public override void Initializtion(CharacterSO data)
@@ -178,6 +231,8 @@ public class AbilityWork : CharacterAbility
         FacilityWorkType requestedWorkType = FacilityWorkType.None,
         BuildableObject preferredTarget = null)
     {
+        WorkerMove?.CancelActiveMovement();
+
         if (CanExecuteSuppressCommand(requestedWorkType))
         {
             StartCoroutine(CommandHandler.SuppressPriorityTarget());
@@ -192,12 +247,12 @@ public class AbilityWork : CharacterAbility
         bool assigned = preferredTarget != null
             ? TryAssignWorkTarget(preferredTarget, requestedWorkType)
             : TryAssignWork(requestedWorkType);
-        if (!assigned || character == null || character.ai == null)
+        if (!assigned || actor == null || actor.Brain == null)
         {
-            if (character != null && character.ai != null)
+            if (actor != null && actor.Brain != null)
             {
-                character.AddLog("작업 실패: 작업장 없음");
-                character.ai.isBestActionEnd = true;
+                actor.AddLog("작업 실패: 작업장 없음");
+                actor.Brain.isBestActionEnd = true;
             }
             return;
         }
@@ -236,7 +291,7 @@ public class AbilityWork : CharacterAbility
     }
 
     public bool TrySetPrioritySuppressTarget(
-        Character target,
+        CharacterActor target,
         GridPathSearchResult searchResult,
         out string errorMessage)
     {
@@ -267,15 +322,15 @@ public class AbilityWork : CharacterAbility
         else if (!isWorking)
         {
             AssignWork(null, FacilityWorkType.None);
-            FacilityCandidateCache.MarkDynamicStateDirty();
-            character?.ai?.RequestImmediateReplan(clearFailures: true);
+            MarkFacilityDynamicStateDirty();
+            actor?.Brain?.RequestImmediateReplan(clearFailures: true);
         }
         else
         {
-            FacilityCandidateCache.MarkDynamicStateDirty();
+            MarkFacilityDynamicStateDirty();
         }
 
-        character?.AddLog($"{WorkTaskCatalog.GetDisplayName(workType)} 우선순위: {priority.ToDisplayText()}");
+        actor?.AddLog($"{WorkTaskCatalog.GetDisplayName(workType)} 우선순위: {priority.ToDisplayText()}");
     }
 
     public bool ShouldUseRestProtection()
@@ -323,7 +378,7 @@ public class AbilityWork : CharacterAbility
         routineOperateCooldownUntil = Time.time + routineOperateCooldownSeconds;
         if (!isWorking)
         {
-            character?.ai?.RequestImmediateReplan(clearFailures: true);
+            actor?.Brain?.RequestImmediateReplan(clearFailures: true);
         }
     }
 
@@ -352,9 +407,15 @@ public class AbilityWork : CharacterAbility
         DutyController.SetDutyState(nextState);
     }
 
-    public void RecoverOffDuty(float sleep, float mood, float fun = 0f, float hunger = 0f)
+    public void RecoverOffDuty(
+        float sleep,
+        float mood,
+        float fun = 0f,
+        float hunger = 0f,
+        float excretion = 0f,
+        float hygiene = 0f)
     {
-        DutyController.RecoverOffDuty(sleep, mood, fun, hunger);
+        DutyController.RecoverOffDuty(sleep, mood, fun, hunger, excretion, hygiene);
     }
 
     public void ApplyWorkFatigueTick()
@@ -388,31 +449,45 @@ public class AbilityWork : CharacterAbility
 
     internal void StopAssignedWork(string reason)
     {
+        StopAssignedWork(reason, true);
+    }
+
+    internal void StopAssignedWorkFromAi(string reason)
+    {
+        StopAssignedWork(reason, false);
+    }
+
+    private void StopAssignedWork(string reason, bool requestImmediateReplan)
+    {
         InvalidateActiveWorkRun();
+        WorkerMove?.CancelActiveMovement();
 
         if (assignedShop is IWorkableFacility facility)
         {
-            facility.DeallocateWorker(character);
+            facility.DeallocateWorker(actor);
         }
 
-        AIAction currentAction = character != null && character.ai != null
-            ? character.ai.bestAction
+        AIAction currentAction = actor != null && actor.Brain != null
+            ? actor.Brain.bestAction
             : null;
-        currentAction?.ReleaseReservation(character);
+        currentAction?.ReleaseReservation(actor);
 
         AssignWork(null, FacilityWorkType.None);
         isWorking = false;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
         if (!string.IsNullOrWhiteSpace(reason))
         {
-            character?.AddLog($"작업 종료: {reason}");
+            actor?.AddLog($"작업 종료: {reason}");
         }
 
-        if (character != null && character.ai != null)
+        if (actor != null && actor.Brain != null)
         {
-            character.ai.bestAction = null;
-            character.ai.isBestActionEnd = true;
-            character.ai.RequestImmediateReplan(clearFailures: true);
+            actor.Brain.bestAction = null;
+            actor.Brain.isBestActionEnd = true;
+            if (requestImmediateReplan)
+            {
+                actor.Brain.RequestImmediateReplan(clearFailures: true);
+            }
         }
     }
 
@@ -459,6 +534,11 @@ public class AbilityWork : CharacterAbility
         return CommandHandler.HasUrgentPriorityTarget();
     }
 
+    internal void MarkFacilityDynamicStateDirty()
+    {
+        FacilityCandidateCacheService.MarkDynamicStateDirty();
+    }
+
     private bool CanExecuteSuppressCommand(FacilityWorkType requestedWorkType)
     {
         return HasPrioritySuppressTarget
@@ -477,16 +557,10 @@ public class AbilityWork : CharacterAbility
 
     private void TryBindScheduleEvents()
     {
-        if (character == null)
-        {
-            character = GetComponent<Character>();
-        }
-        if (character == null)
-        {
-            return;
-        }
+        CacheCommonReferences();
 
-        if (!character.TryGetAbility(out AbilitySchedule nextSchedule)
+        if (abilityCache == null
+            || !abilityCache.TryGetAbility(out AbilitySchedule nextSchedule)
             || nextSchedule == null
             || nextSchedule.nowSheduleData == null)
         {
@@ -604,5 +678,77 @@ public class AbilityWork : CharacterAbility
             forcedWorkType,
             ignorePriority,
             out bestCandidate);
+    }
+
+    private sealed class AbilityWorkNoopBlueprintResearchWorkService : IBlueprintResearchWorkService
+    {
+        public bool HasResearchWorkFor(BuildableObject facility) => false;
+
+        public BlueprintResearchWorkResult ApplyResearchWork(
+            CharacterActor researcher,
+            BuildableObject researchFacility,
+            float seconds)
+        {
+            return new BlueprintResearchWorkResult(
+                false,
+                null,
+                0f,
+                0f,
+                1f,
+                false,
+                "Blueprint research runtime is not available.");
+        }
+    }
+
+    private sealed class AbilityWorkNoopStaffDiscontentRuntimeService : IStaffDiscontentRuntimeService
+    {
+        public float GetWorkEfficiencyMultiplier(CharacterActor staff) => 1f;
+
+        public bool ShouldBlockWork(CharacterActor staff, out string reason)
+        {
+            reason = string.Empty;
+            return false;
+        }
+
+        public bool IsRebellionTarget(CharacterActor target) => false;
+        public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender) => false;
+    }
+
+    private sealed class AbilityWorkNoopFloatingIconFeedbackService : IFloatingIconFeedbackService
+    {
+        public bool Show(Component target, Sprite sprite, float maxWorldSize) => false;
+    }
+
+    private sealed class AbilityWorkFallbackGridResolver : IWorkGridResolver
+    {
+        public Grid ResolveActiveGrid(
+            AbilityWork work,
+            GridPathSearchResult searchResult,
+            Grid priorityGrid = null)
+        {
+            if (searchResult != null && searchResult.sourceGrid != null)
+            {
+                return searchResult.sourceGrid;
+            }
+
+            if (priorityGrid != null)
+            {
+                return priorityGrid;
+            }
+
+            work?.EnsureWorkReferences();
+            return work != null ? work.CachedGrid : null;
+        }
+
+        public Vector2Int GetGridPosition(Grid activeGrid, CharacterActor actor)
+        {
+            if (activeGrid == null || actor == null)
+            {
+                return Vector2Int.zero;
+            }
+
+            Vector2Int position = activeGrid.GetXY(actor.transform.position);
+            return activeGrid.IsValidGridPos(position) ? position : Vector2Int.zero;
+        }
     }
 }

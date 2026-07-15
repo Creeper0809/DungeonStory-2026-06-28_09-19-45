@@ -63,11 +63,11 @@ public static class RegularCustomerDebugScenarios
     {
         RegularCustomerState state = new RegularCustomerState();
         RegularCustomerRules rules = CreateTestRules();
-        Character customer = CreateCustomer(101, "Slime Regular", "Slime", 80f);
+        CharacterActor customer = CreateCustomer(101, "Slime Regular", "Slime", 80f);
 
-        state.RecordVisit(customer, rules);
-        customer.stats[Character.Condition.MOOD] = 60f;
-        RegularCustomerVisitResult result = state.RecordVisit(customer, rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        customer.stats[CharacterCondition.MOOD] = 60f;
+        RegularCustomerVisitResult result = state.RecordVisit(CharacterActor.From(customer), rules);
 
         bool valid = result.Success
             && result.Record.VisitCount == 2
@@ -82,11 +82,11 @@ public static class RegularCustomerDebugScenarios
     {
         RegularCustomerState state = new RegularCustomerState();
         RegularCustomerRules rules = CreateTestRules();
-        Character customer = CreateCustomer(102, "Orc Regular", "Orc", 70f);
+        CharacterActor customer = CreateCustomer(102, "Orc Regular", "Orc", 70f);
 
-        state.RecordVisit(customer, rules);
-        state.RecordVisit(customer, rules);
-        RegularCustomerVisitResult result = state.RecordVisit(customer, rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        RegularCustomerVisitResult result = state.RecordVisit(CharacterActor.From(customer), rules);
 
         bool valid = result.Success
             && result.BecameRegular
@@ -101,12 +101,12 @@ public static class RegularCustomerDebugScenarios
     {
         RegularCustomerState state = new RegularCustomerState();
         RegularCustomerRules rules = CreateTestRules();
-        Character customer = CreateCustomer(103, "Vampire Candidate", "Vampire", 85f);
+        CharacterActor customer = CreateCustomer(103, "Vampire Candidate", "Vampire", 85f);
 
-        state.RecordVisit(customer, rules);
-        state.RecordVisit(customer, rules);
-        state.RecordVisit(customer, rules);
-        RegularCustomerVisitResult result = state.RecordVisit(customer, rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        RegularCustomerVisitResult result = state.RecordVisit(CharacterActor.From(customer), rules);
 
         bool valid = result.Success
             && result.BecameRecruitCandidate
@@ -121,11 +121,11 @@ public static class RegularCustomerDebugScenarios
     {
         RegularCustomerState state = new RegularCustomerState();
         RegularCustomerRules rules = CreateTestRules();
-        Character customer = CreateCustomer(104, "Goblin Recruit", "Goblin", 90f);
+        CharacterActor customer = CreateCustomer(104, "Goblin Recruit", "Goblin", 90f);
 
         for (int i = 0; i < 4; i++)
         {
-            state.RecordVisit(customer, rules);
+            state.RecordVisit(CharacterActor.From(customer), rules);
         }
 
         bool recruited = state.TryRecruit(customer.data.id, out RegularCustomerRecruitResult result);
@@ -147,11 +147,11 @@ public static class RegularCustomerDebugScenarios
     {
         RegularCustomerState state = new RegularCustomerState();
         RegularCustomerRules rules = CreateTestRules();
-        Character customer = CreateCustomer(105, "Low Mood Customer", "Slime", 30f);
+        CharacterActor customer = CreateCustomer(105, "Low Mood Customer", "Slime", 30f);
 
-        state.RecordVisit(customer, rules);
-        state.RecordVisit(customer, rules);
-        RegularCustomerVisitResult result = state.RecordVisit(customer, rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        state.RecordVisit(CharacterActor.From(customer), rules);
+        RegularCustomerVisitResult result = state.RecordVisit(CharacterActor.From(customer), rules);
 
         bool valid = result.Success
             && !result.Record.IsRegular
@@ -166,7 +166,7 @@ public static class RegularCustomerDebugScenarios
     {
         GameObject runtimeObject = new GameObject("RegularCustomerRuntime_Test");
         RegularCustomerRuntime runtime = runtimeObject.AddComponent<RegularCustomerRuntime>();
-        Character customer = CreateCustomer(106, "Runtime Candidate", "Orc", 85f);
+        CharacterActor customer = CreateCustomer(106, "Runtime Candidate", "Orc", 85f);
         BuildableObject facility = CreateFacility();
 
         using CountingRegularListener regularListener = new CountingRegularListener();
@@ -174,7 +174,7 @@ public static class RegularCustomerDebugScenarios
 
         for (int i = 0; i < 4; i++)
         {
-            runtime.OnTriggerEvent(new FacilityVisitEvent(customer, facility));
+            runtime.OnTriggerEvent(new FacilityVisitEvent(CharacterActor.From(customer), facility));
         }
 
         bool recruitSuccess = runtime.TryRecruit(customer.data.id, out RegularCustomerRecruitResult recruitResult);
@@ -203,11 +203,11 @@ public static class RegularCustomerDebugScenarios
         };
     }
 
-    private static Character CreateCustomer(int id, string name, string speciesTag, float mood)
+    private static CharacterActor CreateCustomer(int id, string name, string speciesTag, float mood)
     {
         GameObject obj = new GameObject(name);
         obj.AddComponent<SpriteRenderer>();
-        Character character = obj.AddComponent<Character>();
+        CharacterActor character = obj.AddComponent<CharacterActor>();
 
         CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
         data.id = id;
@@ -218,11 +218,11 @@ public static class RegularCustomerDebugScenarios
 
         character.data = data;
         character.characterType = CharacterType.Customer;
-        character.stats ??= new Dictionary<Character.Condition, float>();
-        character.stats[Character.Condition.HUNGER] = 100f;
-        character.stats[Character.Condition.SLEEP] = 100f;
-        character.stats[Character.Condition.FUN] = 100f;
-        character.stats[Character.Condition.MOOD] = mood;
+        character.stats ??= new Dictionary<CharacterCondition, float>();
+        character.stats[CharacterCondition.HUNGER] = 100f;
+        character.stats[CharacterCondition.SLEEP] = 100f;
+        character.stats[CharacterCondition.FUN] = 100f;
+        character.stats[CharacterCondition.MOOD] = mood;
         return character;
     }
 
@@ -246,7 +246,7 @@ public static class RegularCustomerDebugScenarios
         return facility;
     }
 
-    private static void DestroyCustomer(Character character)
+    private static void DestroyCustomer(CharacterActor character)
     {
         if (character == null) return;
 

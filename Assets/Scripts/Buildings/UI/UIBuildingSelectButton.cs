@@ -1,7 +1,7 @@
-using System.Collections;
-using System.Collections.Generic;
+using System;
 using UnityEngine;
 using UnityEngine.UI;
+using VContainer;
 
 public class UIBuildingSelectButton : MonoBehaviour
 {
@@ -13,24 +13,127 @@ public class UIBuildingSelectButton : MonoBehaviour
     [SerializeField] private Vector2 iconMaxSize = DefaultIconMaxSize;
 
     public int id;
+    private IDungeonGridBuildingControllerProvider buildingControllerProvider;
+    private IGameDataProvider gameDataProvider;
+    private BuildingSO buildingData;
+    private GameData observedGameData;
+    private bool isDisposed;
+
+    [Inject]
+    public void Construct(
+        IDungeonGridBuildingControllerProvider buildingControllerProvider,
+        IGameDataProvider gameDataProvider)
+    {
+        this.buildingControllerProvider = buildingControllerProvider
+            ?? throw new ArgumentNullException(nameof(buildingControllerProvider));
+        this.gameDataProvider = gameDataProvider
+            ?? throw new ArgumentNullException(nameof(gameDataProvider));
+    }
 
     public void Initialization(BuildingSO so)
     {
         if (so == null) return;
 
         id = so.id;
+        buildingData = so;
         ApplyButtonSize();
         SetIcon(so.icon);
+        RefreshAvailability();
+    }
+
+    public void Initialization(BuildingSO so, IDungeonGridBuildingControllerProvider buildingControllerProvider)
+    {
+        this.buildingControllerProvider = buildingControllerProvider;
+        Initialization(so);
     }
 
     public void OnClick()
     {
-        DungeonStoryGridBuildingController.Instance.SetGridModeBuild();
-        DungeonStoryGridBuildingController.Instance.SelectBuildingById(id);
+        if (!IsAvailable())
+        {
+            int phase = buildingData != null ? buildingData.Operational.unlockPhase : 1;
+            NoticeFeedEvent.Trigger($"{phase}단계에 해금되는 시설입니다.", NoticeFeedEvent.Grade.DANGER);
+            return;
+        }
+
+        DungeonStoryGridBuildingController controller = RequireBuildingController();
+        controller.SetGridModeBuild();
+        controller.SelectBuildingById(id);
+        GetComponentInParent<GridConstructTab>()?.CollapseForPlacement();
     }
+
     public void ActiveDestroyMode()
     {
-        DungeonStoryGridBuildingController.Instance.SetDestroyMode();
+        RequireBuildingController().SetDestroyMode();
+    }
+
+    private void OnEnable()
+    {
+        isDisposed = false;
+        ObserveGameData();
+        RefreshAvailability();
+    }
+
+    private void OnDisable()
+    {
+        StopObservingGameData();
+    }
+
+    private void OnDestroy()
+    {
+        isDisposed = true;
+        StopObservingGameData();
+    }
+
+    private void StopObservingGameData()
+    {
+        if (observedGameData?.day != null)
+        {
+            observedGameData.day.OnValueChange -= OnDayChanged;
+        }
+
+        observedGameData = null;
+    }
+
+    private void ObserveGameData()
+    {
+        if (observedGameData != null
+            || gameDataProvider == null
+            || !gameDataProvider.TryGetGameData(out observedGameData)
+            || observedGameData?.day == null)
+        {
+            return;
+        }
+
+        observedGameData.day.OnValueChange -= OnDayChanged;
+        observedGameData.day.OnValueChange += OnDayChanged;
+    }
+
+    private void OnDayChanged(int _)
+    {
+        if (isDisposed || this == null)
+        {
+            return;
+        }
+
+        RefreshAvailability();
+    }
+
+    private bool IsAvailable()
+    {
+        ObserveGameData();
+        return buildingData == null
+            || observedGameData == null
+            || FacilityProgression.IsUnlocked(buildingData, observedGameData);
+    }
+
+    private void RefreshAvailability()
+    {
+        Button button = GetComponent<Button>();
+        if (button != null)
+        {
+            button.interactable = IsAvailable();
+        }
     }
 
     private void ApplyButtonSize()
@@ -79,7 +182,13 @@ public class UIBuildingSelectButton : MonoBehaviour
         float scale = Mathf.Min(
             iconMaxSize.x / sprite.rect.width,
             iconMaxSize.y / sprite.rect.height);
-        scale = Mathf.Min(1f, scale);
         return new Vector2(sprite.rect.width * scale, sprite.rect.height * scale);
+    }
+
+    private DungeonStoryGridBuildingController RequireBuildingController()
+    {
+        return (buildingControllerProvider
+                ?? throw new InvalidOperationException($"{nameof(UIBuildingSelectButton)} requires {nameof(IDungeonGridBuildingControllerProvider)} injection."))
+            .Controller;
     }
 }

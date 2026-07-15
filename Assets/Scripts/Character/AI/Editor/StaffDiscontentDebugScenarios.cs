@@ -63,9 +63,9 @@ public static class StaffDiscontentDebugScenarios
     private static bool VerifyLowSatisfactionStage()
     {
         using ScenarioRuntime runtime = new ScenarioRuntime();
-        Character staff = CreateStaff(201, "Low Satisfaction Staff", 45f);
+        CharacterActor staff = CreateStaff(201, "Low Satisfaction Staff", 45f);
 
-        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome outcome);
+        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome outcome);
         bool valid = record != null
             && outcome == StaffDiscontentOutcome.Warning
             && record.Stage == StaffDiscontentStage.LowSatisfaction
@@ -78,10 +78,10 @@ public static class StaffDiscontentDebugScenarios
     private static bool VerifyEfficiencyDropMultiplier()
     {
         using ScenarioRuntime runtime = new ScenarioRuntime();
-        Character staff = CreateStaff(202, "Efficiency Drop Staff", 34f);
+        CharacterActor staff = CreateStaff(202, "Efficiency Drop Staff", 34f);
 
-        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome outcome);
-        float multiplier = runtime.Runtime.GetWorkEfficiencyMultiplier(staff);
+        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome outcome);
+        float multiplier = runtime.Runtime.GetWorkEfficiencyMultiplier(CharacterActor.From(staff));
         bool valid = record != null
             && outcome == StaffDiscontentOutcome.EfficiencyPenalty
             && record.Stage == StaffDiscontentStage.EfficiencyDrop
@@ -95,10 +95,10 @@ public static class StaffDiscontentDebugScenarios
     private static bool VerifyWorkDisruptionBlocksWork()
     {
         using ScenarioRuntime runtime = new ScenarioRuntime();
-        Character staff = CreateStaff(203, "Work Disruption Staff", 20f);
+        CharacterActor staff = CreateStaff(203, "Work Disruption Staff", 20f);
         AbilityWork work = staff.GetAbility<AbilityWork>();
 
-        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome outcome);
+        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome outcome);
         bool canWork = work.CanStartWorkAction();
         bool valid = record != null
             && outcome == StaffDiscontentOutcome.WorkDisruption
@@ -113,15 +113,15 @@ public static class StaffDiscontentDebugScenarios
     private static bool VerifyDeparturePermanentLoss()
     {
         using ScenarioRuntime runtime = new ScenarioRuntime();
-        Character staff = CreateStaff(204, "Departing Staff", 10f);
+        CharacterActor staff = CreateStaff(204, "Departing Staff", 10f);
 
-        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome outcome);
+        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome outcome);
         bool valid = record != null
             && outcome == StaffDiscontentOutcome.PermanentDeparture
             && record.Stage == StaffDiscontentStage.Departure
             && record.IsPermanentLoss
             && record.IsDeparted
-            && staff.CurrentLifecycleState == Character.LifecycleState.Despawned;
+            && staff.CurrentLifecycleState == CharacterLifecycleState.Despawned;
 
         DestroyStaff(staff);
         return valid;
@@ -130,9 +130,9 @@ public static class StaffDiscontentDebugScenarios
     private static bool VerifyLocalRebellionPermanentLoss()
     {
         using ScenarioRuntime runtime = new ScenarioRuntime();
-        Character staff = CreateStaff(205, "Rebel Staff", 5f);
+        CharacterActor staff = CreateStaff(205, "Rebel Staff", 5f);
 
-        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome outcome);
+        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome outcome);
         bool valid = record != null
             && outcome == StaffDiscontentOutcome.LocalRebellion
             && record.Stage == StaffDiscontentStage.LocalRebellion
@@ -147,10 +147,10 @@ public static class StaffDiscontentDebugScenarios
     private static bool VerifyOwnerThreatEscalation()
     {
         using ScenarioRuntime runtime = new ScenarioRuntime();
-        Character staff = CreateStaff(206, "Escalating Rebel Staff", 5f);
+        CharacterActor staff = CreateStaff(206, "Escalating Rebel Staff", 5f);
 
-        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome firstOutcome);
-        record = runtime.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome secondOutcome);
+        StaffDiscontentRecord record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome firstOutcome);
+        record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome secondOutcome);
         bool valid = firstOutcome == StaffDiscontentOutcome.LocalRebellion
             && secondOutcome == StaffDiscontentOutcome.OwnerThreat
             && record != null
@@ -160,7 +160,7 @@ public static class StaffDiscontentDebugScenarios
         return valid;
     }
 
-    private static Character CreateStaff(int id, string name, float mood)
+    private static CharacterActor CreateStaff(int id, string name, float mood)
     {
         CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
         data.id = id;
@@ -172,27 +172,27 @@ public static class StaffDiscontentDebugScenarios
 
         GameObject obj = new GameObject(name);
         obj.AddComponent<SpriteRenderer>();
-        obj.AddComponent<Character>();
+        obj.AddComponent<CharacterActor>();
         obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityShopping>();
         obj.AddComponent<AbilityWork>();
-        obj.AddComponent<AIBrain>();
-
-        Character character = obj.GetComponent<Character>();
-        typeof(Character)
+        AIBrain brain = obj.AddComponent<AIBrain>();
+        brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
+        CharacterActor character = obj.GetComponent<CharacterActor>();
+        typeof(CharacterActor)
             .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.Invoke(character, null);
         character.RefreshAbilityCache();
         character.Initialization(data);
-        character.SetLifecycleState(Character.LifecycleState.Active);
-        character.stats[Character.Condition.MOOD] = mood;
-        character.stats[Character.Condition.SLEEP] = 80f;
-        character.stats[Character.Condition.HUNGER] = 80f;
-        character.stats[Character.Condition.FUN] = 80f;
+        character.SetLifecycleState(CharacterLifecycleState.Active);
+        character.stats[CharacterCondition.MOOD] = mood;
+        character.stats[CharacterCondition.SLEEP] = 80f;
+        character.stats[CharacterCondition.HUNGER] = 80f;
+        character.stats[CharacterCondition.FUN] = 80f;
         return character;
     }
 
-    private static void DestroyStaff(Character staff)
+    private static void DestroyStaff(CharacterActor staff)
     {
         if (staff == null) return;
 

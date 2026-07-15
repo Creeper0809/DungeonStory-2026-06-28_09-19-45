@@ -75,10 +75,10 @@ public static class MetaProgressionDebugScenarios
             0f,
             0f)));
         scenario.Runtime.OnTriggerEvent(new InvasionResolvedEvent(true, 1f));
-        scenario.Runtime.OnTriggerEvent(new FacilityVisitEvent(null, CreateFacility(9001, "발견 시설")));
+        scenario.Runtime.OnTriggerEvent(new FacilityVisitEvent((CharacterActor)null, CreateFacility(9001, "발견 시설")));
 
-        Character owner = CreateOwner();
-        RunResultSnapshot result = scenario.Runtime.EndRun(owner, "테스트 사망");
+        CharacterActor owner = CreateOwner();
+        RunResultSnapshot result = scenario.Runtime.EndRun(CharacterActor.From(owner), "테스트 사망");
 
         bool valid = result != null
             && result.legacyCurrency > 0
@@ -135,7 +135,9 @@ public static class MetaProgressionDebugScenarios
         BuildingSO second = CreateBuilding(9102, "1성 테스트 시설 B", false);
         IReadOnlyList<FacilityShopOffer> offers = FacilityShopService.CreateBasicPurchaseOffers(
             new[] { second, first },
-            new FacilityShopUnlockState());
+            new FacilityShopUnlockState(),
+            scenario.Runtime.GetExpandedBasicPurchaseBuildingIds(new[] { second, first }),
+            DefaultBuildingCostMultiplier);
 
         bool valid = purchasedFacility
             && purchasedBasic
@@ -145,6 +147,11 @@ public static class MetaProgressionDebugScenarios
         Object.DestroyImmediate(first);
         Object.DestroyImmediate(second);
         return valid;
+    }
+
+    private static float DefaultBuildingCostMultiplier(BuildingSO building)
+    {
+        return 1f;
     }
 
     private static bool VerifyRecipePreservation()
@@ -162,8 +169,8 @@ public static class MetaProgressionDebugScenarios
             Array.Empty<string>(),
             new[] { "recipe_preserve_test" });
         scenario.Runtime.OnTriggerEvent(new BlueprintResearchCompletedEvent(blueprint, unlock));
-        Character owner = CreateOwner();
-        scenario.Runtime.EndRun(owner, "테스트 사망");
+        CharacterActor owner = CreateOwner();
+        scenario.Runtime.EndRun(CharacterActor.From(owner), "테스트 사망");
 
         bool valid = scenario.Runtime.IsRecipePreserved("recipe_preserve_test");
 
@@ -180,7 +187,7 @@ public static class MetaProgressionDebugScenarios
         bool traitPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeId.StartingOwnerTraitCandidatePlusOne, out _);
         bool warningPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeId.InvasionWarningAccuracy, out _);
 
-        Character owner = CreateOwner();
+        CharacterActor owner = CreateOwner();
         bool valid = healthPurchased
             && traitPurchased
             && warningPurchased
@@ -193,7 +200,7 @@ public static class MetaProgressionDebugScenarios
         return valid;
     }
 
-    private static Character CreateOwner()
+    private static CharacterActor CreateOwner()
     {
         CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
         data.id = 9301;
@@ -204,13 +211,13 @@ public static class MetaProgressionDebugScenarios
 
         GameObject obj = new GameObject("Meta Test Owner");
         obj.AddComponent<SpriteRenderer>();
-        Character character = obj.AddComponent<Character>();
+        CharacterActor character = obj.AddComponent<CharacterActor>();
         obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityWork>();
         obj.AddComponent<AIBrain>();
         character.RefreshAbilityCache();
         character.Initialization(data);
-        character.SetLifecycleState(Character.LifecycleState.Active);
+        character.SetLifecycleState(CharacterLifecycleState.Active);
         return character;
     }
 

@@ -47,6 +47,7 @@ MonoBehaviour:
   horizontalDraggable: 0
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
+  movementTravelTime: 2
   maintenance: 0
   facility:
     roles: 0
@@ -60,6 +61,17 @@ MonoBehaviour:
     dislikedSpeciesTags: []
     disabledWhenDamaged: 1
     requiresStock: 0
+    requiresRoomRole: 0
+    requiresStaffedService: 0
+    selfContainedRoom: 0
+    baseCrimePressure: 0.01
+    unstaffedSupervisionRisk: 0.07
+    staffedSupervisionReduction: 0.03
+    lowMoodCrimeRiskWeight: 0.08
+    unmetNeedCrimeRiskWeight: 0.05
+    crowdCrimeRiskWeight: 0.04
+    highValueCrimeRiskWeight: 0.05
+    damagedFacilityCrimeRiskWeight: 0.05
   defense:
     enabled: 1
     concept: 1
@@ -78,4 +90,9 @@ MonoBehaviour:
       duration: 0
       stacks: 1
       logTag: "\uD53C\uD574"
+  evolution:
+    contributesToRoomProfile: 1
+    tags: []
+    scores: []
+    metrics: []
   unlocked: 1

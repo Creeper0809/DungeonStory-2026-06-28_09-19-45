@@ -6,6 +6,21 @@ using UnityEngine;
 
 public static class FacilityDebugScenarios
 {
+    private static readonly IBlueprintResearchWorkService BlueprintResearchWorkService =
+        new NoopBlueprintResearchWorkService();
+    private static readonly IWorldInfoClickSelector WorldInfoClickSelector =
+        new NoopWorldInfoClickSelector();
+    private static readonly IFacilityCandidateCache FacilityCandidateCacheService =
+        new FacilityCandidateCacheStore();
+    private static readonly IRoomFacilityPolicy RoomFacilityPolicyService =
+        new RoomFacilityPolicyService(RoomRegistry.EditorCache);
+    private static readonly IShopStockCatalog ShopStockCatalogService =
+        new AssetDatabaseShopStockCatalog();
+    private static readonly IFloatingNumberFeedbackService FloatingNumberFeedbackService =
+        new NoopFloatingNumberFeedbackService();
+    private static readonly IWorkforceReplanService WorkforceReplanService =
+        new NoopWorkforceReplanService();
+
     [MenuItem("DungeonStory/Debug/Facilities/Run P1 Facility Scenarios")]
     public static void RunFromMenu()
     {
@@ -120,9 +135,9 @@ public static class FacilityDebugScenarios
         List<BuildableObject> visitable = world.Grid.SearchPath(Vector2Int.zero).GetAllVisitableBuilding();
         return !visitable.Contains(shop)
             && !visitable.Contains(restRoom)
-            && !shop.CanVisit(null, out string stockReason)
+            && !shop.CanVisit((CharacterActor)null, out string stockReason)
             && stockReason == "재고 없음"
-            && !restRoom.CanVisit(null, out string damageReason)
+            && !restRoom.CanVisit((CharacterActor)null, out string damageReason)
             && damageReason == "시설 파손";
     }
 
@@ -173,7 +188,7 @@ public static class FacilityDebugScenarios
 
     private static bool VerifyDailyDeliveryOffers()
     {
-        IReadOnlyList<StockDeliveryOffer> offers = StockSupplyService.CreateDailyDeliveryOffers(1);
+        IReadOnlyList<StockDeliveryOffer> offers = StockSupplyService.CreateDailyDeliveryOffers(1, DefaultStockCostMultiplier);
 
         return offers.Count == 4
             && offers.Any((offer) => offer.category == StockCategory.Food && offer.amount > 0 && offer.cost > 0)
@@ -297,9 +312,14 @@ public static class FacilityDebugScenarios
     private sealed class FacilityScenarioWorld : System.IDisposable
     {
         private readonly List<GameObject> objects = new List<GameObject>();
+        private readonly List<ScriptableObject> scriptableObjects = new List<ScriptableObject>();
+        private readonly IGameDataProvider gameDataProvider;
 
         public FacilityScenarioWorld()
         {
+            GameData gameData = CreateGameData(1000);
+            scriptableObjects.Add(gameData);
+            gameDataProvider = new FixedGameDataProvider(gameData);
             Grid = new Grid(14, 1);
             for (int x = 0; x < Grid.width; x++)
             {
@@ -317,7 +337,8 @@ public static class FacilityDebugScenarios
         {
             BuildingSO buildingData = AssetDatabase.LoadAssetAtPath<BuildingSO>(
                 $"Assets/Resources/SO/Building/P1/{assetName}.asset");
-            GridBuildingFactory factory = new GridBuildingFactory();
+            GridBuildingFactory factory = new GridBuildingFactory((building) =>
+                InjectBuildableObject(building));
             BuildableObject building = factory.Create(Grid, buildingData, position);
             objects.Add(building.gameObject);
             building.SetGrid(Grid);
@@ -327,7 +348,81 @@ public static class FacilityDebugScenarios
                 buildingData.Placement.Layer,
                 buildingData.GetGridPosList(position),
                 buildingData.Placement.IsMovement);
+            if (building.Facility != null && building.Facility.requiresRoomRole)
+            {
+                PlaceRoomDoorsFor(building);
+            }
+
             return building;
+        }
+
+        private void PlaceRoomDoorsFor(BuildableObject building)
+        {
+            if (building == null || building.buildPoses == null || building.buildPoses.Count == 0)
+            {
+                return;
+            }
+
+            int minX = building.buildPoses.Min((pos) => pos.x);
+            int maxX = building.buildPoses.Max((pos) => pos.x);
+            int y = building.centerPos.y;
+            PlaceRuntimeDoor(new Vector2Int(minX - 1, y));
+            PlaceRuntimeDoor(new Vector2Int(maxX + 1, y));
+        }
+
+        private void PlaceRuntimeDoor(Vector2Int position)
+        {
+            if (!Grid.IsValidGridPos(position))
+            {
+                return;
+            }
+
+            GridCell cell = Grid.GetGridCell(position);
+            if (cell == null || cell.HasOccupantInLayer(GridLayer.Building))
+            {
+                return;
+            }
+
+            BuildingSO buildingData = ScriptableObject.CreateInstance<BuildingSO>();
+            scriptableObjects.Add(buildingData);
+            buildingData.id = 901;
+            buildingData.objectName = "문";
+            buildingData.width = 1;
+            buildingData.height = 1;
+            buildingData.layer = GridLayer.Building;
+            buildingData.category = BuildingCategory.None;
+            buildingData.type = typeof(BuildableObject);
+            buildingData.unlocked = true;
+            buildingData.facility = new FacilityData();
+
+            GameObject obj = new GameObject("Room Boundary Door");
+            objects.Add(obj);
+            BuildableObject door = obj.AddComponent<BuildableObject>();
+            InjectBuildableObject(door);
+            door.SetGrid(Grid);
+            door.Initialization(buildingData, position);
+            Grid.RegisterOccupant(
+                door,
+                GridLayer.Building,
+                buildingData.GetGridPosList(position),
+                false);
+        }
+
+        private void InjectBuildableObject(BuildableObject building)
+        {
+            building.ConstructBuildableObject(
+                BlueprintResearchWorkService,
+                WorldInfoClickSelector,
+                FacilityCandidateCacheService,
+                RoomFacilityPolicyService);
+            if (building is Shop shop)
+            {
+                shop.ConstructShop(
+                    gameDataProvider,
+                    ShopStockCatalogService,
+                    FloatingNumberFeedbackService,
+                    WorkforceReplanService);
+            }
         }
 
         public void Dispose()
@@ -336,7 +431,17 @@ public static class FacilityDebugScenarios
             {
                 Object.DestroyImmediate(obj);
             }
+
+            foreach (ScriptableObject obj in scriptableObjects.Where((obj) => obj != null))
+            {
+                Object.DestroyImmediate(obj);
+            }
         }
+    }
+
+    private static float DefaultStockCostMultiplier(StockCategory category)
+    {
+        return 1f;
     }
 
     private sealed class TestHallwayOccupant : IGridOccupant
@@ -345,5 +450,124 @@ public static class FacilityDebugScenarios
         public bool IsGridDestroyed => false;
         public bool IsGridVisitable => false;
         public bool IsGridMovement => true;
+    }
+
+    private sealed class NoopBlueprintResearchWorkService : IBlueprintResearchWorkService
+    {
+        public bool HasResearchWorkFor(BuildableObject facility)
+        {
+            return false;
+        }
+
+        public BlueprintResearchWorkResult ApplyResearchWork(
+            CharacterActor researcher,
+            BuildableObject researchFacility,
+            float seconds)
+        {
+            return new BlueprintResearchWorkResult(
+                false,
+                null,
+                0f,
+                0f,
+                1f,
+                false,
+                "Facility scenario fixture has no blueprint research runtime.");
+        }
+    }
+
+    private sealed class NoopWorldInfoClickSelector : IWorldInfoClickSelector
+    {
+        public bool TryHandleWorldInfoClick()
+        {
+            return false;
+        }
+
+        public bool TryTriggerCharacterUnderPointer()
+        {
+            return false;
+        }
+
+        public bool TryGetPreferredCharacterUnderPointer(out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacterAtScreenPosition(
+            Vector3 screenPosition,
+            Camera camera,
+            out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacter(Collider2D[] hits, out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+    }
+
+    private sealed class AssetDatabaseShopStockCatalog : IShopStockCatalog
+    {
+        public bool TryGetStockInfoForShop(int shopId, out StockInfo stockInfo)
+        {
+            stockInfo = AssetDatabase.FindAssets("t:StockInfo", new[] { "Assets/Resources/SO/Stock" })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(AssetDatabase.LoadAssetAtPath<StockInfo>)
+                .FirstOrDefault(candidate => candidate != null && candidate.shopId == shopId);
+            return stockInfo != null;
+        }
+
+        public bool TryGetSaleItem(int saleItemId, out SaleItem saleItem)
+        {
+            saleItem = AssetDatabase.FindAssets("t:SaleItem", new[] { "Assets/Resources/SO/Stock" })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(AssetDatabase.LoadAssetAtPath<SaleItem>)
+                .FirstOrDefault(candidate => candidate != null && candidate.id == saleItemId);
+            return saleItem != null;
+        }
+
+        public StockCategory GetStockCategory(int saleItemId)
+        {
+            return TryGetSaleItem(saleItemId, out SaleItem saleItem)
+                ? saleItem.category
+                : StockCategory.General;
+        }
+    }
+
+    private sealed class FixedGameDataProvider : IGameDataProvider
+    {
+        private readonly GameData gameData;
+
+        public FixedGameDataProvider(GameData gameData)
+        {
+            this.gameData = gameData;
+        }
+
+        public bool TryGetGameData(out GameData resolvedGameData)
+        {
+            resolvedGameData = gameData;
+            return resolvedGameData != null;
+        }
+    }
+
+    private sealed class NoopFloatingNumberFeedbackService : IFloatingNumberFeedbackService
+    {
+        public bool TryShow(
+            NumberCondition condition,
+            Vector3 worldPosition,
+            float value)
+        {
+            return false;
+        }
+    }
+
+    private sealed class NoopWorkforceReplanService : IWorkforceReplanService
+    {
+        public void RequestIdleWorkersToReplan(bool clearFailures = true)
+        {
+        }
     }
 }

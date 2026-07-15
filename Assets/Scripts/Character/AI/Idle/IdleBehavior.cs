@@ -1,30 +1,30 @@
 public interface IIdleBehavior
 {
     string DisplayName { get; }
-    bool CanRun(Character character);
-    bool TryRun(Character character, float duration, out string failureReason);
+    bool CanRun(CharacterActor actor);
+    bool TryRun(CharacterActor actor, float duration, out string failureReason);
 }
 
 public sealed class StaffWanderIdleBehavior : IIdleBehavior
 {
     public string DisplayName => "던전 배회";
 
-    public bool CanRun(Character character)
+    public bool CanRun(CharacterActor actor)
     {
-        return CharacterWorkRoleUtility.TryGetWork(character, out _)
-            && character.TryGetAbility(out AbilityMove _);
+        return CharacterWorkRoleUtility.TryGetWork(actor, out _)
+            && actor.TryGetAbility(out AbilityMove _);
     }
 
-    public bool TryRun(Character character, float duration, out string failureReason)
+    public bool TryRun(CharacterActor actor, float duration, out string failureReason)
     {
         failureReason = string.Empty;
-        if (!CanRun(character))
+        if (!CanRun(actor))
         {
             failureReason = "던전 배회 조건 불만족";
             return false;
         }
 
-        AbilityMove move = character.GetAbility<AbilityMove>();
+        AbilityMove move = actor.GetAbility<AbilityMove>();
         if (move != null && move.StartIdleWander(duration))
         {
             return true;
@@ -39,21 +39,21 @@ public sealed class StaticWaitIdleBehavior : IIdleBehavior
 {
     public string DisplayName => "제자리 대기";
 
-    public bool CanRun(Character character)
+    public bool CanRun(CharacterActor actor)
     {
-        return character != null && character.TryGetAbility(out AbilityMove _);
+        return actor != null && actor.TryGetAbility(out AbilityMove _);
     }
 
-    public bool TryRun(Character character, float duration, out string failureReason)
+    public bool TryRun(CharacterActor actor, float duration, out string failureReason)
     {
         failureReason = string.Empty;
-        if (!CanRun(character))
+        if (!CanRun(actor))
         {
             failureReason = "이동 능력 없음";
             return false;
         }
 
-        character.GetAbility<AbilityMove>().StartWait(duration);
+        actor.GetAbility<AbilityMove>().StartWait(duration);
         return true;
     }
 }
@@ -64,7 +64,7 @@ public static class IdleBehaviorRunner
     private static readonly IIdleBehavior StaticWait = new StaticWaitIdleBehavior();
 
     public static bool TryRunDefault(
-        Character character,
+        CharacterActor actor,
         float duration,
         bool allowMovement,
         out string behaviorName,
@@ -73,20 +73,20 @@ public static class IdleBehaviorRunner
         behaviorName = string.Empty;
         failureReason = string.Empty;
 
-        IIdleBehavior behavior = SelectBehavior(character, allowMovement);
+        IIdleBehavior behavior = SelectBehavior(actor, allowMovement);
         if (behavior == null)
         {
             failureReason = "No idle behavior configured for current state.";
             return false;
         }
 
-        if (!behavior.CanRun(character))
+        if (!behavior.CanRun(actor))
         {
             failureReason = $"{behavior.DisplayName} cannot run.";
             return false;
         }
 
-        if (!behavior.TryRun(character, duration, out failureReason))
+        if (!behavior.TryRun(actor, duration, out failureReason))
         {
             return false;
         }
@@ -96,14 +96,14 @@ public static class IdleBehaviorRunner
     }
 
     public static bool TryRunStatic(
-        Character character,
+        CharacterActor actor,
         float duration,
         out string behaviorName,
         out string failureReason)
     {
         behaviorName = string.Empty;
         failureReason = string.Empty;
-        if (!StaticWait.TryRun(character, duration, out failureReason))
+        if (!StaticWait.TryRun(actor, duration, out failureReason))
         {
             return false;
         }
@@ -112,20 +112,20 @@ public static class IdleBehaviorRunner
         return true;
     }
 
-    public static string GetSelectedBehaviorTypeNameForDebug(Character character, bool allowMovement)
+    public static string GetSelectedBehaviorTypeNameForDebug(CharacterActor actor, bool allowMovement)
     {
-        IIdleBehavior behavior = SelectBehavior(character, allowMovement);
+        IIdleBehavior behavior = SelectBehavior(actor, allowMovement);
         return behavior != null ? behavior.GetType().Name : string.Empty;
     }
 
-    private static IIdleBehavior SelectBehavior(Character character, bool allowMovement)
+    private static IIdleBehavior SelectBehavior(CharacterActor actor, bool allowMovement)
     {
         if (!allowMovement)
         {
             return StaticWait;
         }
 
-        if (CharacterWorkRoleUtility.TryGetWork(character, out _))
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out _))
         {
             return StaffWander;
         }

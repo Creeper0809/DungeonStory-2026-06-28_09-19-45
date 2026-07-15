@@ -10,9 +10,13 @@ public class ConditionNeedToConnect : IBuildingCondition
     [HideIf("connectWithEntrance")]
     public int associatedId;
 
-    public void OnBuild() {}
+    public void OnBuild(BuildingConditionContext context) {}
 
-    public bool IsSatisfy(Grid grid, List<Vector2Int> buildPos,out string errorMessage)
+    public bool IsSatisfy(
+        Grid grid,
+        List<Vector2Int> buildPos,
+        BuildingConditionContext context,
+        out string errorMessage)
     {
         if (grid == null || buildPos == null || buildPos.Count == 0)
         {

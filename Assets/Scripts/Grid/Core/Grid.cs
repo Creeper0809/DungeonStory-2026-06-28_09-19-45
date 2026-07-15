@@ -7,7 +7,10 @@ public enum GridLayer
 {
     Hallway = 0,
     Building = 1,
-    Character = 2
+    Character = 2,
+    WallFixture = 3,
+    CeilingFixture = 4,
+    FloorOverlay = 5
 }
 
 public enum GridMoveType
@@ -581,6 +584,7 @@ public class Grid
         Vector2Int[] dir = { Vector2Int.left, Vector2Int.right };
         Queue<Vector2Int> queue = GridSearchScratch.RentPositionQueue();
         List<GridMoveStep> nextSteps = GridSearchScratch.RentMoveStepList();
+        List<IGridOccupant> currentOccupants = GridSearchScratch.RentOccupantList();
         HashSet<IGridOccupant> visitableOccupantSet = GridSearchScratch.RentOccupantSet();
         int searchMark = NextSearchMark();
 
@@ -598,9 +602,9 @@ public class Grid
                 GridCell cell = GetGridCell(pos);
                 if (cell == null) continue;
 
-                GridSearchScratch.SharedOccupants.Clear();
-                cell.FillAllOccupants(GridSearchScratch.SharedOccupants);
-                foreach (IGridOccupant occupant in GridSearchScratch.SharedOccupants)
+                currentOccupants.Clear();
+                cell.FillAllOccupants(currentOccupants);
+                foreach (IGridOccupant occupant in currentOccupants)
                 {
                     if (occupant != null
                         && occupant.IsGridVisitable
@@ -629,9 +633,12 @@ public class Grid
                 {
                     Vector2Int nextPos = step.To;
                     GridCell nextCell = GetGridCell(nextPos);
+                    bool isAllowedTerminal = stopCondition != null
+                        && stopCondition(nextPos)
+                        && !IsMovementBlockedByWall(nextPos);
                     if (nextCell != null
                         && searchMarks[nextPos.y, nextPos.x] != searchMark
-                        && (IsWalkable(nextPos) || (stopCondition != null && stopCondition(nextPos))))
+                        && (IsWalkable(nextPos) || isAllowedTerminal))
                     {
                         queue.Enqueue(nextPos);
                         searchMarks[nextPos.y, nextPos.x] = searchMark;
@@ -644,6 +651,7 @@ public class Grid
         {
             GridSearchScratch.Return(queue);
             GridSearchScratch.Return(nextSteps);
+            GridSearchScratch.ReturnOccupantList(currentOccupants);
             GridSearchScratch.Return(visitableOccupantSet);
             GridSearchScratch.SharedOccupants.Clear();
         }
@@ -710,6 +718,17 @@ public class Grid
         GridCell cell = GetGridCell(pos);
         if (cell == null) return false;
 
+        BuildableObject building = cell.GetOccupant(GridLayer.Building) as BuildableObject;
+        if (IsMovementBlockedByWall(pos))
+        {
+            return false;
+        }
+
+        if (building != null && IsWalkableFacilityCell(building))
+        {
+            return true;
+        }
+
         if (cell.HasOccupantInLayer(GridLayer.Hallway)) return true;
 
         GridSearchScratch.SharedOccupants.Clear();
@@ -725,6 +744,28 @@ public class Grid
 
         GridSearchScratch.SharedOccupants.Clear();
         return false;
+    }
+
+    public bool IsMovementBlockedByWall(Vector2Int pos)
+    {
+        BuildableObject building = GetGridCell(pos)?.GetOccupant(GridLayer.Building) as BuildableObject;
+        if (building == null || building.isDestroy)
+        {
+            return false;
+        }
+
+        BuildingSO buildingData = building.BuildingData;
+        bool isDoor = building is Door || (buildingData != null && buildingData.IsDoor);
+        bool isStructuralWall = buildingData != null
+            ? buildingData.IsStructuralWall
+            : building.category == BuildingCategory.Wall;
+        return isStructuralWall && !isDoor;
+    }
+
+    private static bool IsWalkableFacilityCell(BuildableObject building)
+    {
+        FacilityData facility = building != null ? building.Facility : null;
+        return facility != null && facility.IsVisitorFacility;
     }
 
     public bool TryFindNearestWalkablePosition(Vector2Int start, out Vector2Int walkablePosition)
@@ -743,6 +784,33 @@ public class Grid
             if (cell == null || !IsWalkable(cell.Position)) continue;
 
             int distance = Mathf.Abs(cell.Position.x - start.x) + Mathf.Abs(cell.Position.y - start.y);
+            if (found && distance >= bestDistance) continue;
+
+            found = true;
+            best = cell.Position;
+            bestDistance = distance;
+        }
+
+        walkablePosition = best;
+        return found;
+    }
+
+    public bool TryFindNearestWalkablePositionOnSameFloor(Vector2Int start, out Vector2Int walkablePosition)
+    {
+        if (IsValidGridPos(start) && IsWalkable(start))
+        {
+            walkablePosition = start;
+            return true;
+        }
+
+        bool found = false;
+        Vector2Int best = default;
+        int bestDistance = int.MaxValue;
+        foreach (GridCell cell in GetCells())
+        {
+            if (cell == null || cell.Position.y != start.y || !IsWalkable(cell.Position)) continue;
+
+            int distance = Mathf.Abs(cell.Position.x - start.x);
             if (found && distance >= bestDistance) continue;
 
             found = true;
@@ -861,6 +929,7 @@ internal static class GridSearchScratch
     private static readonly Stack<Queue<Vector2Int>> PositionQueues = new Stack<Queue<Vector2Int>>();
     private static readonly Stack<List<Vector2Int>> PositionLists = new Stack<List<Vector2Int>>();
     private static readonly Stack<List<GridMoveStep>> MoveStepLists = new Stack<List<GridMoveStep>>();
+    private static readonly Stack<List<IGridOccupant>> OccupantLists = new Stack<List<IGridOccupant>>();
     private static readonly Stack<HashSet<IGridOccupant>> OccupantSets = new Stack<HashSet<IGridOccupant>>();
 
     [ThreadStatic] private static List<IGridOccupant> sharedOccupants;
@@ -881,6 +950,11 @@ internal static class GridSearchScratch
     public static List<Vector2Int> RentPositionList()
     {
         return PositionLists.Count > 0 ? PositionLists.Pop() : new List<Vector2Int>(128);
+    }
+
+    public static List<IGridOccupant> RentOccupantList()
+    {
+        return OccupantLists.Count > 0 ? OccupantLists.Pop() : new List<IGridOccupant>(8);
     }
 
     public static HashSet<IGridOccupant> RentOccupantSet()
@@ -910,6 +984,14 @@ internal static class GridSearchScratch
 
         list.Clear();
         PositionLists.Push(list);
+    }
+
+    public static void ReturnOccupantList(List<IGridOccupant> list)
+    {
+        if (list == null) return;
+
+        list.Clear();
+        OccupantLists.Push(list);
     }
 
     public static void Return(HashSet<IGridOccupant> set)

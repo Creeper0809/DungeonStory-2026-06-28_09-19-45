@@ -3,6 +3,16 @@ using UnityEngine;
 
 public class GridCell
 {
+    private static readonly GridLayer[] SelectionPriority =
+    {
+        GridLayer.Character,
+        GridLayer.Building,
+        GridLayer.WallFixture,
+        GridLayer.CeilingFixture,
+        GridLayer.FloorOverlay,
+        GridLayer.Hallway
+    };
+
     private readonly Dictionary<GridLayer, IGridOccupant> occupants;
     private List<GridTraversalLink> traversalLinks;
     private bool isBuildable;
@@ -26,20 +36,15 @@ public class GridCell
     {
         if (occupants.Count == 0) return null;
 
-        bool found = false;
-        GridLayer topLayer = GridLayer.Hallway;
-        IGridOccupant topOccupant = null;
-        foreach (KeyValuePair<GridLayer, IGridOccupant> kvp in occupants)
+        foreach (GridLayer layer in SelectionPriority)
         {
-            if (!found || kvp.Key > topLayer)
+            if (occupants.TryGetValue(layer, out IGridOccupant occupant))
             {
-                found = true;
-                topLayer = kvp.Key;
-                topOccupant = kvp.Value;
+                return occupant;
             }
         }
 
-        return topOccupant;
+        return null;
     }
     public void ConnectFloor(IEnumerable<Vector2Int> poses)
     {
@@ -125,6 +130,11 @@ public class GridCell
     public bool HasOccupant()
     {
         return occupants.Count > 0;
+    }
+    public bool HasPlacementSupport()
+    {
+        return HasOccupantInLayer(GridLayer.Hallway)
+            || HasOccupantInLayer(GridLayer.Building);
     }
     public bool TrySetOccupant(GridLayer layer, IGridOccupant occupant)
     {

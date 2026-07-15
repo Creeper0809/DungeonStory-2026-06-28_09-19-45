@@ -1,0 +1,70 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7be3e50469ab0014fb12b8050afa04d6, type: 3}
+  m_Name: EV_BattlefieldDining
+  m_EditorClassIdentifier: Assembly-CSharp::FacilityEvolutionRecipeSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 9103
+  evolutionId: evolve_battle_dining_to_battlefield_dining
+  displayName: "\uC804\uC7A5\uC758 \uC2DD\uB2F9 \uC9C4\uD654"
+  description: "\uC804\uD22C \uC2DD\uB2F9\uC774 \uACBD\uBE44 \uC9D1\uACB0\uACFC \uCE68\uC785
+    \uBC29\uC5B4 \uAE30\uB85D\uC744 \uC313\uC544 \uC804\uC7A5\uC758 \uC2DD\uB2F9
+    \uACC4\uBCF4\uB85C \uC9C4\uD654\uD55C\uB2E4."
+  resultBuilding: {fileID: 11400000, guid: c325c62eb92cba1c88d42d1ed4d0d884, type: 2}
+  fromFacilities:
+  - {fileID: 11400000, guid: 9a2c6dc03b666e7dfaafda7edea079aa, type: 2}
+  fromLineageTags: []
+  requiredStarGrade: 2
+  resultStarGrade: 3
+  publicByDefault: 1
+  requiredResearchRecipeId: 
+  requireUsableRoom: 1
+  requiredRoomScores:
+  - key: Combat
+    requireMin: 1
+    minValue: 34
+    requireMax: 0
+    maxValue: 0
+  - key: Defense
+    requireMin: 1
+    minValue: 12
+    requireMax: 0
+    maxValue: 0
+  requiredRoomMetrics: []
+  requiredRoomTags: []
+  requiredUniqueFixtures: []
+  requiredRecordTokens:
+  - key: GuardRallyPoint
+    minCount: 1
+  - key: IntruderBloodied
+    minCount: 1
+  requiredMaterials: []
+  allowedMutationTags:
+  - Brutal
+  - Security
+  consumeRecordTokens: 0
+  identityPressureWeights:
+  - key: Combat
+    value: 0.4
+  - key: Security
+    value: 0.45
+  - key: Service
+    value: 0.1
+  minimumIdentityScore: 0.4

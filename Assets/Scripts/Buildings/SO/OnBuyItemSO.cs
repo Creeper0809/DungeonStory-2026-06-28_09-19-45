@@ -4,8 +4,9 @@ using UnityEngine;
 
 public class OnBuyItemSO : ScriptableObject
 {
-    public virtual void Onbuy(Character character)
+    public virtual void Onbuy(CharacterActor actor)
     {
 
     }
+
 }

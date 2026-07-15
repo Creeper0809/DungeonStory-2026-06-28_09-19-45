@@ -1,0 +1,119 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 319e562edb6800049aa5db86683c9031, type: 3}
+  m_Name: "M03_\uB8EC\uC548\uC815\uAE30"
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes:
+    - Name: type
+      Entry: 7
+      Data: 0|System.RuntimeType, mscorlib
+    - Name: 
+      Entry: 1
+      Data: Facility, Assembly-CSharp
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: tiles
+      Entry: 6
+      Data: 
+    - Name: OnBuildCondition
+      Entry: 6
+      Data: 
+  id: 1038
+  objectName: "\uB8EC \uC548\uC815\uAE30"
+  sprite: {fileID: 21300000, guid: a8ec07b59b5c52d4b8bf67381ec77eba, type: 3}
+  icon: {fileID: 21300000, guid: a8ec07b59b5c52d4b8bf67381ec77eba, type: 3}
+  width: 1
+  height: 1
+  layer: 1
+  category: 7
+  horizontalDraggable: 0
+  verticalDraggable: 0
+  movementAnchorOffset: {x: 0, y: 0}
+  movementTravelTime: 2
+  maintenance: 1
+  facility:
+    roles: 0
+    capacity: 0
+    useDuration: 0
+    internalStockMax: 0
+    restockRequestThreshold: 0
+    requiredWorkers: 0
+    supportedWorkTypes: 0
+    preferredSpeciesTags: []
+    dislikedSpeciesTags: []
+    disabledWhenDamaged: 1
+    requiresStock: 0
+    requiresRoomRole: 0
+    requiresStaffedService: 0
+    selfContainedRoom: 0
+    baseCrimePressure: 0.01
+    unstaffedSupervisionRisk: 0.07
+    staffedSupervisionReduction: 0.03
+    lowMoodCrimeRiskWeight: 0.08
+    unmetNeedCrimeRiskWeight: 0.05
+    crowdCrimeRiskWeight: 0.04
+    highValueCrimeRiskWeight: 0.05
+    damagedFacilityCrimeRiskWeight: 0.05
+  defense:
+    enabled: 0
+    concept: 0
+    triggerTimings: 0
+    targetRule: 0
+    cooldownSeconds: 0
+    periodicIntervalSeconds: 0
+    range: 0
+    star: 1
+    combatLogText: 
+    effectAssets: []
+    effects: []
+  evolution:
+    contributesToRoomProfile: 1
+    tags:
+    - Mana
+    - Security
+    scores:
+    - key: Mana
+      value: 2
+    - key: Security
+      value: 2.5
+    metrics: []
+  operational:
+    code: M03
+    functions: 4097
+    recovery:
+      sleep: 0
+      mood: 0
+      fun: 0
+      hunger: 0
+      excretion: 0
+      hygiene: 0
+    storageCategory: 1
+    storageCapacity: 0
+    seatCapacity: 0
+    tableCapacity: 0
+    serviceCapacity: 0
+    workOutputAmount: 0
+    constructionCost: 60
+    unlockPhase: 1
+    demolitionRefundRate: 0.5
+    lightIntensity: 0
+    lightRadius: 0
+  unlocked: 1

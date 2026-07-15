@@ -6,8 +6,8 @@ using UnityEngine;
 public class StatChange : OnBuyItemSO
 {
     public int value;
-    public override void Onbuy(Character character)
+    public override void Onbuy(CharacterActor actor)
     {
-        character.ChangesStat(Character.Condition.HUNGER, value);
+        actor?.ChangesStat(CharacterCondition.HUNGER, value);
     }
 }

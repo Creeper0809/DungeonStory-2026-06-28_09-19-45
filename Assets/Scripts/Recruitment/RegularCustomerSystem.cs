@@ -56,12 +56,12 @@ public sealed class RegularCustomerRecord
 {
     private float satisfactionTotal;
 
-    public RegularCustomerRecord(int customerId, Character customer, RecruitCapability recruitCapabilities)
+    public RegularCustomerRecord(int customerId, CharacterActor customer, RecruitCapability recruitCapabilities)
     {
         CustomerId = customerId;
         DisplayName = RegularCustomerService.GetCustomerDisplayName(customer, customerId);
         SpeciesTag = RegularCustomerService.GetCustomerSpeciesTag(customer);
-        SourceData = customer != null ? customer.data : null;
+        SourceData = RegularCustomerService.GetCustomerData(customer);
         RecruitCapabilities = recruitCapabilities == RecruitCapability.None
             ? RecruitCapability.All
             : recruitCapabilities;
@@ -88,13 +88,13 @@ public sealed class RegularCustomerRecord
         }
     }
 
-    public void RecordVisit(Character customer, float satisfaction, RegularCustomerRules rules)
+    public void RecordVisit(CharacterActor customer, float satisfaction, RegularCustomerRules rules)
     {
         if (customer != null)
         {
             DisplayName = RegularCustomerService.GetCustomerDisplayName(customer, CustomerId);
             SpeciesTag = RegularCustomerService.GetCustomerSpeciesTag(customer);
-            SourceData = customer.data != null ? customer.data : SourceData;
+            SourceData = RegularCustomerService.GetCustomerData(customer) ?? SourceData;
         }
 
         VisitCount++;
@@ -187,7 +187,7 @@ public sealed class RegularCustomerState
     public IReadOnlyCollection<RegularCustomerRecord> Records => records.Values;
     public IReadOnlyList<RegularCustomerRecruitResult> RecruitedCharacters => recruitedCharacters;
 
-    public RegularCustomerVisitResult RecordVisit(Character customer, RegularCustomerRules rules)
+    public RegularCustomerVisitResult RecordVisit(CharacterActor customer, RegularCustomerRules rules)
     {
         rules ??= RegularCustomerRules.CreateDefault();
         if (!RegularCustomerService.IsTrackableCustomer(customer))
@@ -252,7 +252,7 @@ public sealed class RegularCustomerState
         return true;
     }
 
-    private RegularCustomerRecord GetOrCreate(int customerId, Character customer, RegularCustomerRules rules)
+    private RegularCustomerRecord GetOrCreate(int customerId, CharacterActor customer, RegularCustomerRules rules)
     {
         if (!records.TryGetValue(customerId, out RegularCustomerRecord record))
         {
@@ -338,28 +338,32 @@ public struct CustomerRecruitedEvent
 
 public static class RegularCustomerService
 {
-    public static bool IsTrackableCustomer(Character customer)
+    public static bool IsTrackableCustomer(CharacterActor customer)
     {
+        CharacterIdentity identity = GetIdentity(customer);
         return customer != null
-            && customer.characterType == CharacterType.Customer
-            && customer.data != null;
+            && identity != null
+            && identity.CharacterType == CharacterType.Customer
+            && identity.Data != null;
     }
 
-    public static int GetCustomerId(Character customer)
+    public static int GetCustomerId(CharacterActor customer)
     {
         if (customer == null)
         {
             return -1;
         }
 
-        return customer.data != null ? customer.data.id : customer.GetInstanceID();
+        CharacterIdentity identity = GetIdentity(customer);
+        return identity != null ? identity.StableId : customer.GetInstanceID();
     }
 
-    public static string GetCustomerDisplayName(Character customer, int customerId)
+    public static string GetCustomerDisplayName(CharacterActor customer, int customerId)
     {
-        if (!string.IsNullOrWhiteSpace(customer?.data?.characterName))
+        CharacterIdentity identity = GetIdentity(customer);
+        if (!string.IsNullOrWhiteSpace(identity != null ? identity.DisplayName : null))
         {
-            return customer.data.characterName;
+            return identity.DisplayName;
         }
 
         if (!string.IsNullOrWhiteSpace(customer?.name))
@@ -370,26 +374,38 @@ public static class RegularCustomerService
         return $"Customer {customerId}";
     }
 
-    public static string GetCustomerSpeciesTag(Character customer)
+    public static string GetCustomerSpeciesTag(CharacterActor customer)
     {
-        if (!string.IsNullOrWhiteSpace(customer?.SpeciesTag))
+        CharacterIdentity identity = GetIdentity(customer);
+        if (!string.IsNullOrWhiteSpace(identity != null ? identity.SpeciesTag : null))
         {
-            return customer.SpeciesTag;
+            return identity.SpeciesTag;
         }
 
         return "Unknown";
     }
 
-    public static float GetSatisfaction(Character customer)
+    public static float GetSatisfaction(CharacterActor customer)
     {
-        if (customer == null || customer.stats == null)
+        CharacterStats stats = customer != null ? customer.Stats : null;
+        if (stats == null)
         {
             return 0f;
         }
 
-        return customer.stats.TryGetValue(Character.Condition.MOOD, out float mood)
+        return stats.Stats.TryGetValue(CharacterCondition.MOOD, out float mood)
             ? Mathf.Clamp(mood, 0f, 100f)
             : 0f;
+    }
+
+    public static CharacterSO GetCustomerData(CharacterActor customer)
+    {
+        return GetIdentity(customer)?.Data;
+    }
+
+    private static CharacterIdentity GetIdentity(CharacterActor customer)
+    {
+        return customer != null ? customer.Identity : null;
     }
 
     public static bool MeetsRegularCondition(RegularCustomerRecord record, RegularCustomerRules rules)
@@ -440,13 +456,12 @@ public class RegularCustomerRuntime : MonoBehaviour, UtilEventListener<FacilityV
 
     private readonly RegularCustomerState state = new RegularCustomerState();
 
-    public static RegularCustomerRuntime Instance => FindFirstObjectByType<RegularCustomerRuntime>();
     public RegularCustomerState State => state;
     public RegularCustomerRules Rules => rules;
 
     public void OnTriggerEvent(FacilityVisitEvent eventType)
     {
-        RegularCustomerVisitResult result = state.RecordVisit(eventType.visitor, rules);
+        RegularCustomerVisitResult result = state.RecordVisit(eventType.visitorActor, rules);
         if (!result.Success)
         {
             return;

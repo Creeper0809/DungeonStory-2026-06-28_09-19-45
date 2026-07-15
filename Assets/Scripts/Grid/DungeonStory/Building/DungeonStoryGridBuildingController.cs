@@ -1,52 +1,67 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using VContainer;
 
 public class DungeonStoryGridBuildingController : MonoBehaviour
 {
-    private static DungeonStoryGridBuildingController instance;
-
-    public static DungeonStoryGridBuildingController Instance
-    {
-        get
-        {
-            if (instance == null)
-            {
-                instance = FindFirstObjectByType<DungeonStoryGridBuildingController>();
-                if (instance == null && GridSystemManager.Instance != null)
-                {
-                    instance = GridSystemManager.Instance.gameObject.AddComponent<DungeonStoryGridBuildingController>();
-                }
-            }
-
-            return instance;
-        }
-    }
-
     [SerializeField] private GridSystemManager gridSystem;
     [SerializeField] private InputAction buildingPlaceAction;
     [SerializeField] private InputAction expandGridAction;
     public Data<BuildingSO> selectedBuilding = new Data<BuildingSO>();
     public List<InitialBuildInfo> initialPlacement = new List<InitialBuildInfo>();
 
-    private DataManager dataManager;
+    private IGridSystemProvider gridSystemProvider;
+    private IDataCatalog dataCatalog;
+    private IWorldPointerPositionProvider worldPointerPositionProvider;
+    private IGridTextureProvider gridTextureProvider;
+    private IObjectResolver objectResolver;
+    private IGameDataProvider gameDataProvider;
+    private IGridBuildingObjectFactory gridBuildingObjectFactory;
+    private IUiPointerBlocker uiPointerBlocker;
     private GridBuildingPlacementService placementService;
     private bool initialized;
+    private bool resetGridModeAtEndOfFrame;
+    private int lastPlacementInputFrame = -1;
 
     public event Action<BuildingSO> OnSelectedBuildingChanged;
 
-    public GridSystemManager GridSystem => gridSystem != null ? gridSystem : GridSystemManager.Instance;
+    public GridSystemManager GridSystem => ResolveGridSystem();
     public BuildingSO SelectedBuilding => selectedBuilding != null ? selectedBuilding.Value : null;
+    public bool IsPlacementInputConsumedThisFrame => lastPlacementInputFrame == Time.frameCount;
+
+    [Inject]
+    public void Construct(
+        IGridSystemProvider gridSystemProvider,
+        IDataCatalog dataCatalog,
+        IWorldPointerPositionProvider worldPointerPositionProvider,
+        IGridTextureProvider gridTextureProvider,
+        IObjectResolver objectResolver,
+        IGameDataProvider gameDataProvider,
+        IGridBuildingObjectFactory gridBuildingObjectFactory,
+        IUiPointerBlocker uiPointerBlocker)
+    {
+        this.gridSystemProvider = gridSystemProvider
+            ?? throw new ArgumentNullException(nameof(gridSystemProvider));
+        this.dataCatalog = dataCatalog
+            ?? throw new ArgumentNullException(nameof(dataCatalog));
+        this.worldPointerPositionProvider = worldPointerPositionProvider
+            ?? throw new ArgumentNullException(nameof(worldPointerPositionProvider));
+        this.gridTextureProvider = gridTextureProvider
+            ?? throw new ArgumentNullException(nameof(gridTextureProvider));
+        this.objectResolver = objectResolver
+            ?? throw new ArgumentNullException(nameof(objectResolver));
+        this.gameDataProvider = gameDataProvider
+            ?? throw new ArgumentNullException(nameof(gameDataProvider));
+        this.gridBuildingObjectFactory = gridBuildingObjectFactory
+            ?? throw new ArgumentNullException(nameof(gridBuildingObjectFactory));
+        this.uiPointerBlocker = uiPointerBlocker
+            ?? throw new ArgumentNullException(nameof(uiPointerBlocker));
+    }
 
     private void Awake()
     {
-        instance = this;
-        if (gridSystem == null)
-        {
-            gridSystem = GridSystemManager.Instance;
-        }
         if (selectedBuilding == null)
         {
             selectedBuilding = new Data<BuildingSO>();
@@ -67,27 +82,24 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
     private void EnsureInitialized()
     {
-        if (initialized && placementService != null && dataManager != null) return;
+        if (initialized && placementService != null) return;
 
-        if (gridSystem == null)
-        {
-            gridSystem = GridSystemManager.Instance;
-        }
+        gridSystem = ResolveGridSystem();
         if (gridSystem == null || gridSystem.grid == null) return;
 
-        dataManager = DataManager.Instance;
-        IReadOnlyDictionary<int, BuildingSO> buildingDataById = dataManager != null
-            ? dataManager.GetData<BuildingSO>()
-            : null;
+        IReadOnlyDictionary<int, BuildingSO> buildingDataById = ResolveDataCatalog().GetData<BuildingSO>();
         BuildingSO hallwayBuilding = null;
         buildingDataById?.TryGetValue(0, out hallwayBuilding);
-        GridBuildingFactory buildingFactory = new GridBuildingFactory(GridTexture.Instance, ConfigurePlacedBuilding);
+        GridBuildingFactory buildingFactory = new GridBuildingFactory(
+            ResolveGridTexture(),
+            ConfigurePlacedBuilding,
+            ResolveGridBuildingObjectFactory());
         placementService = new GridBuildingPlacementService(
             gridSystem.grid,
             hallwayBuilding,
             FindBuildingDataById,
             buildingFactory,
-            new BuildingPlacementValidator());
+            new BuildingPlacementValidator(new GridPlacementValidator(), CreateBuildingConditionContext));
         if (!HasAnyGridOccupants(gridSystem.grid))
         {
             placementService.PlaceInitialBuildings(initialPlacement);
@@ -97,6 +109,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         gridSystem.OnGridExpand += OnGridExpand;
         gridSystem.OnGridObjectChanged += DrawGridTextureWalls;
         initialized = true;
+        DrawGridTextureWalls();
     }
 
     private void Update()
@@ -105,9 +118,23 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         if (!gridSystem.isDragging || SelectedBuilding == null) return;
 
         gridSystem.UpdateDragSelection(
-            gridSystem.grid.GetXY(GameManager.Instance.GetMouseWorldPos()),
+            gridSystem.grid.GetXY(ResolveMouseWorldPosition()),
             SelectedBuilding.horizontalDraggable,
             SelectedBuilding.verticalDraggable);
+    }
+
+    private void LateUpdate()
+    {
+        if (!resetGridModeAtEndOfFrame)
+        {
+            return;
+        }
+
+        resetGridModeAtEndOfFrame = false;
+        if (gridSystem != null)
+        {
+            gridSystem.SetGridModeNone();
+        }
     }
 
     public void TriggerPlaceBuilding()
@@ -115,18 +142,20 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         EnsureInitialized();
         if (gridSystem == null || gridSystem.grid == null || placementService == null) return;
         if (gridSystem.Mode != GridMode.Build || SelectedBuilding == null) return;
-        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
+        if (RequireUiPointerBlocker().IsPointerOverUi()) return;
+
+        lastPlacementInputFrame = Time.frameCount;
 
         if (!SelectedBuilding.GetDraggable())
         {
-            Vector2Int pos = gridSystem.grid.GetXY(GameManager.Instance.GetMouseWorldPos());
+            Vector2Int pos = gridSystem.grid.GetXY(ResolveMouseWorldPosition());
             PlaceBuilding(new List<Vector2Int> { pos });
             return;
         }
 
         if (!gridSystem.isDragging)
         {
-            Vector2Int firstSelectedPos = gridSystem.grid.GetXY(GameManager.Instance.GetMouseWorldPos());
+            Vector2Int firstSelectedPos = gridSystem.grid.GetXY(ResolveMouseWorldPosition());
             if (!gridSystem.TryBeginDragSelection(firstSelectedPos, SelectedBuilding.horizontalDraggable, SelectedBuilding.verticalDraggable))
             {
                 NoticeFeedEvent.Trigger("유효하지 않은 위치입니다.", NoticeFeedEvent.Grade.DANGER);
@@ -142,6 +171,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         EnsureInitialized();
         if (gridSystem == null || gridSystem.grid == null || placementService == null) return;
         if (gridSystem.Mode != GridMode.Destory) return;
+        if (RequireUiPointerBlocker().IsPointerOverUi()) return;
 
         BuildableObject building = GetBuildingByMousePos();
         if (!building) return;
@@ -152,7 +182,9 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
             return;
         }
 
-        NoticeFeedEvent.Trigger($"{buildingData.objectName} 삭제 완료", NoticeFeedEvent.Grade.NONE);
+        int refund = FacilityProgression.GetRefund(buildingData);
+        string refundText = refund > 0 ? $" · {refund} 환급" : string.Empty;
+        NoticeFeedEvent.Trigger($"{buildingData.objectName} 철거 완료{refundText}", NoticeFeedEvent.Grade.NONE);
         gridSystem.NotifyGridObjectChanged();
     }
 
@@ -181,7 +213,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         EnsureInitialized();
         if (gridSystem == null || gridSystem.grid == null) return null;
 
-        Vector2Int pos = gridSystem.grid.GetXY(GameManager.Instance.GetMouseWorldPos());
+        Vector2Int pos = gridSystem.grid.GetXY(ResolveMouseWorldPosition());
         if (!gridSystem.grid.IsValidGridPos(pos)) return null;
 
         return gridSystem.grid.GetGridCell(pos).GetBuilding();
@@ -206,21 +238,21 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
     public Vector3 GetMouseWorldPosSnapped()
     {
         EnsureInitialized();
-        if (gridSystem == null) return GameManager.Instance.GetMouseWorldPos();
+        if (gridSystem == null) return ResolveMouseWorldPosition();
 
-        return gridSystem.GetWorldPosSnapped(GameManager.Instance.GetMouseWorldPos());
+        return gridSystem.GetWorldPosSnapped(ResolveMouseWorldPosition());
     }
 
     public void SelectBuildingById(int id)
     {
         EnsureInitialized();
-        if (gridSystem == null || dataManager == null) return;
-        if (gridSystem.Mode == GridMode.None) return;
+        if (gridSystem == null) return;
+        if (gridSystem.Mode == GridMode.None && id != -1) return;
 
         BuildingSO building = null;
         if (id != -1)
         {
-            building = dataManager.GetData<BuildingSO>()[id];
+            building = ResolveBuildingDataById(id);
         }
 
         selectedBuilding.Value = building;
@@ -235,35 +267,28 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
     public void SetGridModeBuild()
     {
         EnsureInitialized();
-        if (gridSystem == null)
-        {
-            gridSystem = GridSystemManager.Instance;
-        }
         if (gridSystem == null) return;
 
+        resetGridModeAtEndOfFrame = false;
         gridSystem.SetGridModeBuild();
     }
 
     public void SetGridModeNone()
     {
-        if (gridSystem == null)
-        {
-            gridSystem = GridSystemManager.Instance;
-        }
+        EnsureInitialized();
         if (gridSystem == null) return;
 
+        resetGridModeAtEndOfFrame = false;
         gridSystem.SetGridModeNone();
         ClearBuildingSO();
     }
 
     public void SetDestroyMode()
     {
-        if (gridSystem == null)
-        {
-            gridSystem = GridSystemManager.Instance;
-        }
+        EnsureInitialized();
         if (gridSystem == null) return;
 
+        resetGridModeAtEndOfFrame = false;
         gridSystem.SetGridMode(GridMode.Destory);
         ClearBuildingSO();
     }
@@ -287,20 +312,20 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
             gridSystem.NotifyGridObjectChanged();
         }
 
+        if (placedCount == 0) return;
+
         if (placedCount > 0)
         {
-            NoticeFeedEvent.Trigger($"{building.objectName}X{placedCount} 설치 완료", NoticeFeedEvent.Grade.NONE);
+            NoticeFeedEvent.Trigger($"{building.objectName} x{placedCount} 설치 완료", NoticeFeedEvent.Grade.NONE);
         }
 
         ClearBuildingSO();
-        gridSystem.SetGridModeNone();
+        resetGridModeAtEndOfFrame = true;
     }
 
     private void DrawGridTextureWalls()
     {
-        if (GridTexture.Instance == null) return;
-
-        GridTexture.Instance.DrawWall(gridSystem.grid);
+        ResolveGridTexture().DrawWall(gridSystem.grid);
     }
 
     private static bool HasAnyGridOccupants(Grid grid)
@@ -334,10 +359,6 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
             gridSystem.OnGridObjectChanged -= DrawGridTextureWalls;
         }
 
-        if (instance == this)
-        {
-            instance = null;
-        }
     }
 
     private void EnsureInputActions()
@@ -364,10 +385,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
     private void OnExpandGridInput(InputAction.CallbackContext context)
     {
-        if (gridSystem == null)
-        {
-            gridSystem = GridSystemManager.Instance;
-        }
+        EnsureInitialized();
         if (gridSystem == null) return;
 
         gridSystem.GridExpand(2, 2);
@@ -375,23 +393,22 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
     private BuildingSO FindBuildingDataById(int id)
     {
-        if (dataManager == null)
-        {
-            dataManager = DataManager.Instance;
-        }
-
-        IReadOnlyDictionary<int, BuildingSO> buildingDataById = dataManager != null
-            ? dataManager.GetData<BuildingSO>()
-            : null;
-        return buildingDataById != null && buildingDataById.TryGetValue(id, out BuildingSO buildingData)
+        return TryResolveBuildingDataById(id, out BuildingSO buildingData)
             ? buildingData
             : null;
+    }
+
+    private BuildingConditionContext CreateBuildingConditionContext()
+    {
+        ResolveGameDataProvider().TryGetGameData(out GameData gameData);
+        return new BuildingConditionContext(gameData);
     }
 
     private void ConfigurePlacedBuilding(BuildableObject building)
     {
         if (building == null) return;
 
+        ResolveObjectResolver().Inject(building);
         building.OnBuildingClicked -= OnPlacedBuildingClicked;
         building.OnBuildingClicked += OnPlacedBuildingClicked;
     }
@@ -399,8 +416,87 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
     private void OnPlacedBuildingClicked(BuildableObject building)
     {
         if (building == null) return;
+        if (IsPlacementInputConsumedThisFrame) return;
         if (gridSystem != null && gridSystem.Mode != GridMode.None) return;
+        if (RequireUiPointerBlocker().IsPointerOverUi()) return;
 
         InfoFeedEvent.Trigger(new BuildingInfoTarget(building));
+    }
+
+    private GridSystemManager ResolveGridSystem()
+    {
+        if (gridSystem != null)
+        {
+            return gridSystem;
+        }
+
+        gridSystem = ResolveGridSystemProvider().Manager;
+        return gridSystem;
+    }
+
+    private IGridSystemProvider ResolveGridSystemProvider()
+    {
+        return gridSystemProvider
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IGridSystemProvider)} injection.");
+    }
+
+    private IDataCatalog ResolveDataCatalog()
+    {
+        return dataCatalog
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IDataCatalog)} injection.");
+    }
+
+    private Vector3 ResolveMouseWorldPosition()
+    {
+        IWorldPointerPositionProvider provider = worldPointerPositionProvider
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IWorldPointerPositionProvider)} injection.");
+        return provider.MouseWorldPosition;
+    }
+
+    private GridTexture ResolveGridTexture()
+    {
+        IGridTextureProvider provider = gridTextureProvider
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IGridTextureProvider)} injection.");
+        return provider.Texture;
+    }
+
+    private IObjectResolver ResolveObjectResolver()
+    {
+        return objectResolver
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IObjectResolver)} injection.");
+    }
+
+    private IGameDataProvider ResolveGameDataProvider()
+    {
+        return gameDataProvider
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IGameDataProvider)} injection.");
+    }
+
+    private IGridBuildingObjectFactory ResolveGridBuildingObjectFactory()
+    {
+        return gridBuildingObjectFactory
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IGridBuildingObjectFactory)} injection.");
+    }
+
+    private IUiPointerBlocker RequireUiPointerBlocker()
+    {
+        return uiPointerBlocker
+            ?? throw new InvalidOperationException($"{nameof(DungeonStoryGridBuildingController)} requires {nameof(IUiPointerBlocker)} injection.");
+    }
+
+    private BuildingSO ResolveBuildingDataById(int id)
+    {
+        if (TryResolveBuildingDataById(id, out BuildingSO buildingData))
+        {
+            return buildingData;
+        }
+
+        throw new KeyNotFoundException($"BuildingSO id {id} was not found in {nameof(IDataCatalog)}.");
+    }
+
+    private bool TryResolveBuildingDataById(int id, out BuildingSO buildingData)
+    {
+        IReadOnlyDictionary<int, BuildingSO> buildingDataById = ResolveDataCatalog().GetData<BuildingSO>();
+        return buildingDataById.TryGetValue(id, out buildingData);
     }
 }

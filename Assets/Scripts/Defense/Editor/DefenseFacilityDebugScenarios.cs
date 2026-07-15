@@ -9,6 +9,27 @@ using Object = UnityEngine.Object;
 
 public static class DefenseFacilityDebugScenarios
 {
+    private static readonly IDefenseStatusRuntimeService StatusRuntimeService =
+        new DefenseStatusRuntimeService(new DefenseStatusRuntimeFactory());
+    private static readonly IBlueprintResearchWorkService BlueprintResearchWorkService =
+        new NoopBlueprintResearchWorkService();
+    private static readonly IStaffDiscontentRuntimeService StaffDiscontentRuntimeService =
+        new NoopStaffDiscontentRuntimeService();
+    private static readonly IFloatingIconFeedbackService FloatingIconFeedbackService =
+        new NoopFloatingIconFeedbackService();
+    private static readonly IWorkGridResolver WorkGridResolver =
+        new ScenarioWorkGridResolver();
+    private static readonly IFacilityCandidateCache FacilityCandidateCache =
+        new FacilityCandidateCacheStore();
+    private static readonly IWorldInfoClickSelector WorldInfoClickSelector =
+        new NoopWorldInfoClickSelector();
+    private static readonly IRoomFacilityPolicy RoomFacilityPolicy =
+        new RoomFacilityPolicyService(new RoomLayoutCache());
+    private static readonly IOwnerRunLifecycleService OwnerRunLifecycleService =
+        new NoopOwnerRunLifecycleService();
+    private static readonly IMetaProgressionRuntimeReader MetaProgressionRuntimeReader =
+        new ScenarioMetaProgressionRuntimeReader();
+
     private static readonly string[] DefenseAssetNames =
     {
         "P1_SpikeTrap",
@@ -118,13 +139,14 @@ public static class DefenseFacilityDebugScenarios
         };
 
         world.PlaceDefense(clone, new Vector2Int(2, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
         float before = intruder.CurrentHealth;
         List<DefenseActivationReport> reports = DefenseFacilityResolver.TriggerAt(
             world.Grid,
-            intruder,
+            CharacterActor.From(intruder),
             new Vector2Int(1, 0),
-            DefenseTriggerTiming.OnEnter);
+            DefenseTriggerTiming.OnEnter,
+            StatusRuntimeService);
 
         return reports.Count == 1
             && reports[0].TotalDamage > 0f
@@ -135,14 +157,15 @@ public static class DefenseFacilityDebugScenarios
     {
         using DefenseScenarioWorld world = new DefenseScenarioWorld();
         DefenseFacility spike = world.PlaceDefense("P1_SpikeTrap", new Vector2Int(2, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
         CountingDefenseTriggerListener listener = new CountingDefenseTriggerListener();
 
         List<DefenseActivationReport> reports = DefenseFacilityResolver.TriggerAt(
             world.Grid,
-            intruder,
+            CharacterActor.From(intruder),
             new Vector2Int(1, 0),
-            DefenseTriggerTiming.OnEnter);
+            DefenseTriggerTiming.OnEnter,
+            StatusRuntimeService);
 
         bool valid = reports.Count == 1
             && reports[0].Facility == spike
@@ -158,15 +181,16 @@ public static class DefenseFacilityDebugScenarios
     {
         using DefenseScenarioWorld world = new DefenseScenarioWorld();
         DefenseFacility spike = world.PlaceDefense("P1_SpikeTrap", new Vector2Int(2, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
-        Character worker = world.CreateWorker(new Vector2Int(0, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor worker = world.CreateWorker(new Vector2Int(0, 0));
 
         spike.SetDamaged(true);
         bool disabled = DefenseFacilityResolver.TriggerAt(
             world.Grid,
-            intruder,
+            CharacterActor.From(intruder),
             new Vector2Int(1, 0),
-            DefenseTriggerTiming.OnEnter).Count == 0;
+            DefenseTriggerTiming.OnEnter,
+            StatusRuntimeService).Count == 0;
 
         bool repairCandidate = worker.TryGetAbility(out AbilityWork work)
             && work.TrySetPriorityWorkTarget(spike, FacilityWorkType.Repair, world.Grid.SearchPath(worker.GetNowXY()), out _)
@@ -181,13 +205,13 @@ public static class DefenseFacilityDebugScenarios
         using DefenseScenarioWorld world = new DefenseScenarioWorld();
         world.PlaceDefense("P1_PoisonPool", new Vector2Int(2, 0));
         world.PlaceDefense("P1_SpikeTrap", new Vector2Int(4, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
 
         float beforePoison = intruder.CurrentHealth;
-        DefenseFacilityResolver.TriggerAt(world.Grid, intruder, new Vector2Int(1, 0), DefenseTriggerTiming.OnEnter);
+        DefenseFacilityResolver.TriggerAt(world.Grid, CharacterActor.From(intruder), new Vector2Int(1, 0), DefenseTriggerTiming.OnEnter, StatusRuntimeService);
         float poisonDamage = beforePoison - intruder.CurrentHealth;
         float beforeSpike = intruder.CurrentHealth;
-        DefenseFacilityResolver.TriggerAt(world.Grid, intruder, new Vector2Int(3, 0), DefenseTriggerTiming.OnEnter);
+        DefenseFacilityResolver.TriggerAt(world.Grid, CharacterActor.From(intruder), new Vector2Int(3, 0), DefenseTriggerTiming.OnEnter, StatusRuntimeService);
         float spikeDamageAfterCorrosion = beforeSpike - intruder.CurrentHealth;
 
         return poisonDamage > 0f && spikeDamageAfterCorrosion > 14f;
@@ -197,11 +221,11 @@ public static class DefenseFacilityDebugScenarios
     {
         using DefenseScenarioWorld world = new DefenseScenarioWorld();
         world.PlaceDefense("P1_FireVent", new Vector2Int(2, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
 
-        DefenseFacilityResolver.TriggerAt(world.Grid, intruder, new Vector2Int(1, 0), DefenseTriggerTiming.OnEnter);
+        DefenseFacilityResolver.TriggerAt(world.Grid, CharacterActor.From(intruder), new Vector2Int(1, 0), DefenseTriggerTiming.OnEnter, StatusRuntimeService);
         float beforeTick = intruder.CurrentHealth;
-        float tickDamage = DefenseEffectResolver.TickStatuses(intruder, 2f);
+        float tickDamage = DefenseEffectResolver.TickStatuses(CharacterActor.From(intruder), 2f, StatusRuntimeService);
 
         return tickDamage > 0f && intruder.CurrentHealth < beforeTick;
     }
@@ -212,12 +236,12 @@ public static class DefenseFacilityDebugScenarios
         world.PlaceDefense("P1_LightningPillar", new Vector2Int(1, 0));
         world.PlaceDefense("P1_LightningPillar", new Vector2Int(3, 0));
         world.PlaceDefense("P1_LightningPillar", new Vector2Int(5, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(0, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(0, 0));
 
         float before = intruder.CurrentHealth;
-        DefenseFacilityResolver.TriggerAt(world.Grid, intruder, new Vector2Int(0, 0), DefenseTriggerTiming.OnEnter);
-        DefenseFacilityResolver.TriggerAt(world.Grid, intruder, new Vector2Int(2, 0), DefenseTriggerTiming.OnEnter);
-        DefenseFacilityResolver.TriggerAt(world.Grid, intruder, new Vector2Int(4, 0), DefenseTriggerTiming.OnEnter);
+        DefenseFacilityResolver.TriggerAt(world.Grid, CharacterActor.From(intruder), new Vector2Int(0, 0), DefenseTriggerTiming.OnEnter, StatusRuntimeService);
+        DefenseFacilityResolver.TriggerAt(world.Grid, CharacterActor.From(intruder), new Vector2Int(2, 0), DefenseTriggerTiming.OnEnter, StatusRuntimeService);
+        DefenseFacilityResolver.TriggerAt(world.Grid, CharacterActor.From(intruder), new Vector2Int(4, 0), DefenseTriggerTiming.OnEnter, StatusRuntimeService);
         float totalDamage = before - intruder.CurrentHealth;
 
         return totalDamage > 24f;
@@ -227,13 +251,14 @@ public static class DefenseFacilityDebugScenarios
     {
         using DefenseScenarioWorld world = new DefenseScenarioWorld();
         world.PlaceDefense("P1_IceVent", new Vector2Int(2, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
 
         List<DefenseActivationReport> reports = DefenseFacilityResolver.TriggerAt(
             world.Grid,
-            intruder,
+            CharacterActor.From(intruder),
             new Vector2Int(1, 0),
-            DefenseTriggerTiming.OnEnter);
+            DefenseTriggerTiming.OnEnter,
+            StatusRuntimeService);
 
         return reports.Count == 1
             && reports[0].TotalDamage > 0f
@@ -244,13 +269,14 @@ public static class DefenseFacilityDebugScenarios
     {
         using DefenseScenarioWorld world = new DefenseScenarioWorld();
         DefenseFacility guardRoom = world.PlaceDefense("P1_GuardRoom", new Vector2Int(2, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
 
         List<DefenseActivationReport> reports = DefenseFacilityResolver.TriggerAt(
             world.Grid,
-            intruder,
+            CharacterActor.From(intruder),
             new Vector2Int(1, 0),
-            DefenseTriggerTiming.OnEnter);
+            DefenseTriggerTiming.OnEnter,
+            StatusRuntimeService);
 
         return guardRoom.Facility.SupportsWork(FacilityWorkType.Guard)
             && guardRoom.Facility.requiredWorkers == 1
@@ -295,7 +321,7 @@ public static class DefenseFacilityDebugScenarios
         private static readonly FieldInfo GridField =
             typeof(GridSystemManager).GetField("<grid>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo CharacterAwakeMethod =
-            typeof(Character).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(CharacterActor).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly GridSystemManager previousGridSystem;
         private readonly List<GameObject> objects = new List<GameObject>();
@@ -338,6 +364,11 @@ public static class DefenseFacilityDebugScenarios
                 throw new InvalidOperationException($"{buildingData?.name ?? "Defense asset"} did not create DefenseFacility.");
             }
 
+            defense.ConstructBuildableObject(
+                BlueprintResearchWorkService,
+                WorldInfoClickSelector,
+                FacilityCandidateCache,
+                RoomFacilityPolicy);
             objects.Add(defense.gameObject);
             defense.SetGrid(Grid);
             defense.Initialization(buildingData, position);
@@ -362,17 +393,17 @@ public static class DefenseFacilityDebugScenarios
             }
         }
 
-        public Character CreateIntruder(Vector2Int position)
+        public CharacterActor CreateIntruder(Vector2Int position)
         {
             CharacterSO data = AssetDatabase.LoadAssetAtPath<CharacterSO>(
                 "Assets/Resources/SO/Character/Intruders/Intruder_Breakthrough.asset");
             GameObject obj = CreateCharacterObject("Defense Scenario Intruder");
-            Character character = obj.GetComponent<Character>();
+            CharacterActor character = obj.GetComponent<CharacterActor>();
             InitializeCharacter(character, data, position);
             return character;
         }
 
-        public Character CreateWorker(Vector2Int position)
+        public CharacterActor CreateWorker(Vector2Int position)
         {
             CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
             scriptableObjects.Add(data);
@@ -380,8 +411,14 @@ public static class DefenseFacilityDebugScenarios
             data.characterName = "Defense Repair Worker";
             data.speciesTag = "Orc";
             GameObject obj = CreateCharacterObject("Defense Scenario Worker");
-            obj.AddComponent<AbilityWork>();
-            Character character = obj.GetComponent<Character>();
+            AbilityWork work = obj.AddComponent<AbilityWork>();
+            work.ConstructAbilityWork(
+                BlueprintResearchWorkService,
+                StaffDiscontentRuntimeService,
+                FloatingIconFeedbackService,
+                WorkGridResolver,
+                FacilityCandidateCache);
+            CharacterActor character = obj.GetComponent<CharacterActor>();
             InitializeCharacter(character, data, position);
             character.RefreshAbilityCache();
             return character;
@@ -407,16 +444,20 @@ public static class DefenseFacilityDebugScenarios
             objects.Add(obj);
             obj.AddComponent<SpriteRenderer>();
             obj.AddComponent<AbilityMove>();
-            obj.AddComponent<Character>();
+            obj.AddComponent<CharacterActor>();
             return obj;
         }
 
-        private void InitializeCharacter(Character character, CharacterSO data, Vector2Int position)
+        private void InitializeCharacter(CharacterActor character, CharacterSO data, Vector2Int position)
         {
             CharacterAwakeMethod?.Invoke(character, null);
+            character.GetComponent<CharacterStats>()?.ConstructCharacterStats(
+                StaffDiscontentRuntimeService,
+                OwnerRunLifecycleService,
+                MetaProgressionRuntimeReader);
             character.RefreshAbilityCache();
             character.Initialization(data);
-            character.SetLifecycleState(Character.LifecycleState.Active);
+            character.SetLifecycleState(CharacterLifecycleState.Active);
             character.transform.position = Grid.GetWorldPos(position);
         }
     }
@@ -427,6 +468,167 @@ public static class DefenseFacilityDebugScenarios
         public bool IsGridDestroyed => false;
         public bool IsGridVisitable => false;
         public bool IsGridMovement => true;
+    }
+
+    private sealed class NoopBlueprintResearchWorkService : IBlueprintResearchWorkService
+    {
+        public bool HasResearchWorkFor(BuildableObject facility)
+        {
+            return false;
+        }
+
+        public BlueprintResearchWorkResult ApplyResearchWork(
+            CharacterActor researcher,
+            BuildableObject researchFacility,
+            float seconds)
+        {
+            return new BlueprintResearchWorkResult(
+                false,
+                null,
+                0f,
+                0f,
+                1f,
+                false,
+                "Defense scenario fixture has no blueprint research runtime.");
+        }
+    }
+
+    private sealed class NoopStaffDiscontentRuntimeService : IStaffDiscontentRuntimeService
+    {
+        public float GetWorkEfficiencyMultiplier(CharacterActor staff)
+        {
+            return 1f;
+        }
+
+        public bool ShouldBlockWork(CharacterActor staff, out string reason)
+        {
+            reason = string.Empty;
+            return false;
+        }
+
+        public bool IsRebellionTarget(CharacterActor target)
+        {
+            return false;
+        }
+
+        public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender)
+        {
+            return false;
+        }
+    }
+
+    private sealed class NoopFloatingIconFeedbackService : IFloatingIconFeedbackService
+    {
+        public bool Show(Component target, Sprite sprite, float maxWorldSize)
+        {
+            return false;
+        }
+    }
+
+    private sealed class ScenarioWorkGridResolver : IWorkGridResolver
+    {
+        public Grid ResolveActiveGrid(
+            AbilityWork work,
+            GridPathSearchResult searchResult,
+            Grid priorityGrid = null)
+        {
+            if (searchResult != null && searchResult.sourceGrid != null)
+            {
+                return searchResult.sourceGrid;
+            }
+
+            if (priorityGrid != null)
+            {
+                return priorityGrid;
+            }
+
+            return work != null ? work.CachedGrid : null;
+        }
+
+        public Vector2Int GetGridPosition(Grid activeGrid, CharacterActor actor)
+        {
+            if (activeGrid == null || actor == null)
+            {
+                return Vector2Int.zero;
+            }
+
+            Vector2Int position = activeGrid.GetXY(actor.transform.position);
+            return activeGrid.IsValidGridPos(position) ? position : Vector2Int.zero;
+        }
+    }
+
+    private sealed class NoopWorldInfoClickSelector : IWorldInfoClickSelector
+    {
+        public bool TryHandleWorldInfoClick()
+        {
+            return false;
+        }
+
+        public bool TryTriggerCharacterUnderPointer()
+        {
+            return false;
+        }
+
+        public bool TryGetPreferredCharacterUnderPointer(out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacterAtScreenPosition(
+            Vector3 screenPosition,
+            Camera camera,
+            out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacter(Collider2D[] hits, out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+    }
+
+    private sealed class NoopOwnerRunLifecycleService : IOwnerRunLifecycleService
+    {
+        public void HandleOwnerDeath(CharacterActor owner, string reason)
+        {
+        }
+    }
+
+    private sealed class ScenarioMetaProgressionRuntimeReader : IMetaProgressionRuntimeReader
+    {
+        public int GetStartingFacilityCandidateBonus()
+        {
+            return 0;
+        }
+
+        public int GetStartingOwnerTraitCandidateBonus()
+        {
+            return 0;
+        }
+
+        public float GetOwnerMaxHealthMultiplier()
+        {
+            return 1f;
+        }
+
+        public float GetInvasionWarningThresholdMultiplier()
+        {
+            return 1f;
+        }
+
+        public bool IsRecipePreserved(string recipeId)
+        {
+            return false;
+        }
+
+        public IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(IEnumerable<BuildingSO> buildings)
+        {
+            return Array.Empty<int>();
+        }
     }
 
     private sealed class CountingDefenseTriggerListener : UtilEventListener<DefenseFacilityTriggeredEvent>, IDisposable

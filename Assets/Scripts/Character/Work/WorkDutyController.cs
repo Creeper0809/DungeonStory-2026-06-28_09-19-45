@@ -19,18 +19,17 @@ public sealed class WorkDutyController
 
     public void InitializeWorkerCondition(CharacterSO data)
     {
-        Character character = work.WorkerCharacter;
-        if (character == null
-            || character.stats == null
-            || data == null)
+        if (GetWorkerStats() == null || data == null)
         {
             return;
         }
 
-        EnsureStatAtLeast(Character.Condition.SLEEP, 85f);
-        EnsureStatAtLeast(Character.Condition.MOOD, 75f);
-        EnsureStatAtLeast(Character.Condition.FUN, 70f);
-        EnsureStatAtLeast(Character.Condition.HUNGER, 80f);
+        EnsureStatAtLeast(CharacterCondition.SLEEP, 85f);
+        EnsureStatAtLeast(CharacterCondition.MOOD, 75f);
+        EnsureStatAtLeast(CharacterCondition.FUN, 70f);
+        EnsureStatAtLeast(CharacterCondition.HUNGER, 80f);
+        EnsureStatAtLeast(CharacterCondition.EXCRETION, 85f);
+        EnsureStatAtLeast(CharacterCondition.HYGIENE, 80f);
     }
 
     public bool ShouldUseRestProtection()
@@ -42,14 +41,14 @@ public sealed class WorkDutyController
             return false;
         }
 
-        Character character = work.WorkerCharacter;
-        if (character == null || character.stats == null)
+        CharacterStats stats = GetWorkerStats();
+        if (stats == null)
         {
             restProtectionActive = false;
             return false;
         }
 
-        if (!character.stats.TryGetValue(Character.Condition.SLEEP, out float sleep))
+        if (!stats.Stats.TryGetValue(CharacterCondition.SLEEP, out float sleep))
         {
             restProtectionActive = false;
             return false;
@@ -84,8 +83,8 @@ public sealed class WorkDutyController
 
     public bool CanStartWorkAction()
     {
-        Character character = work.WorkerCharacter;
-        if (character != null && character.IsOnExpedition)
+        CharacterActor actor = work.WorkerActor;
+        if (actor != null && actor.IsOnExpedition)
         {
             return false;
         }
@@ -95,7 +94,7 @@ public sealed class WorkDutyController
             if (IsOffDuty)
             {
                 SetDutyState(AbilityWork.DutyState.OnDuty);
-                character?.AddLog("비번 중 제압 명령 대응");
+                actor?.AddLog("비번 중 제압 명령 대응");
             }
 
             return true;
@@ -106,14 +105,13 @@ public sealed class WorkDutyController
             if (IsOffDuty)
             {
                 SetDutyState(AbilityWork.DutyState.OnDuty);
-                character?.AddLog("비번 중 우선 작업 대응");
+                actor?.AddLog("비번 중 우선 작업 대응");
             }
 
             return true;
         }
 
-        if (StaffDiscontentRuntime.Instance != null
-            && StaffDiscontentRuntime.Instance.ShouldBlockWork(character, out string discontentReason))
+        if (work.StaffDiscontentRuntimeService.ShouldBlockWork(actor, out string discontentReason))
         {
             BeginOffDuty(string.IsNullOrWhiteSpace(discontentReason)
                 ? "직원 불만"
@@ -126,7 +124,7 @@ public sealed class WorkDutyController
             if (ShouldReturnToWork())
             {
                 SetDutyState(AbilityWork.DutyState.OnDuty);
-                character?.AddLog("근무 복귀");
+                actor?.AddLog("근무 복귀");
                 return true;
             }
 
@@ -149,18 +147,20 @@ public sealed class WorkDutyController
 
     public bool ShouldTakeOffDuty()
     {
-        Character character = work.WorkerCharacter;
-        if (character == null
-            || character.IsOwner
-            || character.stats == null)
+        CharacterActor actor = work.WorkerActor;
+        if (actor == null || actor.IsOwner || GetWorkerStats() == null)
         {
             return false;
         }
 
-        float sleep = GetStat(Character.Condition.SLEEP, 100f);
-        float mood = GetStat(Character.Condition.MOOD, 100f);
+        float sleep = GetStat(CharacterCondition.SLEEP, 100f);
+        float mood = GetStat(CharacterCondition.MOOD, 100f);
+        float excretion = GetStat(CharacterCondition.EXCRETION, 100f);
+        float hygiene = GetStat(CharacterCondition.HYGIENE, 100f);
         return sleep <= work.OffDutySleepThreshold
-            || mood <= work.OffDutyMoodThreshold;
+            || mood <= work.OffDutyMoodThreshold
+            || excretion <= 25f
+            || hygiene <= 20f;
     }
 
     public bool ShouldReturnToWork()
@@ -175,16 +175,20 @@ public sealed class WorkDutyController
             return false;
         }
 
-        float sleep = GetStat(Character.Condition.SLEEP, 0f);
-        float mood = GetStat(Character.Condition.MOOD, 0f);
+        float sleep = GetStat(CharacterCondition.SLEEP, 0f);
+        float mood = GetStat(CharacterCondition.MOOD, 0f);
+        float excretion = GetStat(CharacterCondition.EXCRETION, 0f);
+        float hygiene = GetStat(CharacterCondition.HYGIENE, 0f);
         return sleep >= work.ReturnToWorkSleepThreshold
-            && mood >= work.ReturnToWorkMoodThreshold;
+            && mood >= work.ReturnToWorkMoodThreshold
+            && excretion >= 55f
+            && hygiene >= 45f;
     }
 
     public void BeginOffDuty(string reason)
     {
-        Character character = work.WorkerCharacter;
-        if (character == null || character.IsOwner)
+        CharacterActor actor = work.WorkerActor;
+        if (actor == null || actor.IsOwner)
         {
             return;
         }
@@ -194,12 +198,12 @@ public sealed class WorkDutyController
         SetDutyState(AbilityWork.DutyState.OffDuty);
         if (!wasOffDuty)
         {
-            character.AddLog(string.IsNullOrWhiteSpace(reason)
+            actor.AddLog(string.IsNullOrWhiteSpace(reason)
                 ? "비번 시작"
                 : $"비번 시작: {reason}");
         }
 
-        if (!wasOffDuty && character.TryGetAbility(out AbilityShopping shopping))
+        if (!wasOffDuty && actor.TryGetAbility(out AbilityShopping shopping))
         {
             shopping.BeginOffDutyVisitCycle();
         }
@@ -210,7 +214,7 @@ public sealed class WorkDutyController
         work.ReleaseAssignedWorkTarget();
         work.ClearPriorityWorkTarget();
         SetDutyState(AbilityWork.DutyState.OnDuty);
-        work.WorkerCharacter?.AddLog("원정 준비: 작업 해제");
+        work.WorkerActor?.AddLog("원정 준비: 작업 해제");
     }
 
     public void SetDutyState(AbilityWork.DutyState nextState)
@@ -227,64 +231,84 @@ public sealed class WorkDutyController
         }
 
         dutyState = nextState;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        work.MarkFacilityDynamicStateDirty();
         if (!work.isWorking)
         {
-            work.WorkerCharacter?.ai?.RequestImmediateReplan(
+            work.WorkerActor?.Brain?.RequestImmediateReplan(
                 clearFailures: nextState == AbilityWork.DutyState.OnDuty);
         }
     }
 
-    public void RecoverOffDuty(float sleep, float mood, float fun = 0f, float hunger = 0f)
+    public void RecoverOffDuty(
+        float sleep,
+        float mood,
+        float fun = 0f,
+        float hunger = 0f,
+        float excretion = 0f,
+        float hygiene = 0f)
     {
-        Character character = work.WorkerCharacter;
-        if (character == null) return;
+        CharacterStats stats = GetWorkerStats();
+        if (stats == null) return;
 
-        if (sleep != 0f) character.ChangesStat(Character.Condition.SLEEP, sleep);
-        if (mood != 0f) character.ChangesStat(Character.Condition.MOOD, mood);
-        if (fun != 0f) character.ChangesStat(Character.Condition.FUN, fun);
-        if (hunger != 0f) character.ChangesStat(Character.Condition.HUNGER, hunger);
+        if (sleep != 0f) stats.ChangesStat(CharacterCondition.SLEEP, sleep);
+        if (mood != 0f)
+        {
+            stats.ApplyMoodFactor(
+                "rest:off-duty",
+                mood > 0f ? "잠깐 숨을 돌림" : "제대로 쉬지 못함",
+                mood,
+                90f,
+                3);
+        }
+        if (fun != 0f) stats.ChangesStat(CharacterCondition.FUN, fun);
+        if (hunger != 0f) stats.ChangesStat(CharacterCondition.HUNGER, hunger);
+        if (excretion != 0f) stats.ChangesStat(CharacterCondition.EXCRETION, excretion);
+        if (hygiene != 0f) stats.ChangesStat(CharacterCondition.HYGIENE, hygiene);
     }
 
     public void ApplyWorkFatigueTick()
     {
-        Character character = work.WorkerCharacter;
-        if (character == null || character.stats == null) return;
+        CharacterStats stats = GetWorkerStats();
+        if (stats == null) return;
 
-        character.ChangesStat(Character.Condition.SLEEP, -work.SleepDrainPerWorkTick);
-        character.ChangesStat(Character.Condition.MOOD, -work.MoodDrainPerWorkTick);
+        stats.ChangesStat(CharacterCondition.SLEEP, -work.SleepDrainPerWorkTick);
+        stats.ApplyMoodFactor(
+            "work:fatigue",
+            "계속된 작업",
+            -work.MoodDrainPerWorkTick,
+            90f,
+            8);
+        stats.ChangesStat(CharacterCondition.EXCRETION, -0.35f);
+        stats.ChangesStat(CharacterCondition.HYGIENE, -0.2f);
     }
 
     public IEnumerator CheckActionWork(int runId)
     {
-        Character character = work.WorkerCharacter;
+        CharacterActor actor = work.WorkerActor;
         string endReason = string.Empty;
         float startedAt = Time.time;
-        while (work.CanContinueWorkRun(runId) && character != null && character.ai != null)
+        while (work.CanContinueWorkRun(runId) && actor != null && actor.Brain != null)
         {
-            WorkDebugLog.LogProgress(character);
             ApplyWorkFatigueTick();
             if (!CanContinueAssignedWork(out string stopReason))
             {
                 endReason = stopReason;
-                WorkDebugLog.LogEnd(character, stopReason);
-                character.AddLog($"작업 종료: {stopReason}");
+                WorkDebugLog.LogEnd(actor, stopReason);
                 break;
             }
 
             if (ShouldInterruptCurrentWork(out string interruptReason))
             {
                 endReason = interruptReason;
-                WorkDebugLog.LogEnd(character, interruptReason);
-                character.AddLog($"작업 종료: {interruptReason}");
+                WorkDebugLog.LogEnd(actor, interruptReason);
                 break;
             }
 
             if (ShouldEndRoutineWorkShift(startedAt, out string routineShiftReason))
             {
                 endReason = routineShiftReason;
-                WorkDebugLog.LogEnd(character, routineShiftReason);
-                character.AddLog($"근무 교대: {routineShiftReason}");
+                WorkDebugLog.LogEnd(actor, $"근무 교대 · {routineShiftReason}");
+                actor.AddLog($"근무 교대: {routineShiftReason}");
                 work.BeginRoutineWorkCooldown(work.AssignedWorkType);
                 break;
             }
@@ -302,8 +326,7 @@ public sealed class WorkDutyController
         if (string.IsNullOrWhiteSpace(endReason))
         {
             const string externalStopReason = "외부 작업 상태 해제";
-            WorkDebugLog.LogEnd(character, externalStopReason);
-            character?.AddLog($"작업 종료: {externalStopReason}");
+            WorkDebugLog.LogEnd(actor, externalStopReason);
         }
 
         work.ClearActiveWorkCheckRoutine(runId);
@@ -417,27 +440,32 @@ public sealed class WorkDutyController
         return true;
     }
 
-    private void EnsureStatAtLeast(Character.Condition condition, float value)
+    private void EnsureStatAtLeast(CharacterCondition condition, float value)
     {
-        Character character = work.WorkerCharacter;
-        if (character == null || character.stats == null) return;
+        CharacterStats stats = GetWorkerStats();
+        if (stats == null) return;
 
-        if (!character.stats.TryGetValue(condition, out float current) || current < value)
+        if (!stats.Stats.TryGetValue(condition, out float current) || current < value)
         {
-            character.stats[condition] = value;
+            stats.Stats[condition] = value;
         }
     }
 
-    private float GetStat(Character.Condition condition, float defaultValue)
+    private float GetStat(CharacterCondition condition, float defaultValue)
     {
-        Character character = work.WorkerCharacter;
-        if (character == null || character.stats == null)
+        CharacterStats stats = GetWorkerStats();
+        if (stats == null)
         {
             return defaultValue;
         }
 
-        return character.stats.TryGetValue(condition, out float value)
+        return stats.Stats.TryGetValue(condition, out float value)
             ? value
             : defaultValue;
+    }
+
+    private CharacterStats GetWorkerStats()
+    {
+        return work.WorkerActor != null ? work.WorkerActor.Stats : null;
     }
 }

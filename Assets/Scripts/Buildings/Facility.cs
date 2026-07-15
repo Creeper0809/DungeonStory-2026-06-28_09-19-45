@@ -1,10 +1,10 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Linq;
 using UnityEngine;
 
 public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWarehouseFacility
 {
-    private Character worker;
+    private CharacterActor worker;
     private WarehouseInventory warehouseInventory;
 
     public WarehouseInventory Inventory => warehouseInventory;
@@ -14,47 +14,78 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
     {
         base.Initialization(buildingSO, buildPos);
 
-        warehouseInventory = Facility != null
-            && Facility.SupportsRole(FacilityRole.Logistics)
-            && Facility.internalStockMax > 0
-                ? WarehouseInventory.CreateSeeded(Facility.internalStockMax)
-                : null;
+        if (Operational != null && Operational.storageCapacity > 0)
+        {
+            bool restrictCategory = !Operational.HasFunction(FacilityFunction.Logistics);
+            warehouseInventory = new WarehouseInventory(
+                Operational.storageCapacity,
+                Operational.storageCategory,
+                restrictCategory);
+            if (Operational.HasFunction(FacilityFunction.Logistics))
+            {
+                warehouseInventory.ApplySnapshot(
+                    WarehouseInventory.CreateSeeded(Operational.storageCapacity).CreateSnapshot());
+            }
+        }
+        else
+        {
+            warehouseInventory = Facility != null
+                && Facility.SupportsRole(FacilityRole.Logistics)
+                && Facility.internalStockMax > 0
+                    ? WarehouseInventory.CreateSeeded(Facility.internalStockMax)
+                    : null;
+        }
     }
 
-    public IEnumerator Interact(Character character)
+    public IEnumerator Interact(CharacterActor actor)
     {
-        if (!TryBeginUse(character, out string failureReason))
+        if (!TryBeginUse(actor, out string failureReason))
         {
-            character?.AddLog($"{objectNameOrDefault()} ?댁슜 ?ㅽ뙣: {failureReason}");
+            actor?.AddLog($"{objectNameOrDefault()} 이용 실패: {failureReason}");
             yield break;
         }
 
-        AbilityMove moveable = character != null ? character.GetAbility<AbilityMove>() : null;
+        AbilityMove moveable = actor != null ? actor.GetAbility<AbilityMove>() : null;
         if (moveable == null)
         {
-            EndUse(character);
+            EndUse(actor);
             yield break;
         }
 
-        yield return moveable.Move2PosBySpeed(GetRandomUsePosition(), 0.7f);
+        AIAction currentAction = actor != null && actor.Brain != null
+            ? actor.Brain.bestAction
+            : null;
+        Vector3 usePosition = GetFacilityAnchorWorldPosition(FacilityAnchorKind.Use, actor.transform.position);
+        actor?.Brain?.SetActionPhase("\uC2DC\uC124 \uC811\uADFC", this);
+        yield return moveable.Move2PosBySpeed(usePosition, 0.7f, currentAction);
+        actor?.Brain?.SetActionPhase("\uC790\uB9AC \uC7A1\uAE30", this);
+        yield return Linger(actor, 0.12f, currentAction);
 
         float duration = Facility != null ? Facility.useDuration : 1f;
-        if (character != null)
+        if (actor != null && actor.Stats != null)
         {
-            duration *= character.GetStayDurationMultiplier();
+            duration *= actor.Stats.GetStayDurationMultiplier();
         }
 
+        actor?.Brain?.SetActionPhase("\uC2DC\uC124 \uC774\uC6A9", this, $"{duration:0.#}s");
         if (duration > 0f)
         {
             yield return new WaitForSeconds(duration);
         }
 
-        ApplyUseRecovery(character);
-        character?.AddLog($"{objectNameOrDefault()} ?댁슜 ?꾨즺");
-        EndUse(character);
+        ApplyConfiguredUseRecovery(actor);
+        ModularFacilityRuntimeEffects.ApplyUseCompleted(actor, this);
+        RoomEnvironmentExperienceEvent.Trigger(
+            actor,
+            this,
+            RoomExperienceActivity.FacilityUse);
+        actor?.Brain?.SetActionPhase("\uC774\uC6A9 \uC815\uB9AC", this);
+        yield return Linger(actor, 0.12f, currentAction);
+        actor?.AddLog($"{objectNameOrDefault()} 이용 완료");
+        EndUse(actor);
     }
 
-    public bool CanAssignWorker(Character character, out string failureReason)
+    public bool CanAssignWorker(CharacterActor actor, out string failureReason)
     {
         PruneInvalidWorker();
         bool hasAssignableWork = false;
@@ -73,13 +104,13 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
             return false;
         }
 
-        if (worker != null && worker != character)
+        if (worker != null && worker != actor)
         {
             failureReason = "이미 근무자가 있음";
             return false;
         }
 
-        if (HasWorkerReservationForOther(character))
+        if (HasWorkerReservationForOther(actor))
         {
             failureReason = "이미 작업 예약됨";
             return false;
@@ -88,37 +119,73 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
         return true;
     }
 
-    public IEnumerator AllocateWorker(Character character)
+    public IEnumerator AllocateWorker(CharacterActor actor)
     {
         PruneInvalidWorker();
-        if (!CanAssignWorker(character, out _))
+        if (!CanAssignWorker(actor, out _))
         {
             yield break;
         }
 
-        worker = character;
-        ReleaseWorkerReservation(character);
-        AbilityMove moveable = character.GetAbility<AbilityMove>();
+        worker = actor;
+        ReleaseWorkerReservation(actor);
+        AbilityMove moveable = actor != null ? actor.GetAbility<AbilityMove>() : null;
         if (moveable == null) yield break;
 
-        yield return moveable.Move2PosBySpeed(GetWorkerPosition());
-        character.ChangeLayer("DungeonMiddleObject");
-        character.transform.position = GetWorkerPosition() + new Vector2(0f, 0.15f);
-        character.Flip(Character.Facing.RIGHT);
+        AIAction currentAction = actor != null && actor.Brain != null
+            ? actor.Brain.bestAction
+            : null;
+        Vector3 workPosition = GetFacilityAnchorWorldPosition(FacilityAnchorKind.Work, actor.transform.position);
+        actor?.Brain?.SetActionPhase("\uC791\uC5C5\uB300 \uC811\uADFC", this);
+        yield return moveable.Move2PosBySpeed(workPosition, 1f, currentAction);
+        actor.ChangeLayer("DungeonMiddleObject");
+        yield return moveable.Move2PosBySpeed(workPosition + new Vector3(0f, 0.15f), 3f, currentAction);
+        actor?.Brain?.SetActionPhase("\uC791\uC5C5 \uC790\uC138", this);
+        actor.Flip(CharacterFacing.RIGHT);
     }
 
-    public void DeallocateWorker(Character character)
+    public void DeallocateWorker(CharacterActor actor)
     {
+        if (actor == null)
+        {
+            return;
+        }
+
         PruneInvalidWorker();
-        if (worker != character) return;
+        if (worker != actor) return;
 
         worker = null;
-        character.transform.position -= new Vector3(0f, 0.15f);
-        if (TryGetNearestWalkableWorldPosition(character.transform.position, out Vector3 exitPosition))
+        actor.Brain?.SetActionPhase("\uC2DC\uC124 \uD1F4\uC7A5", this);
+        actor.transform.position -= new Vector3(0f, 0.15f);
+        if (TryGetFacilityOccupiedWorldPosition(actor.transform.position, out Vector3 exitPosition))
         {
-            character.transform.position = exitPosition;
+            actor.transform.position = exitPosition;
         }
-        character.ChangeLayer("Default");
+        actor.ChangeLayer("Default");
+    }
+
+    private static IEnumerator Linger(CharacterActor actor, float seconds, AIAction expectedAction)
+    {
+        if (seconds <= 0f)
+        {
+            yield break;
+        }
+
+        float timer = 0f;
+        while (timer < seconds)
+        {
+            if (expectedAction != null
+                && (actor == null
+                    || actor.Brain == null
+                    || actor.Brain.bestAction != expectedAction
+                    || actor.Brain.isBestActionEnd))
+            {
+                yield break;
+            }
+
+            timer += Time.deltaTime;
+            yield return null;
+        }
     }
 
     private void PruneInvalidWorker()
@@ -152,9 +219,9 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
 
         int minX = buildPoses.Min((pos) => pos.x);
         int maxX = buildPoses.Max((pos) => pos.x);
-        Vector2 left = grid.GetWorldPos(new Vector2Int(maxX, centerPos.y));
-        Vector2 right = grid.GetWorldPos(new Vector2Int(minX, centerPos.y));
-        return new Vector2(Random.Range(left.x, right.x), left.y);
+        Vector2 minWorld = grid.GetWorldPos(new Vector2Int(minX, centerPos.y));
+        Vector2 maxWorld = grid.GetWorldPos(new Vector2Int(maxX, centerPos.y));
+        return new Vector2(Random.Range(minWorld.x, maxWorld.x), minWorld.y);
     }
 
     private Vector2 GetWorkerPosition()
@@ -168,17 +235,26 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
         return grid.GetWorldPos(new Vector2(endX, centerPos.y));
     }
 
-    private void ApplyUseRecovery(Character character)
+    public void ApplyConfiguredUseRecovery(CharacterActor actor)
     {
-        if (character == null || Facility == null)
+        if (actor == null || Facility == null)
         {
             return;
         }
 
-        float sleep = 0f;
-        float mood = 0f;
-        float fun = 0f;
-        float hunger = 0f;
+        FacilityNeedRecoveryData configured = Operational != null ? Operational.recovery : default;
+        float sleep = configured.sleep;
+        float mood = configured.mood;
+        float fun = configured.fun;
+        float hunger = configured.hunger;
+        float excretion = configured.excretion;
+        float hygiene = configured.hygiene;
+
+        if (configured.HasEffect)
+        {
+            ApplyRecovery(actor, sleep, mood, fun, hunger, excretion, hygiene);
+            return;
+        }
 
         if (Facility.SupportsRole(FacilityRole.Rest))
         {
@@ -214,21 +290,61 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
             mood += 5f;
         }
 
-        if (sleep == 0f && mood == 0f && fun == 0f && hunger == 0f)
+        if (Facility.SupportsRole(FacilityRole.Toilet))
+        {
+            excretion += 70f;
+            mood += 2f;
+        }
+
+        if (Facility.SupportsRole(FacilityRole.Hygiene))
+        {
+            hygiene += 60f;
+            mood += 4f;
+        }
+
+        ApplyRecovery(actor, sleep, mood, fun, hunger, excretion, hygiene);
+    }
+
+    private void ApplyRecovery(
+        CharacterActor actor,
+        float sleep,
+        float mood,
+        float fun,
+        float hunger,
+        float excretion,
+        float hygiene)
+    {
+        if (sleep == 0f
+            && mood == 0f
+            && fun == 0f
+            && hunger == 0f
+            && excretion == 0f
+            && hygiene == 0f)
         {
             return;
         }
 
-        if (character.TryGetAbility(out AbilityWork work))
+        if (mood != 0f)
         {
-            work.RecoverOffDuty(sleep, mood, fun, hunger);
+            actor.ApplyMoodFactor(
+                $"facility:{GetInstanceID()}",
+                $"{objectNameOrDefault()} 이용",
+                mood,
+                180f,
+                2);
+        }
+
+        if (actor.TryGetAbility(out AbilityWork work))
+        {
+            work.RecoverOffDuty(sleep, 0f, fun, hunger, excretion, hygiene);
             return;
         }
 
-        if (sleep != 0f) character.ChangesStat(Character.Condition.SLEEP, sleep);
-        if (mood != 0f) character.ChangesStat(Character.Condition.MOOD, mood);
-        if (fun != 0f) character.ChangesStat(Character.Condition.FUN, fun);
-        if (hunger != 0f) character.ChangesStat(Character.Condition.HUNGER, hunger);
+        if (sleep != 0f) actor.ChangesStat(CharacterCondition.SLEEP, sleep);
+        if (fun != 0f) actor.ChangesStat(CharacterCondition.FUN, fun);
+        if (hunger != 0f) actor.ChangesStat(CharacterCondition.HUNGER, hunger);
+        if (excretion != 0f) actor.ChangesStat(CharacterCondition.EXCRETION, excretion);
+        if (hygiene != 0f) actor.ChangesStat(CharacterCondition.HYGIENE, hygiene);
     }
 
     private string objectNameOrDefault()

@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using VContainer;
 
 [Serializable]
 public class FacilityRevenueSummary
@@ -190,20 +191,20 @@ public struct OperatingDayReportEvent
 
 public struct FacilityVisitEvent
 {
-    public Character visitor;
+    public CharacterActor visitorActor;
     public BuildableObject facility;
 
-    public FacilityVisitEvent(Character visitor, BuildableObject facility)
+    public FacilityVisitEvent(CharacterActor visitor, BuildableObject facility)
     {
-        this.visitor = visitor;
+        visitorActor = visitor;
         this.facility = facility;
     }
 
     private static FacilityVisitEvent e;
 
-    public static void Trigger(Character visitor, BuildableObject facility)
+    public static void Trigger(CharacterActor visitor, BuildableObject facility)
     {
-        e.visitor = visitor;
+        e.visitorActor = visitor;
         e.facility = facility;
         EventObserver.TriggerEvent(e);
     }
@@ -211,22 +212,22 @@ public struct FacilityVisitEvent
 
 public struct FacilityRevenueEvent
 {
-    public Character customer;
+    public CharacterActor customerActor;
     public BuildableObject facility;
     public int revenue;
 
-    public FacilityRevenueEvent(Character customer, BuildableObject facility, int revenue)
+    public FacilityRevenueEvent(CharacterActor customer, BuildableObject facility, int revenue)
     {
-        this.customer = customer;
+        customerActor = customer;
         this.facility = facility;
         this.revenue = revenue;
     }
 
     private static FacilityRevenueEvent e;
 
-    public static void Trigger(Character customer, BuildableObject facility, int revenue)
+    public static void Trigger(CharacterActor customer, BuildableObject facility, int revenue)
     {
-        e.customer = customer;
+        e.customerActor = customer;
         e.facility = facility;
         e.revenue = revenue;
         EventObserver.TriggerEvent(e);
@@ -235,14 +236,14 @@ public struct FacilityRevenueEvent
 
 public struct FacilityStockConsumedEvent
 {
-    public Character consumer;
+    public CharacterActor consumerActor;
     public BuildableObject facility;
     public StockCategory category;
     public int amount;
 
-    public FacilityStockConsumedEvent(Character consumer, BuildableObject facility, StockCategory category, int amount)
+    public FacilityStockConsumedEvent(CharacterActor consumer, BuildableObject facility, StockCategory category, int amount)
     {
-        this.consumer = consumer;
+        consumerActor = consumer;
         this.facility = facility;
         this.category = category;
         this.amount = amount;
@@ -250,12 +251,57 @@ public struct FacilityStockConsumedEvent
 
     private static FacilityStockConsumedEvent e;
 
-    public static void Trigger(Character consumer, BuildableObject facility, StockCategory category, int amount)
+    public static void Trigger(CharacterActor consumer, BuildableObject facility, StockCategory category, int amount)
     {
-        e.consumer = consumer;
+        e.consumerActor = consumer;
         e.facility = facility;
         e.category = category;
         e.amount = amount;
+        EventObserver.TriggerEvent(e);
+    }
+}
+
+public enum FacilityCrimeKind
+{
+    Shoplifting
+}
+
+public struct FacilityCrimeEvent
+{
+    public CharacterActor actor;
+    public BuildableObject facility;
+    public FacilityCrimeKind kind;
+    public string detail;
+    public int lossValue;
+
+    public FacilityCrimeEvent(
+        CharacterActor actor,
+        BuildableObject facility,
+        FacilityCrimeKind kind,
+        string detail,
+        int lossValue)
+    {
+        this.actor = actor;
+        this.facility = facility;
+        this.kind = kind;
+        this.detail = detail ?? string.Empty;
+        this.lossValue = Mathf.Max(0, lossValue);
+    }
+
+    private static FacilityCrimeEvent e;
+
+    public static void Trigger(
+        CharacterActor actor,
+        BuildableObject facility,
+        FacilityCrimeKind kind,
+        string detail,
+        int lossValue)
+    {
+        e.actor = actor;
+        e.facility = facility;
+        e.kind = kind;
+        e.detail = detail ?? string.Empty;
+        e.lossValue = Mathf.Max(0, lossValue);
         EventObserver.TriggerEvent(e);
     }
 }
@@ -293,23 +339,56 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
     UtilEventListener<FacilityVisitEvent>,
     UtilEventListener<FacilityRevenueEvent>,
     UtilEventListener<FacilityStockConsumedEvent>,
+    UtilEventListener<FacilityCrimeEvent>,
     UtilEventListener<FacilityRestockEvent>,
     UtilEventListener<StockSupplyEvent>,
     UtilEventListener<EventAlertLoggedEvent>
 {
+    private const int MaxReportHistory = 20;
+
     private readonly Dictionary<string, int> facilityRevenue = new Dictionary<string, int>();
     private readonly Dictionary<string, int> speciesVisits = new Dictionary<string, int>();
     private readonly Dictionary<StockCategory, int> consumedStock = new Dictionary<StockCategory, int>();
     private readonly List<float> visitorMoodSamples = new List<float>();
     private readonly List<StockSupplyResult> stockSupplyResults = new List<StockSupplyResult>();
+    private readonly List<string> incidents = new List<string>();
     private readonly List<string> eventLog = new List<string>();
     private int totalRevenue;
     private int totalVisits;
     private int restockFailureCount;
     private int currentDay = 1;
     private OperatingDayReport latestReport;
+    private readonly List<OperatingDayReport> reportHistory = new List<OperatingDayReport>();
+    private IDungeonSceneComponentQuery sceneQuery;
+    private IFacilityShopCatalog facilityShopCatalog;
+    private IRunVariableRuntimeReader runVariableReader;
 
     public OperatingDayReport LatestReport => latestReport;
+    public IReadOnlyList<OperatingDayReport> ReportHistory => reportHistory;
+    public int CurrentDay => currentDay;
+    public int CurrentRevenue => totalRevenue;
+    public int CurrentVisits => totalVisits;
+    public int CurrentRestockFailureCount => restockFailureCount;
+    public int CurrentConsumedStock => consumedStock.Values.Sum();
+    public int CurrentIncidentCount => incidents.Count;
+    public int CurrentEventCount => eventLog.Count;
+    public float CurrentAverageSatisfaction => visitorMoodSamples.Count > 0
+        ? visitorMoodSamples.Average()
+        : 0f;
+
+    [Inject]
+    public void Construct(
+        IDungeonSceneComponentQuery sceneQuery,
+        IFacilityShopCatalog facilityShopCatalog,
+        IRunVariableRuntimeReader runVariableReader)
+    {
+        this.sceneQuery = sceneQuery
+            ?? throw new ArgumentNullException(nameof(sceneQuery));
+        this.facilityShopCatalog = facilityShopCatalog
+            ?? throw new ArgumentNullException(nameof(facilityShopCatalog));
+        this.runVariableReader = runVariableReader
+            ?? throw new ArgumentNullException(nameof(runVariableReader));
+    }
 
     public void OnTriggerEvent(OperatingDayStartedEvent eventType)
     {
@@ -320,23 +399,31 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
     public void OnTriggerEvent(OperatingDayEndedEvent eventType)
     {
         latestReport = BuildReport(Mathf.Max(1, eventType.day));
+        reportHistory.Insert(0, latestReport);
+        if (reportHistory.Count > MaxReportHistory)
+        {
+            reportHistory.RemoveRange(MaxReportHistory, reportHistory.Count - MaxReportHistory);
+        }
+
         OperatingDayReportEvent.Trigger(latestReport);
         ResetLedger();
     }
 
     public void OnTriggerEvent(FacilityVisitEvent eventType)
     {
-        Character visitor = eventType.visitor;
-        if (visitor == null || visitor.characterType != CharacterType.Customer)
+        CharacterActor visitor = eventType.visitorActor;
+        CharacterIdentity identity = visitor != null ? visitor.Identity : null;
+        if (visitor == null || identity == null || identity.CharacterType != CharacterType.Customer)
         {
             return;
         }
 
         totalVisits++;
-        string species = string.IsNullOrWhiteSpace(visitor.SpeciesTag) ? "Unknown" : visitor.SpeciesTag;
+        string species = string.IsNullOrWhiteSpace(identity.SpeciesTag) ? "Unknown" : identity.SpeciesTag;
         speciesVisits[species] = speciesVisits.TryGetValue(species, out int count) ? count + 1 : 1;
 
-        if (visitor.stats != null && visitor.stats.TryGetValue(Character.Condition.MOOD, out float mood))
+        CharacterStats stats = visitor.Stats;
+        if (stats != null && stats.Stats.TryGetValue(CharacterCondition.MOOD, out float mood))
         {
             visitorMoodSamples.Add(mood);
         }
@@ -362,6 +449,14 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
         consumedStock[eventType.category] = consumedStock.TryGetValue(eventType.category, out int current)
             ? current + amount
             : amount;
+    }
+
+    public void OnTriggerEvent(FacilityCrimeEvent eventType)
+    {
+        string detail = string.IsNullOrWhiteSpace(eventType.detail)
+            ? $"{eventType.kind}: loss {Mathf.Max(0, eventType.lossValue)}"
+            : eventType.detail;
+        incidents.Add(detail);
     }
 
     public void OnTriggerEvent(FacilityRestockEvent eventType)
@@ -394,6 +489,7 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
         this.EventStartListening<FacilityVisitEvent>();
         this.EventStartListening<FacilityRevenueEvent>();
         this.EventStartListening<FacilityStockConsumedEvent>();
+        this.EventStartListening<FacilityCrimeEvent>();
         this.EventStartListening<FacilityRestockEvent>();
         this.EventStartListening<StockSupplyEvent>();
         this.EventStartListening<EventAlertLoggedEvent>();
@@ -406,6 +502,7 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
         this.EventStopListening<FacilityVisitEvent>();
         this.EventStopListening<FacilityRevenueEvent>();
         this.EventStopListening<FacilityStockConsumedEvent>();
+        this.EventStopListening<FacilityCrimeEvent>();
         this.EventStopListening<FacilityRestockEvent>();
         this.EventStopListening<StockSupplyEvent>();
         this.EventStopListening<EventAlertLoggedEvent>();
@@ -413,8 +510,8 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
 
     private OperatingDayReport BuildReport(int day)
     {
-        BuildableObject[] buildings = FindObjectsByType<BuildableObject>(FindObjectsSortMode.None);
-        Character[] characters = FindObjectsByType<Character>(FindObjectsSortMode.None);
+        IReadOnlyList<BuildableObject> buildings = RequireSceneQuery().All<BuildableObject>();
+        IReadOnlyList<CharacterActor> characters = RequireSceneQuery().All<CharacterActor>();
 
         OperatingDayReport report = new OperatingDayReport
         {
@@ -435,10 +532,14 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
                 .Select((pair) => new StockConsumptionSummary { category = pair.Key, amount = pair.Value })
                 .OrderByDescending((item) => item.amount)
                 .ToList(),
+            incidents = new List<string>(incidents),
             eventLog = new List<string>(eventLog),
             stockSupplyResults = new List<StockSupplyResult>(stockSupplyResults),
-            refreshedDailyShopOffers = StockSupplyService.CreateDailyDeliveryOffers(day + 1).ToList(),
-            refreshedFacilityShopOffers = FacilityShopService.CreateDailyOffers(day + 1)
+            refreshedDailyShopOffers = StockSupplyService.CreateDailyDeliveryOffers(day + 1, RequireRunVariableReader()).ToList(),
+            refreshedFacilityShopOffers = FacilityShopService.CreateDailyOffers(
+                    day + 1,
+                    RequireFacilityShopCatalog(),
+                    RequireRunVariableReader())
                 .Select((offer) => offer.ToSnapshot())
                 .ToList()
         };
@@ -481,12 +582,10 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
         }
     }
 
-    private static void FillStaffSnapshot(OperatingDayReport report, IEnumerable<Character> characters)
+    private static void FillStaffSnapshot(OperatingDayReport report, IEnumerable<CharacterActor> characters)
     {
-        List<Character> staff = characters
-            .Where((character) => character != null
-                && character.characterType == CharacterType.NPC
-                && character.TryGetAbility(out AbilityWork _))
+        List<CharacterActor> staff = characters
+            .Where(IsStaffCharacter)
             .ToList();
 
         report.staffSummary.staffCount = staff.Count;
@@ -495,15 +594,15 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
             return;
         }
 
-        report.staffSummary.workingCount = staff.Count((character) =>
-            character.TryGetAbility(out AbilityWork work) && work.isWorking);
-        report.staffSummary.offDutyCount = staff.Count((character) =>
-            character.TryGetAbility(out AbilityWork work) && work.IsOffDuty);
-        report.staffSummary.averageSleep = staff.Average((character) => GetStat(character, Character.Condition.SLEEP));
-        report.staffSummary.averageMood = staff.Average((character) => GetStat(character, Character.Condition.MOOD));
+        report.staffSummary.workingCount = staff.Count((actor) =>
+            CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work) && work.isWorking);
+        report.staffSummary.offDutyCount = staff.Count((actor) =>
+            CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work) && work.IsOffDuty);
+        report.staffSummary.averageSleep = staff.Average((actor) => GetStat(actor, CharacterCondition.SLEEP));
+        report.staffSummary.averageMood = staff.Average((actor) => GetStat(actor, CharacterCondition.MOOD));
         report.staffComplaintEvents = staff
-            .Where((character) => GetStat(character, Character.Condition.MOOD) <= 25f)
-            .Select((character) => $"{character.name}: 기분 낮음")
+            .Where((actor) => GetStat(actor, CharacterCondition.MOOD) <= 25f)
+            .Select((actor) => $"{actor.name}: 기분 낮음")
             .ToList();
     }
 
@@ -514,6 +613,7 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
         consumedStock.Clear();
         visitorMoodSamples.Clear();
         stockSupplyResults.Clear();
+        incidents.Clear();
         eventLog.Clear();
         totalRevenue = 0;
         totalVisits = 0;
@@ -531,13 +631,52 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
         return facility.name;
     }
 
-    private static float GetStat(Character character, Character.Condition condition)
+    private static float GetStat(CharacterActor actor, CharacterCondition condition)
     {
-        if (character == null || character.stats == null)
+        CharacterStats stats = actor != null ? actor.Stats : null;
+        if (stats == null)
         {
             return 0f;
         }
 
-        return character.stats.TryGetValue(condition, out float value) ? value : 0f;
+        return stats.Stats.TryGetValue(condition, out float value) ? value : 0f;
+    }
+
+    private static bool IsStaffCharacter(CharacterActor actor)
+    {
+        CharacterIdentity identity = actor != null ? actor.Identity : null;
+        return identity != null
+            && identity.CharacterType == CharacterType.NPC
+            && CharacterWorkRoleUtility.TryGetWork(actor, out _);
+    }
+
+    private IDungeonSceneComponentQuery RequireSceneQuery()
+    {
+        if (sceneQuery == null)
+        {
+            throw new InvalidOperationException($"{nameof(OperatingDaySettlementRuntime)} requires {nameof(IDungeonSceneComponentQuery)} injection.");
+        }
+
+        return sceneQuery;
+    }
+
+    private IFacilityShopCatalog RequireFacilityShopCatalog()
+    {
+        if (facilityShopCatalog == null)
+        {
+            throw new InvalidOperationException($"{nameof(OperatingDaySettlementRuntime)} requires {nameof(IFacilityShopCatalog)} injection.");
+        }
+
+        return facilityShopCatalog;
+    }
+
+    private IRunVariableRuntimeReader RequireRunVariableReader()
+    {
+        if (runVariableReader == null)
+        {
+            throw new InvalidOperationException($"{nameof(OperatingDaySettlementRuntime)} requires {nameof(IRunVariableRuntimeReader)} injection.");
+        }
+
+        return runVariableReader;
     }
 }

@@ -13,15 +13,15 @@ public class AIWork : AIActionSet
     public override float MinimumDuration => minimumDuration;
     public override int InterruptPriority => workInterruptPriority;
 
-    public override float AdjustScore(Character character, float baseScore)
+    public override float AdjustScore(CharacterActor actor, float baseScore)
     {
-        if (character == null || !character.TryGetAbility(out AbilityWork work))
+        if (actor == null || !actor.TryGetAbility(out AbilityWork work))
         {
             return 0f;
         }
 
-        GridPathSearchResult searchResult = character.ai != null
-            ? character.ai.GetPathSearch(character)
+        GridPathSearchResult searchResult = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
             : null;
         float utilityScore = work.GetWorkUtilityScore(workType, searchResult);
         if (utilityScore <= 0f)
@@ -33,54 +33,62 @@ public class AIWork : AIActionSet
         return Mathf.Clamp01(baseScore * availableWorkWeight);
     }
 
-    public override bool CanStart(Character character)
+    public override bool CanStart(CharacterActor actor)
     {
-        if (character == null || !character.TryGetAbility(out AbilityWork work))
+        if (actor == null || !actor.TryGetAbility(out AbilityWork work))
         {
             return false;
         }
 
-        GridPathSearchResult searchResult = character.ai != null
-            ? character.ai.GetPathSearch(character)
+        GridPathSearchResult searchResult = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
             : null;
         return work.CanStartWorkAction(workType, searchResult);
     }
 
-    public override bool CanContinue(Character character, AIAction runningAction, out string stopReason)
+    public override bool CanContinue(CharacterActor actor, AIAction runningAction, out string stopReason)
     {
         stopReason = string.Empty;
-        return character != null
-            && character.TryGetAbility(out AbilityWork work)
+        return actor != null
+            && actor.TryGetAbility(out AbilityWork work)
             && work.CanContinueCurrentWork(out stopReason);
     }
 
-    public override bool CanInterrupt(Character character, AIAction runningAction, out string interruptReason)
+    public override bool CanInterrupt(CharacterActor actor, AIAction runningAction, out string interruptReason)
     {
         interruptReason = string.Empty;
-        return character != null
-            && character.TryGetAbility(out AbilityWork work)
+        return actor != null
+            && actor.TryGetAbility(out AbilityWork work)
             && work.ShouldInterruptCurrentWork(out interruptReason);
     }
 
-    public override void Execute(Character character)
+    public override void Execute(CharacterActor actor)
     {
-        if (character != null && character.TryGetAbility(out AbilityWork work))
+        if (actor != null && actor.TryGetAbility(out AbilityWork work))
         {
-            BuildableObject selectedDestination = character.ai != null
-                ? character.ai.bestAction?.destination
+            BuildableObject selectedDestination = actor.Brain != null
+                ? actor.Brain.bestAction?.destination
                 : null;
             work.StartWorking(workType, selectedDestination);
             return;
         }
 
-        if (character != null && character.ai != null)
+        if (actor != null && actor.Brain != null)
         {
-            character.ai.isBestActionEnd = true;
+            actor.Brain.isBestActionEnd = true;
+        }
+    }
+
+    public override void OnStop(CharacterActor actor, AIAction runningAction, string reason)
+    {
+        if (actor != null && actor.TryGetAbility(out AbilityWork work))
+        {
+            work.StopAssignedWorkFromAi(reason);
         }
     }
 
     public override bool TryReserveDestination(
-        Character character,
+        CharacterActor actor,
         BuildableObject destination,
         out AIActionFailure failure)
     {
@@ -90,7 +98,7 @@ public class AIWork : AIActionSet
             return true;
         }
 
-        if (destination.TryReserveWorker(character, out string failureReason))
+        if (destination.TryReserveWorker(actor, out string failureReason))
         {
             return true;
         }
@@ -102,21 +110,21 @@ public class AIWork : AIActionSet
         return false;
     }
 
-    public override void RefreshDestinationReservation(Character character, BuildableObject destination)
+    public override void RefreshDestinationReservation(CharacterActor actor, BuildableObject destination)
     {
-        destination?.RefreshWorkerReservation(character);
+        destination?.RefreshWorkerReservation(actor);
     }
 
-    public override void ReleaseDestinationReservation(Character character, BuildableObject destination)
+    public override void ReleaseDestinationReservation(CharacterActor actor, BuildableObject destination)
     {
-        destination?.ReleaseWorkerReservation(character);
+        destination?.ReleaseWorkerReservation(actor);
     }
 
     public override IReadOnlyList<BuildableObject> GetDestinationCandidates(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult)
     {
-        if (character == null || !character.TryGetAbility(out AbilityWork work))
+        if (actor == null || !actor.TryGetAbility(out AbilityWork work))
         {
             return new List<BuildableObject>();
         }

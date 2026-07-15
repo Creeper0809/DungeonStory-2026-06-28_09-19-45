@@ -1,26 +1,51 @@
+using System;
 using TMPro;
 using UnityEngine;
 
-public static class TMPKoreanFont
+public interface ITmpKoreanFontProvider
 {
-    private const string EditorFontPath = "Assets/Font/Maplestory Light SDF.asset";
+    TMP_FontAsset GetRequiredFont();
+}
 
-    private static TMP_FontAsset cachedFont;
+public interface ITmpKoreanFontService
+{
+    TMP_FontAsset Resolve();
+    void Apply(TMP_Text text);
+    void ApplyToChildren(Transform root, bool includeInactive = true);
+}
 
-    public static TMP_FontAsset Resolve()
+public sealed class TmpKoreanFontAssetProvider : ITmpKoreanFontProvider
+{
+    private readonly TMP_FontAsset font;
+
+    public TmpKoreanFontAssetProvider(TMP_FontAsset font)
     {
-        if (cachedFont != null)
-        {
-            return cachedFont;
-        }
-
-#if UNITY_EDITOR
-        cachedFont = UnityEditor.AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(EditorFontPath);
-#endif
-        return cachedFont != null ? cachedFont : TMP_Settings.defaultFontAsset;
+        this.font = font
+            ?? throw new ArgumentNullException(nameof(font));
     }
 
-    public static void Apply(TMP_Text text)
+    public TMP_FontAsset GetRequiredFont()
+    {
+        return font;
+    }
+}
+
+public sealed class TmpKoreanFontService : ITmpKoreanFontService
+{
+    private readonly ITmpKoreanFontProvider fontProvider;
+
+    public TmpKoreanFontService(ITmpKoreanFontProvider fontProvider)
+    {
+        this.fontProvider = fontProvider
+            ?? throw new ArgumentNullException(nameof(fontProvider));
+    }
+
+    public TMP_FontAsset Resolve()
+    {
+        return fontProvider.GetRequiredFont();
+    }
+
+    public void Apply(TMP_Text text)
     {
         if (text == null) return;
 
@@ -31,7 +56,7 @@ public static class TMPKoreanFont
         }
     }
 
-    public static void ApplyToChildren(Transform root, bool includeInactive = true)
+    public void ApplyToChildren(Transform root, bool includeInactive = true)
     {
         if (root == null) return;
 

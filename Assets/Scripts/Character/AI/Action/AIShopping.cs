@@ -1,82 +1,79 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Shopping", order = 0)]
 public class AIShopping : AIActionSet
 {
-    public const FacilityRole CustomerInterestRoles =
-        FacilityRole.Purchase
-        | FacilityRole.Training
-        | FacilityRole.Research
-        | FacilityRole.Mana;
-
-    public override bool CanStart(Character character)
+    public override bool CanStart(CharacterActor actor)
     {
-        if (character == null) return false;
-
-        if (!character.TryGetAbility(out AbilityShopping _))
-        {
-            return false;
-        }
-
-        if (CharacterWorkRoleUtility.TryGetWork(character, out AbilityWork work))
-        {
-            return work.IsOffDuty;
-        }
-
-        return true;
+        return CanUseVisitorAction(actor);
     }
 
-    public override void Execute(Character character)
+    public override void Execute(CharacterActor actor)
     {
-        character.GetAbility<AbilityShopping>().StartSopping();
+        actor?.GetAbility<AbilityShopping>()?.StartSopping();
     }
+
     public override IReadOnlyList<BuildableObject> GetDestinationCandidates(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult)
     {
-        AbilityShopping shopping = character != null ? character.GetAbility<AbilityShopping>() : null;
+        AbilityShopping shopping = actor != null ? actor.GetAbility<AbilityShopping>() : null;
         if (shopping == null)
         {
             return Array.Empty<BuildableObject>();
         }
 
         return FacilityCandidateScorer.GetCandidates(
-            character,
+            actor,
             searchResult,
-            CustomerInterestRoles);
+            shopping.GetInterestRoles());
     }
 
     public override BuildableObject SelectDestination(
-        Character character,
+        CharacterActor actor,
         IReadOnlyList<BuildableObject> candidates)
     {
-        if (character == null || candidates == null || candidates.Count == 0)
+        if (actor == null || candidates == null || candidates.Count == 0)
         {
             return null;
         }
 
-        GridPathSearchResult searchResult = character.ai != null ? character.ai.GetPathSearch(character) : null;
+        AbilityShopping shopping = actor.GetAbility<AbilityShopping>();
+        if (shopping == null)
+        {
+            return null;
+        }
+
+        GridPathSearchResult searchResult = actor.Brain != null ? actor.Brain.GetPathSearch(actor) : null;
         return FacilityCandidateScorer.SelectBest(
-            character,
+            actor,
             candidates,
-            CustomerInterestRoles,
-            searchResult);
+            shopping.GetInterestRoles(),
+            searchResult,
+            FacilityScoringContext.RequireFromActor(actor));
     }
 
     public override bool TryResolveDestination(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
         out string failureReason)
     {
+        AbilityShopping shopping = actor != null ? actor.GetAbility<AbilityShopping>() : null;
+        if (shopping == null)
+        {
+            destination = null;
+            failureReason = "쇼핑 능력 없음";
+            return false;
+        }
+
         if (FacilityCandidateScorer.TrySelectBest(
-            character,
+            actor,
             searchResult,
-            CustomerInterestRoles,
+            shopping.GetInterestRoles(),
+            FacilityScoringContext.RequireFromActor(actor),
             out destination))
         {
             failureReason = string.Empty;
@@ -88,7 +85,7 @@ public class AIShopping : AIActionSet
     }
 
     public override bool TryReserveDestination(
-        Character character,
+        CharacterActor actor,
         BuildableObject destination,
         out AIActionFailure failure)
     {
@@ -98,7 +95,7 @@ public class AIShopping : AIActionSet
             return true;
         }
 
-        if (destination.TryReserveVisit(character, out string failureReason))
+        if (destination.TryReserveVisit(actor, out string failureReason))
         {
             return true;
         }
@@ -110,13 +107,30 @@ public class AIShopping : AIActionSet
         return false;
     }
 
-    public override void RefreshDestinationReservation(Character character, BuildableObject destination)
+    public override void RefreshDestinationReservation(CharacterActor actor, BuildableObject destination)
     {
-        destination?.RefreshVisitReservation(character);
+        destination?.RefreshVisitReservation(actor);
     }
 
-    public override void ReleaseDestinationReservation(Character character, BuildableObject destination)
+    public override void ReleaseDestinationReservation(CharacterActor actor, BuildableObject destination)
     {
-        destination?.ReleaseVisitReservation(character);
+        destination?.ReleaseVisitReservation(actor);
+    }
+
+    private static bool CanUseVisitorAction(CharacterActor actor)
+    {
+        if (actor == null) return false;
+
+        if (!actor.TryGetAbility(out AbilityShopping _))
+        {
+            return false;
+        }
+
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work))
+        {
+            return work.IsOffDuty;
+        }
+
+        return true;
     }
 }

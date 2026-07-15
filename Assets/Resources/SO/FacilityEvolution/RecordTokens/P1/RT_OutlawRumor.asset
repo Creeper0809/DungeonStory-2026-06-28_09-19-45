@@ -1,0 +1,37 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e1a78c497354124b972aecb5f3ad18f, type: 3}
+  m_Name: RT_OutlawRumor
+  m_EditorClassIdentifier: Assembly-CSharp::FacilityEvolutionRecordTokenDefinitionSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 9209
+  tokenId: OutlawRumor
+  displayName: "\uBB34\uBC95\uC790 \uC18C\uBB38"
+  description: "\uBC94\uC8C4, \uC808\uB3C4, \uBD80\uC815\uC801 \uC18C\uBB38\uC774
+    \uC2DC\uC124\uC5D0 \uBD99\uC740 \uAE30\uB85D\uC774\uB2E4."
+  sourceMetric: NegativeMentionCount
+  threshold: 1
+  decayPolicy: rumor-decay
+  consumePolicy: 1
+  recipeTags:
+  - Outlaw
+  - Fear
+  uiHint: "\uB098\uC05C \uC18C\uBB38\uC774 \uB2E4\uB978 \uAC00\uB2A5\uC131\uC758
+    \uADF8\uB9BC\uC790\uB97C \uB9CC\uB4E4\uACE0 \uC788\uC2B5\uB2C8\uB2E4."

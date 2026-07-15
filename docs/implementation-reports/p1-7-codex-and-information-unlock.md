@@ -41,6 +41,7 @@ System
 Observation
 Research
 Synthesis
+Evolution
 ```
 
 ### CodexRuntime
@@ -56,6 +57,7 @@ Synthesis
 - `InvasionSpawnedEvent`: 침입자 항목 발견
 - `BlueprintResearchCompletedEvent`: 연구로 해금된 시설/조합식 기록
 - `FacilitySynthesisCompletedEvent`: 합성 결과와 조합식 기록
+- `FacilityEvolutionCompletedEvent`: 시설 계보 진화 결과, 정체성, 서사, 변이 태그 기록
 
 `GameManager`는 시작 시 `CodexRuntime`을 자동으로 붙인다.
 
@@ -117,6 +119,8 @@ P1에서는 `돌파형 침입자` 항목부터 시작한다.
 - 대상 규칙
 - 방어 효과
 - 합성 조합식
+- 계보 진화 기록
+- 진화 정체성/서사/변이 태그
 
 공개 조합식은 바로 표시한다.
 
@@ -134,6 +138,17 @@ P1에서는 `돌파형 침입자` 항목부터 시작한다.
 
 ```text
 조합식: 2성 경보 코일 + 1성 화염 분사구 -> 3성 폭뢰 분사구
+```
+
+계보 진화 완료 시에는 결과 시설 도감에 다음 형태로 기록한다.
+
+```text
+계보 진화: 고기 식당 -> 2성 전투 식당 (2성)
+진화식: 전투 식당 진화
+정체성: 용병 이용 기록과 전투 기물이 강하게 누적된 고기 식당
+진화 기록: 용병들이 식탁을 전투 전 회의 장소로 바꾸었습니다.
+해석 출처: LocalLLM
+변이: Combat
 ```
 
 ## 설계도 보완
@@ -170,6 +185,7 @@ P1에서는 `돌파형 침입자` 항목부터 시작한다.
 - 특수 조합식이 연구 후 실제 조합식으로 보이는지
 - 방어 시설 발동 관찰이 침략 도감 약점으로 기록되는지
 - 손님 방문이 몬스터 도감 관찰 정보로 기록되는지
+- 시설 계보 진화 완료 이벤트가 시설 도감에 계보/정체성/서사/변이 정보를 남기는지
 - `CodexPanel`이 세 도감 섹션을 렌더하는지
 
 Unity 메뉴:
@@ -180,18 +196,15 @@ DungeonStory/Debug/Codex/Run P1 Codex Scenarios
 
 ## 검증 상태
 
-현재 작업 시점에는 Unity Editor 프로세스가 종료되어 있어 Unity MCP 검증을 완료하지 못했다.
-
-확인된 상태:
-
-- 변경 범위 `git diff --check`는 CRLF 안내 외 신규 whitespace 오류 없음
-- `dotnet`은 로컬 환경에 설치되어 있지 않아 대체 빌드 불가
-- `CodexDebugScenarios`는 Unity Editor가 다시 열리면 바로 실행 가능하게 작성됨
-
-다음 Unity 검증 때는 다음 순서로 돌린다.
-
 ```text
-CodexDebugScenarios.RunAll(false)
-전체 P1 회귀 검증
-Unity Console Error/Warning 확인
+Generated: 2026-07-04 06:19:15
+CodexDebugScenarios.RunAll = True
+ImplementedScenarioDebugRunner.RunAll = True
+Suites: 29
+Passed: 29
+Failed: 0
+Console errors: 0
+Console warnings: 9
 ```
+
+콘솔 경고 9건은 기존 `UIBuildingInfo`, `Meta/Offense` TMP obsolete 경고와 Behavior Designer 패키지 obsolete 경고다.

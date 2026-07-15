@@ -21,12 +21,14 @@ public static class CodexDebugScenarios
     {
         P1FacilityShopAssetBuilder.EnsureP1FacilityShopAssets();
         P1FacilitySynthesisAssetBuilder.EnsureP1SynthesisAssets();
+        P1FacilityEvolutionAssetBuilder.EnsureP1EvolutionAssets();
 
         List<string> errors = new List<string>();
         RunScenario("도감 기준 데이터", VerifyReferenceCodexData, errors);
         RunScenario("특수 조합식 힌트와 연구 해금", VerifySpecialRecipeHintAndResearchReveal, errors);
         RunScenario("방어 관찰 침략 도감", VerifyDefenseObservationUpdatesInvasionCodex, errors);
         RunScenario("손님 방문 몬스터 도감", VerifyFacilityVisitUpdatesMonsterCodex, errors);
+        RunScenario("시설 진화 도감 기록", VerifyFacilityEvolutionUpdatesFacilityCodex, errors);
         RunScenario("도감 UI 렌더", VerifyCodexPanelRendering, errors);
 
         if (errors.Count > 0)
@@ -96,7 +98,7 @@ public static class CodexDebugScenarios
 
         BlueprintResearchState researchState = new BlueprintResearchState();
         researchState.UnlockRecipe("recipe_trap_chain_3");
-        CodexService.ImportSynthesisRecipes(runtime.State, researchState);
+        CodexService.ImportSynthesisRecipes(runtime.State, researchState, CreateSynthesisRecipeQuery());
         BuildingSO stormFire = LoadBuilding("P1_StormFireTrap");
         CodexEntrySnapshot stormFireEntry = runtime.State.GetSnapshot(CodexEntryCategory.Facility, $"facility:{stormFire.id}");
 
@@ -110,8 +112,8 @@ public static class CodexDebugScenarios
         using CodexScenarioWorld world = new CodexScenarioWorld();
         CodexRuntime runtime = world.CreateRuntime();
         DefenseFacility iceVent = world.CreateDefenseFacility("P1_IceVent");
-        Character intruder = world.CreateCharacter("Intruder_Breakthrough");
-        DefenseActivationReport report = new DefenseActivationReport(iceVent, intruder, DefenseTriggerTiming.OnEnter);
+        CharacterActor intruder = world.CreateCharacter("Intruder_Breakthrough");
+        DefenseActivationReport report = new DefenseActivationReport(iceVent, CharacterActor.From(intruder), DefenseTriggerTiming.OnEnter);
         report.AddMovementDelay(0.7f);
         report.AddEffectTag("감속");
 
@@ -129,10 +131,10 @@ public static class CodexDebugScenarios
     {
         using CodexScenarioWorld world = new CodexScenarioWorld();
         CodexRuntime runtime = world.CreateRuntime();
-        Character orc = world.CreateCharacter("Owner_Orc");
+        CharacterActor orc = world.CreateCharacter("Owner_Orc");
         BuildableObject meatRestaurant = world.CreateFacility("P1_MeatRestaurant");
 
-        runtime.OnTriggerEvent(new FacilityVisitEvent(orc, meatRestaurant));
+        runtime.OnTriggerEvent(new FacilityVisitEvent(CharacterActor.From(orc), meatRestaurant));
         CodexEntrySnapshot orcEntry = runtime.State.GetSnapshot(CodexEntryCategory.Monster, "monster:Orc");
         CodexEntrySnapshot restaurantEntry = runtime.State.GetSnapshot(CodexEntryCategory.Facility, $"facility:{LoadBuilding("P1_MeatRestaurant").id}");
 
@@ -140,6 +142,55 @@ public static class CodexDebugScenarios
             && ContainsLinePart(orcEntry, "관찰:")
             && restaurantEntry != null
             && ContainsLinePart(restaurantEntry, "역할: 식사");
+    }
+
+    private static bool VerifyFacilityEvolutionUpdatesFacilityCodex()
+    {
+        using CodexScenarioWorld world = new CodexScenarioWorld();
+        CodexRuntime runtime = world.CreateRuntime();
+        FacilityEvolutionRecipeSO recipe = AssetDatabase.LoadAssetAtPath<FacilityEvolutionRecipeSO>(
+            "Assets/Resources/SO/FacilityEvolution/P1/EV_BattleDining.asset");
+        if (recipe == null)
+        {
+            return false;
+        }
+
+        BuildableObject battleDining = world.CreateFacility("P1_BattleDining");
+        FacilityEvolutionProposal proposal = new FacilityEvolutionProposal(
+            "용병 이용 기록과 전투 기물이 강하게 누적된 고기 식당",
+            new[] { recipe.EffectiveId },
+            new Dictionary<string, string>
+            {
+                { recipe.EffectiveId, "용병 이용 기록과 전투 정체성이 전투 식당 계보와 맞습니다." }
+            },
+            new[] { FacilityEvolutionTerms.Combat },
+            "용병들이 식탁을 전투 전 회의 장소로 바꾸었습니다.",
+            0.92f,
+            FacilityEvolutionProposalSources.LocalLlm);
+        FacilityEvolutionResult result = new FacilityEvolutionResult(
+            true,
+            recipe,
+            battleDining,
+            2,
+            FacilityShopService.GetBuildingName(LoadBuilding("P1_MeatRestaurant")),
+            proposal,
+            "전투 식당 진화 완료",
+            new[] { FacilityEvolutionTerms.Combat });
+
+        runtime.OnTriggerEvent(new FacilityEvolutionCompletedEvent(result));
+
+        BuildingSO battleDiningData = LoadBuilding("P1_BattleDining");
+        CodexEntrySnapshot entry = runtime.State.GetSnapshot(
+            CodexEntryCategory.Facility,
+            $"facility:{battleDiningData.id}");
+
+        return entry != null
+            && ContainsLinePart(entry, "계보 진화: 고기 식당 -> 2성 전투 식당 (2성)")
+            && ContainsLinePart(entry, "진화식: 전투 식당 진화")
+            && ContainsLinePart(entry, "정체성: 용병 이용 기록과 전투 기물이 강하게 누적된 고기 식당")
+            && ContainsLinePart(entry, "진화 기록: 용병들이 식탁을 전투 전 회의 장소로 바꾸었습니다.")
+            && ContainsLinePart(entry, "해석 출처: LocalLLM")
+            && ContainsLinePart(entry, "변이: Combat");
     }
 
     private static bool VerifyCodexPanelRendering()
@@ -152,7 +203,8 @@ public static class CodexDebugScenarios
             "돌파형 침입자",
             "약점: 감속",
             CodexInfoSource.Observation);
-        CodexPanel panel = CodexPanel.CreateDefaultPanel(runtime);
+        CodexPanel panel = new CodexPanelFactory(TMPKoreanFontEditorResolver.CreateService())
+            .CreateDefaultPanel(runtime);
         world.TrackObject(panel.transform.root.gameObject);
 
         return panel.LastRenderedText.Contains("몬스터 도감")
@@ -191,6 +243,43 @@ public static class CodexDebugScenarios
         return AssetDatabase.LoadAssetAtPath<CharacterSO>($"Assets/Resources/SO/Character/Intruders/{assetName}.asset");
     }
 
+    private static IFacilitySynthesisRecipeQuery CreateSynthesisRecipeQuery()
+    {
+        return new EditorFacilitySynthesisRecipeQuery();
+    }
+
+    private sealed class EditorFacilitySynthesisRecipeQuery : IFacilitySynthesisRecipeQuery
+    {
+        public IReadOnlyList<FacilitySynthesisRecipeSO> GetAllRecipes()
+        {
+            return AssetDatabase.FindAssets("t:FacilitySynthesisRecipeSO")
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(AssetDatabase.LoadAssetAtPath<FacilitySynthesisRecipeSO>)
+                .Where((recipe) => recipe != null && recipe.HasValidData)
+                .OrderBy((recipe) => recipe.id)
+                .ToArray();
+        }
+
+        public bool IsVisible(FacilitySynthesisRecipeSO recipe, BlueprintResearchState researchState)
+        {
+            return FacilitySynthesisService.IsRecipeVisible(recipe, researchState, null);
+        }
+
+        public IReadOnlyList<FacilitySynthesisRecipeSO> GetVisibleRecipes(BlueprintResearchState researchState)
+        {
+            return GetAllRecipes()
+                .Where((recipe) => IsVisible(recipe, researchState))
+                .ToArray();
+        }
+
+        public FacilitySynthesisRecipeSnapshot ToSnapshot(
+            FacilitySynthesisRecipeSO recipe,
+            BlueprintResearchState researchState)
+        {
+            return FacilitySynthesisService.ToSnapshot(recipe, researchState, null);
+        }
+    }
+
     private sealed class CodexScenarioWorld : IDisposable
     {
         private readonly List<GameObject> objects = new List<GameObject>();
@@ -224,12 +313,12 @@ public static class CodexDebugScenarios
             return CreateFacility(assetName) as DefenseFacility;
         }
 
-        public Character CreateCharacter(string assetName)
+        public CharacterActor CreateCharacter(string assetName)
         {
             CharacterSO characterData = LoadCharacter(assetName);
             GameObject obj = new GameObject(assetName);
             objects.Add(obj);
-            Character character = obj.AddComponent<Character>();
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             character.data = characterData;
             return character;
         }

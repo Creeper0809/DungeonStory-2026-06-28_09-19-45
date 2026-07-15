@@ -82,7 +82,7 @@ public static class OwnerDebugScenarios
     {
         CharacterSO ownerData = LoadOwner("Owner_Orc");
         GameObject obj = CreateCharacterObject("Owner Runtime Scenario");
-        Character character = obj.GetComponent<Character>();
+        CharacterActor character = obj.GetComponent<CharacterActor>();
 
         InitializeCharacter(character, ownerData);
 
@@ -101,7 +101,7 @@ public static class OwnerDebugScenarios
     {
         CharacterSO ownerData = LoadOwner("Owner_Slime");
         GameObject obj = CreateCharacterObject("Owner AI Scenario");
-        Character character = obj.GetComponent<Character>();
+        CharacterActor character = obj.GetComponent<CharacterActor>();
 
         InitializeCharacter(character, ownerData);
         AIAction[] actions = character.ai.availableActions;
@@ -120,7 +120,7 @@ public static class OwnerDebugScenarios
         OwnerRunManager manager = managerObject.AddComponent<OwnerRunManager>();
         manager.SelectOwner(ownerData);
 
-        Character owner = manager.CurrentOwner;
+        CharacterActor owner = manager.CurrentOwnerActor;
         if (owner == null)
         {
             Object.DestroyImmediate(managerObject);
@@ -142,7 +142,7 @@ public static class OwnerDebugScenarios
     {
         CharacterSO ownerData = LoadOwner("Owner_Vampire");
         GameObject characterObject = CreateCharacterObject("Owner Priority Scenario");
-        Character character = characterObject.GetComponent<Character>();
+        CharacterActor character = characterObject.GetComponent<CharacterActor>();
         InitializeCharacter(character, ownerData);
         GameObject runtimeObject = new GameObject("Owner Priority Research Runtime");
         BlueprintResearchRuntime researchRuntime = runtimeObject.AddComponent<BlueprintResearchRuntime>();
@@ -171,22 +171,22 @@ public static class OwnerDebugScenarios
     {
         GameObject obj = new GameObject(name);
         obj.AddComponent<SpriteRenderer>();
-        obj.AddComponent<Character>();
+        obj.AddComponent<CharacterActor>();
         obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityWork>();
         obj.AddComponent<AIBrain>();
         return obj;
     }
 
-    private static void InitializeCharacter(Character character, CharacterSO data)
+    private static void InitializeCharacter(CharacterActor character, CharacterSO data)
     {
-        typeof(Character)
+        typeof(CharacterActor)
             .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.Invoke(character, null);
 
         character.RefreshAbilityCache();
         character.Initialization(data);
-        character.SetLifecycleState(Character.LifecycleState.Active);
+        character.SetLifecycleState(CharacterLifecycleState.Active);
     }
 
     private static CharacterSO[] LoadOwners()

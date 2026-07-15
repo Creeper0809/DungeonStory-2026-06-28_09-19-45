@@ -1,6 +1,5 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 public enum InvasionThreatDifficulty
@@ -9,7 +8,6 @@ public enum InvasionThreatDifficulty
     Normal,
     Hard
 }
-
 public enum InvasionThreatStage
 {
     Peaceful,
@@ -178,6 +176,11 @@ public static class InvasionThreatCalculator
 {
     public static float CalculateRisePerSecond(InvasionThreatSettings settings, InvasionThreatFactors factors)
     {
+        return CalculateRisePerSecond(settings, factors, 1f);
+    }
+
+    public static float CalculateRisePerSecond(InvasionThreatSettings settings, InvasionThreatFactors factors, float runMultiplier)
+    {
         if (settings == null)
         {
             return 0f;
@@ -189,22 +192,7 @@ public static class InvasionThreatCalculator
             + (factors.time * settings.timeRiseWeight)
             + (factors.risk * settings.riskRiseWeight);
 
-        float runMultiplier = RunVariableRuntime.Instance != null
-            ? RunVariableRuntime.Instance.GetThreatRiseMultiplier()
-            : 1f;
         return Mathf.Max(0f, raw * settings.GetDifficultyMultiplier() * Mathf.Max(0.05f, runMultiplier));
-    }
-
-    public static InvasionThreatFactors SampleWorldFactors(float secondsSinceLastInvasion)
-    {
-        BuildableObject[] buildings = UnityEngine.Object.FindObjectsByType<BuildableObject>(FindObjectsSortMode.None);
-        Character[] characters = UnityEngine.Object.FindObjectsByType<Character>(FindObjectsSortMode.None);
-
-        float dungeonValue = CalculateDungeonValue(buildings);
-        float reputation = CalculateReputation(characters);
-        float time = Mathf.Clamp(secondsSinceLastInvasion / 180f, 0f, 10f);
-        float risk = CalculateRisk(buildings);
-        return new InvasionThreatFactors(dungeonValue, reputation, time, risk);
     }
 
     public static string BuildWarningDetail(InvasionThreatSnapshot snapshot)
@@ -242,335 +230,5 @@ public static class InvasionThreatCalculator
     public static string BuildCandidateDetail(InvasionThreatSnapshot snapshot)
     {
         return "수상한 정찰대가 던전 근처에서 목격되었습니다.\n침입이 임박한 것 같습니다.";
-    }
-
-    private static float CalculateDungeonValue(IEnumerable<BuildableObject> buildings)
-    {
-        if (buildings == null)
-        {
-            return 0f;
-        }
-
-        float value = 0f;
-        foreach (BuildableObject building in buildings)
-        {
-            if (building == null || building.isDestroy)
-            {
-                continue;
-            }
-
-            value += 1f;
-            if (building.BuildingData != null)
-            {
-                value += Mathf.Max(0, building.BuildingData.maintenance) / 100f;
-                if (building.BuildingData.Facility != null && building.BuildingData.Facility.roles != FacilityRole.None)
-                {
-                    value += 0.5f;
-                }
-            }
-        }
-
-        return value;
-    }
-
-    private static float CalculateReputation(IEnumerable<Character> characters)
-    {
-        if (characters == null)
-        {
-            return 0f;
-        }
-
-        int customers = 0;
-        float mood = 0f;
-        foreach (Character character in characters)
-        {
-            if (character == null || character.characterType != CharacterType.Customer)
-            {
-                continue;
-            }
-
-            customers++;
-            if (character.stats != null && character.stats.TryGetValue(Character.Condition.MOOD, out float sample))
-            {
-                mood += Mathf.Clamp(sample, 0f, 100f) / 100f;
-            }
-        }
-
-        if (customers == 0)
-        {
-            return 0f;
-        }
-
-        return customers + (mood / Mathf.Max(1, customers));
-    }
-
-    private static float CalculateRisk(IEnumerable<BuildableObject> buildings)
-    {
-        if (buildings == null)
-        {
-            return 0f;
-        }
-
-        float risk = 0f;
-        foreach (BuildableObject building in buildings)
-        {
-            if (building == null || building.isDestroy)
-            {
-                continue;
-            }
-
-            if (building.IsDamaged)
-            {
-                risk += 1.5f;
-            }
-
-            if (building is Shop shop && shop.Facility != null && shop.CurrentStock <= shop.Facility.restockRequestThreshold)
-            {
-                risk += 0.5f;
-            }
-        }
-
-        return risk;
-    }
-}
-
-public class InvasionThreatRuntime : MonoBehaviour,
-    UtilEventListener<InvasionStartedEvent>,
-    UtilEventListener<InvasionResolvedEvent>,
-    UtilEventListener<OperatingDayStartedEvent>
-{
-    [SerializeField] private InvasionThreatSettings settings = new InvasionThreatSettings();
-
-    private float currentThreat;
-    private float secondsSinceLastInvasion;
-    private float safetyRemaining;
-    private float candidateDelayRemaining = -1f;
-    private float warningCooldownRemaining;
-    private bool warningRaisedThisCycle;
-    private bool candidateRaisedThisCycle;
-    private float residualRisk;
-    private InvasionThreatFactors lastFactors;
-
-    public float CurrentThreat => currentThreat;
-    public float SafetyRemaining => safetyRemaining;
-    public bool IsCandidatePending => candidateDelayRemaining >= 0f;
-    public InvasionThreatStage CurrentStage => ResolveStage();
-    public InvasionThreatSnapshot LatestSnapshot => BuildSnapshot();
-    public InvasionThreatSettings Settings => settings;
-    public static InvasionThreatRuntime Instance => FindFirstObjectByType<InvasionThreatRuntime>();
-
-    private void Update()
-    {
-        Tick(Time.deltaTime);
-    }
-
-    public void Tick(float deltaTime)
-    {
-        float safeDelta = Mathf.Max(0f, deltaTime);
-        if (safeDelta <= 0f)
-        {
-            return;
-        }
-
-        if (warningCooldownRemaining > 0f)
-        {
-            warningCooldownRemaining = Mathf.Max(0f, warningCooldownRemaining - safeDelta);
-        }
-
-        if (safetyRemaining > 0f)
-        {
-            safetyRemaining = Mathf.Max(0f, safetyRemaining - safeDelta);
-            secondsSinceLastInvasion += safeDelta;
-            return;
-        }
-
-        secondsSinceLastInvasion += safeDelta;
-        lastFactors = InvasionThreatCalculator.SampleWorldFactors(secondsSinceLastInvasion);
-        if (residualRisk > 0f)
-        {
-            lastFactors = new InvasionThreatFactors(
-                lastFactors.dungeonValue,
-                lastFactors.reputation,
-                lastFactors.time,
-                lastFactors.risk + residualRisk);
-        }
-
-        currentThreat += InvasionThreatCalculator.CalculateRisePerSecond(settings, lastFactors) * safeDelta;
-        currentThreat = Mathf.Max(0f, currentThreat);
-
-        TryRaiseWarning();
-        TickCandidateDelay(safeDelta);
-    }
-
-    public void AddThreat(float amount)
-    {
-        currentThreat = Mathf.Max(0f, currentThreat + amount);
-        lastFactors = InvasionThreatCalculator.SampleWorldFactors(secondsSinceLastInvasion);
-        TryRaiseWarning();
-        TickCandidateDelay(0f);
-    }
-
-    public void OnTriggerEvent(InvasionStartedEvent eventType)
-    {
-        ResetAfterInvasion();
-    }
-
-    public void OnTriggerEvent(InvasionResolvedEvent eventType)
-    {
-        residualRisk = Mathf.Max(0f, eventType.residualRisk);
-        if (!eventType.defended)
-        {
-            residualRisk += 2f;
-        }
-    }
-
-    public void OnTriggerEvent(OperatingDayStartedEvent eventType)
-    {
-        if (eventType.day <= 1)
-        {
-            return;
-        }
-
-        AddThreat(Mathf.Min(6f, eventType.day * 0.5f));
-    }
-
-    private void OnEnable()
-    {
-        this.EventStartListening<InvasionStartedEvent>();
-        this.EventStartListening<InvasionResolvedEvent>();
-        this.EventStartListening<OperatingDayStartedEvent>();
-    }
-
-    private void OnDisable()
-    {
-        this.EventStopListening<InvasionStartedEvent>();
-        this.EventStopListening<InvasionResolvedEvent>();
-        this.EventStopListening<OperatingDayStartedEvent>();
-    }
-
-    private void TryRaiseWarning()
-    {
-        float thresholdMultiplier = RunVariableRuntime.Instance != null
-            ? RunVariableRuntime.Instance.GetWarningThresholdMultiplier()
-            : 1f;
-        if (MetaProgressionRuntime.Instance != null)
-        {
-            thresholdMultiplier *= MetaProgressionRuntime.Instance.GetInvasionWarningThresholdMultiplier();
-        }
-        float warningThreshold = settings != null
-            ? settings.warningThreshold * Mathf.Max(0.05f, thresholdMultiplier)
-            : 0f;
-
-        if (settings == null
-            || currentThreat < warningThreshold
-            || warningRaisedThisCycle
-            || warningCooldownRemaining > 0f)
-        {
-            return;
-        }
-
-        warningRaisedThisCycle = true;
-        warningCooldownRemaining = settings.warningCooldownSeconds;
-        InvasionThreatSnapshot snapshot = BuildSnapshot();
-        InvasionThreatWarningEvent.Trigger(snapshot);
-        EventAlertService.Raise(
-            "침입 경고",
-            InvasionThreatCalculator.BuildWarningDetail(snapshot),
-            EventAlertImportance.Medium,
-            "침입");
-    }
-
-    private void TickCandidateDelay(float deltaTime)
-    {
-        if (settings == null || candidateRaisedThisCycle)
-        {
-            return;
-        }
-
-        float thresholdMultiplier = RunVariableRuntime.Instance != null
-            ? RunVariableRuntime.Instance.GetWarningThresholdMultiplier()
-            : 1f;
-        if (MetaProgressionRuntime.Instance != null)
-        {
-            thresholdMultiplier *= MetaProgressionRuntime.Instance.GetInvasionWarningThresholdMultiplier();
-        }
-        float candidateThreshold = settings.candidateThreshold * Mathf.Max(0.05f, thresholdMultiplier);
-        if (currentThreat < candidateThreshold)
-        {
-            return;
-        }
-
-        if (candidateDelayRemaining < 0f)
-        {
-            candidateDelayRemaining = settings.GetCandidateDelay();
-            return;
-        }
-
-        candidateDelayRemaining = Mathf.Max(0f, candidateDelayRemaining - Mathf.Max(0f, deltaTime));
-        if (candidateDelayRemaining > 0f)
-        {
-            return;
-        }
-
-        candidateRaisedThisCycle = true;
-        InvasionThreatSnapshot snapshot = BuildSnapshot();
-        InvasionCandidateEvent.Trigger(snapshot);
-        EventAlertService.Raise(
-            "침입 임박",
-            InvasionThreatCalculator.BuildCandidateDetail(snapshot),
-            EventAlertImportance.High,
-            "침입");
-    }
-
-    private void ResetAfterInvasion()
-    {
-        currentThreat = 0f;
-        secondsSinceLastInvasion = 0f;
-        safetyRemaining = settings != null ? Mathf.Max(0f, settings.safetyDurationSeconds) : 0f;
-        candidateDelayRemaining = -1f;
-        warningCooldownRemaining = 0f;
-        warningRaisedThisCycle = false;
-        candidateRaisedThisCycle = false;
-        lastFactors = default;
-    }
-
-    private InvasionThreatSnapshot BuildSnapshot()
-    {
-        return new InvasionThreatSnapshot(
-            currentThreat,
-            ResolveStage(),
-            lastFactors,
-            candidateDelayRemaining,
-            safetyRemaining);
-    }
-
-    private InvasionThreatStage ResolveStage()
-    {
-        if (safetyRemaining > 0f)
-        {
-            return InvasionThreatStage.Safety;
-        }
-
-        if (candidateDelayRemaining >= 0f || candidateRaisedThisCycle)
-        {
-            return InvasionThreatStage.Candidate;
-        }
-
-        float thresholdMultiplier = RunVariableRuntime.Instance != null
-            ? RunVariableRuntime.Instance.GetWarningThresholdMultiplier()
-            : 1f;
-        if (MetaProgressionRuntime.Instance != null)
-        {
-            thresholdMultiplier *= MetaProgressionRuntime.Instance.GetInvasionWarningThresholdMultiplier();
-        }
-        float warningThreshold = settings != null
-            ? settings.warningThreshold * Mathf.Max(0.05f, thresholdMultiplier)
-            : 0f;
-        if (settings != null && currentThreat >= warningThreshold)
-        {
-            return InvasionThreatStage.Warning;
-        }
-
-        return InvasionThreatStage.Peaceful;
     }
 }

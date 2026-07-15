@@ -8,7 +8,7 @@ public sealed class WorkCommandHandler
     private readonly AbilityWork work;
     private readonly WorkTargetSelector targetSelector;
     private BuildableObject priorityWorkTarget;
-    private Character prioritySuppressTarget;
+    private CharacterActor prioritySuppressTarget;
     private Grid prioritySuppressGrid;
     private FacilityWorkType priorityWorkType = FacilityWorkType.None;
 
@@ -19,7 +19,7 @@ public sealed class WorkCommandHandler
     }
 
     public BuildableObject PriorityWorkTarget => priorityWorkTarget;
-    public Character PrioritySuppressTarget => prioritySuppressTarget;
+    public CharacterActor PrioritySuppressActor => prioritySuppressTarget;
     public bool HasPrioritySuppressTarget => prioritySuppressTarget != null && !prioritySuppressTarget.IsDead;
     public FacilityWorkType PriorityWorkType => priorityWorkType;
 
@@ -52,18 +52,22 @@ public sealed class WorkCommandHandler
         prioritySuppressGrid = null;
         priorityWorkType = candidate.WorkType;
         work.AssignWork(building, candidate.WorkType);
-        work.WorkerCharacter?.ai?.RequestImmediateReplan(clearFailures: true);
-        work.WorkerCharacter?.AddLog($"우선 작업 지정: {building.name} - {WorkTaskCatalog.GetDisplayName(candidate.WorkType)}");
+        work.WorkerActor?.Brain?.RequestImmediateReplan(clearFailures: true);
+        work.WorkerActor?.AddLog($"우선 작업 지정: {building.name} - {WorkTaskCatalog.GetDisplayName(candidate.WorkType)}");
         errorMessage = string.Empty;
         return true;
     }
 
     public bool TrySetPrioritySuppressTarget(
-        Character target,
+        CharacterActor target,
         GridPathSearchResult searchResult,
         out string errorMessage)
     {
-        if (!WorkCommandResolver.TryResolveSuppressCommand(work.WorkerCharacter, target, out errorMessage))
+        if (!WorkCommandResolver.TryResolveSuppressCommand(
+                work.WorkerActor,
+                target,
+                work.StaffDiscontentRuntimeService.IsRebellionTarget,
+                out errorMessage))
         {
             return false;
         }
@@ -74,13 +78,13 @@ public sealed class WorkCommandHandler
         }
 
         prioritySuppressTarget = target;
-        prioritySuppressGrid = WorkGridUtility.ResolveActiveGrid(work, searchResult);
+        prioritySuppressGrid = work.WorkGridResolver.ResolveActiveGrid(work, searchResult);
         priorityWorkTarget = null;
         priorityWorkType = FacilityWorkType.Guard;
         work.AssignWork(null, FacilityWorkType.Guard);
         work.SetDutyState(AbilityWork.DutyState.OnDuty);
-        work.WorkerCharacter?.ai?.RequestImmediateReplan(clearFailures: true);
-        work.WorkerCharacter?.AddLog($"우선 제압 지정: {target.name}");
+        work.WorkerActor?.Brain?.RequestImmediateReplan(clearFailures: true);
+        work.WorkerActor?.AddLog($"우선 제압 지정: {target.name}");
         errorMessage = string.Empty;
         return true;
     }
@@ -93,13 +97,13 @@ public sealed class WorkCommandHandler
             return false;
         }
 
-        Grid activeGrid = WorkGridUtility.ResolveActiveGrid(work, searchResult, prioritySuppressGrid);
+        Grid activeGrid = work.WorkGridResolver.ResolveActiveGrid(work, searchResult, prioritySuppressGrid);
         if (activeGrid == null)
         {
             return false;
         }
 
-        GridCell cell = activeGrid.GetGridCell(WorkGridUtility.GetGridPosition(activeGrid, prioritySuppressTarget));
+        GridCell cell = activeGrid.GetGridCell(work.WorkGridResolver.GetGridPosition(activeGrid, prioritySuppressTarget));
         if (cell == null)
         {
             return false;
@@ -134,53 +138,58 @@ public sealed class WorkCommandHandler
 
     public IEnumerator SuppressPriorityTarget()
     {
-        Character character = work.WorkerCharacter;
-        if (character == null || character.ai == null)
+        CharacterActor actor = work.WorkerActor;
+        if (actor == null || actor.Brain == null)
         {
             yield break;
         }
 
         work.EnsureWorkReferences();
         AbilityMove move = work.WorkerMove;
-        Character target = prioritySuppressTarget;
-        if (!WorkCommandResolver.TryResolveSuppressCommand(character, target, out string errorMessage))
+        CharacterActor target = prioritySuppressTarget;
+        AIAction currentAction = actor.Brain.bestAction;
+        if (!WorkCommandResolver.TryResolveSuppressCommand(
+                actor,
+                target,
+                work.StaffDiscontentRuntimeService.IsRebellionTarget,
+                out string errorMessage))
         {
-            character.AddLog($"제압 실패: {errorMessage}");
+            actor.AddLog($"제압 실패: {errorMessage}");
             ClearPriorityWorkTarget();
-            character.ai.isBestActionEnd = true;
+            actor.Brain.isBestActionEnd = true;
             yield break;
         }
 
-        Grid activeGrid = WorkGridUtility.ResolveActiveGrid(work, null, prioritySuppressGrid);
+        Grid activeGrid = work.WorkGridResolver.ResolveActiveGrid(work, null, prioritySuppressGrid);
         if (move == null || activeGrid == null)
         {
-            character.AddLog("제압 실패: 이동 정보 없음");
+            actor.AddLog("제압 실패: 이동 정보 없음");
             ClearPriorityWorkTarget();
-            character.ai.isBestActionEnd = true;
+            actor.Brain.isBestActionEnd = true;
             yield break;
         }
 
-        character.AddLog($"제압 시작: {target.name}");
-        while (target != null && !target.IsDead && character != null && !character.IsDead)
+        actor.AddLog($"제압 시작: {target.name}");
+        while (target != null && !target.IsDead && actor != null && !actor.IsDead)
         {
-            Vector2Int targetPos = WorkGridUtility.GetGridPosition(activeGrid, target);
-            Vector2Int actorPos = WorkGridUtility.GetGridPosition(activeGrid, character);
+            Vector2Int targetPos = work.WorkGridResolver.GetGridPosition(activeGrid, target);
+            Vector2Int actorPos = work.WorkGridResolver.GetGridPosition(activeGrid, actor);
             if (actorPos != targetPos)
             {
                 Queue<GridMoveStep> path = activeGrid.GetMovePath(actorPos, (pos) => pos == targetPos);
                 if (path == null || path.Count == 0)
                 {
-                    character.AddLog("제압 실패: 도달할 수 없는 대상");
+                    actor.AddLog("제압 실패: 도달할 수 없는 대상");
                     break;
                 }
 
-                yield return move.MoveByPath(path);
+                yield return move.MoveByPath(path, currentAction);
                 continue;
             }
 
-            float damage = Mathf.Max(1f, work.SuppressBaseDamage * character.GetCombatPowerMultiplier());
-            target.ApplyDamage(damage, $"제압: {character.name}");
-            character.AddLog(target.IsDead
+            float damage = Mathf.Max(1f, work.SuppressBaseDamage * actor.GetCombatPowerMultiplier());
+            target.ApplyDamage(damage, $"제압: {actor.name}");
+            actor.AddLog(target.IsDead
                 ? $"제압 완료: {target.name}"
                 : $"제압 공격: {target.name}");
 
@@ -188,11 +197,11 @@ public sealed class WorkCommandHandler
             {
                 if (target.TryGetComponent(out InvasionIntruderRuntime intruderRuntime))
                 {
-                    intruderRuntime.ResolveSuppressedBy(character);
+                    intruderRuntime.ResolveSuppressedBy(actor);
                 }
-                else if (StaffDiscontentRuntime.Instance != null)
+                else
                 {
-                    StaffDiscontentRuntime.Instance.ResolveSuppressedRebel(target, character);
+                    work.StaffDiscontentRuntimeService.ResolveSuppressedRebel(target, actor);
                 }
                 break;
             }
@@ -201,11 +210,11 @@ public sealed class WorkCommandHandler
         }
 
         ClearPriorityWorkTarget();
-        character.ai.isBestActionEnd = true;
+        actor.Brain.isBestActionEnd = true;
     }
 
     private bool CanReachSuppressTarget(
-        Character target,
+        CharacterActor target,
         GridPathSearchResult searchResult,
         out string errorMessage)
     {
@@ -216,27 +225,27 @@ public sealed class WorkCommandHandler
             return false;
         }
 
-        Grid activeGrid = WorkGridUtility.ResolveActiveGrid(work, searchResult);
+        Grid activeGrid = work.WorkGridResolver.ResolveActiveGrid(work, searchResult);
         if (activeGrid == null)
         {
             errorMessage = "그리드가 초기화되지 않았습니다";
             return false;
         }
 
-        Vector2Int targetPos = WorkGridUtility.GetGridPosition(activeGrid, target);
+        Vector2Int targetPos = work.WorkGridResolver.GetGridPosition(activeGrid, target);
         if (!activeGrid.IsValidGridPos(targetPos))
         {
             errorMessage = "제압 대상 위치가 유효하지 않습니다";
             return false;
         }
 
-        Character character = work.WorkerCharacter;
-        if (character != null && WorkGridUtility.GetGridPosition(activeGrid, character) == targetPos)
+        CharacterActor actor = work.WorkerActor;
+        if (actor != null && work.WorkGridResolver.GetGridPosition(activeGrid, actor) == targetPos)
         {
             return true;
         }
 
-        Vector2Int actorPos = character != null ? WorkGridUtility.GetGridPosition(activeGrid, character) : Vector2Int.zero;
+        Vector2Int actorPos = actor != null ? work.WorkGridResolver.GetGridPosition(activeGrid, actor) : Vector2Int.zero;
         Queue<GridMoveStep> path = searchResult != null
             ? searchResult.GetMovePath((pos) => pos == targetPos)
             : activeGrid.GetMovePath(actorPos, (pos) => pos == targetPos);

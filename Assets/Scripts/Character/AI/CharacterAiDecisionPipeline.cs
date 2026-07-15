@@ -1,0 +1,748 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+public readonly struct CharacterAiDecisionTickResult
+{
+    public CharacterAiDecisionTickResult(
+        bool handled,
+        CharacterAiBranch branch,
+        string task,
+        string status)
+    {
+        Handled = handled;
+        Branch = branch;
+        Task = task ?? string.Empty;
+        Status = status ?? string.Empty;
+    }
+
+    public bool Handled { get; }
+    public CharacterAiBranch Branch { get; }
+    public string Task { get; }
+    public string Status { get; }
+}
+
+public interface ICharacterAiDecisionPipeline
+{
+    bool HasCriticalState(CharacterActor actor);
+    CharacterAiDecisionTickResult RunCritical(CharacterActor actor, CharacterBlackboard blackboard);
+    bool HasMacroGoal(CharacterActor actor);
+    bool HasContinuableCurrentAction(CharacterActor actor);
+    bool ShouldStopCurrentActionForReplan(CharacterActor actor);
+    CharacterAiDecisionTickResult ContinueCurrentAction(CharacterActor actor);
+    CharacterAiDecisionTickResult StopCurrentActionForReplan(CharacterActor actor);
+    CharacterAiDecisionTickResult SelectJobGiverAction(CharacterActor actor, CharacterAiJobGiver jobGiver, string taskName);
+    CharacterAiDecisionTickResult RunSelectedAction(
+        CharacterActor actor,
+        string taskName,
+        CharacterAiBranch branchOverride = CharacterAiBranch.None);
+    CharacterAiDecisionTickResult RunMacroGoalDecision(CharacterActor actor);
+    CharacterAiDecisionTickResult RunIdleBehavior(CharacterActor actor, CharacterBlackboard blackboard);
+    bool HasMacroGoalType(CharacterActor actor, CharacterMacroGoalType goalType);
+    CharacterAiDecisionTickResult ClearContinueMacro(CharacterActor actor);
+    CharacterAiDecisionTickResult RunComplainMacro(CharacterActor actor, CharacterBlackboard blackboard, CharacterMacroGoal goal);
+    CharacterAiDecisionTickResult ApplyAvoidFacility(CharacterActor actor, CharacterBlackboard blackboard, CharacterMacroGoal goal);
+    CharacterAiDecisionTickResult RunExitDungeonMacro(CharacterActor actor, CharacterBlackboard blackboard, CharacterMacroGoal goal);
+    CharacterAiDecisionTickResult RunVandalizeMacro(CharacterActor actor, CharacterBlackboard blackboard, CharacterMacroGoal goal);
+}
+
+public interface ICharacterAiFacilityLookup
+{
+    BuildableObject FindFacility(int id, string tag);
+}
+
+public sealed class CharacterAiFacilityLookup : ICharacterAiFacilityLookup
+{
+    private readonly IDungeonSceneComponentQuery sceneQuery;
+
+    public CharacterAiFacilityLookup(IDungeonSceneComponentQuery sceneQuery)
+    {
+        this.sceneQuery = sceneQuery
+            ?? throw new ArgumentNullException(nameof(sceneQuery));
+    }
+
+    public BuildableObject FindFacility(int id, string tag)
+    {
+        IReadOnlyList<BuildableObject> buildings = sceneQuery.All<BuildableObject>();
+        foreach (BuildableObject building in buildings)
+        {
+            if (CharacterAiDecisionPipeline.MatchesFacility(building, id, tag))
+            {
+                return building;
+            }
+        }
+
+        return null;
+    }
+}
+
+public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
+{
+    public bool HasCriticalState(CharacterActor actor)
+    {
+        return actor == null
+            || actor.IsDead
+            || actor.CurrentLifecycleState == CharacterLifecycleState.ExitingDungeon
+            || actor.CurrentLifecycleState == CharacterLifecycleState.Despawned
+            || actor.CurrentLifecycleState == CharacterLifecycleState.OnExpedition;
+    }
+
+    public CharacterAiDecisionTickResult RunCritical(CharacterActor actor, CharacterBlackboard blackboard)
+    {
+        if (actor == null)
+        {
+            return Result(false, CharacterAiBranch.Critical, "HasCriticalState", "Actor is missing.", blackboard);
+        }
+
+        blackboard.ClearCommitment(CharacterAiInterruptReason.Critical, actor.CurrentLifecycleState.ToString());
+        if (actor.Brain != null)
+        {
+            actor.Brain.isBestActionEnd = false;
+        }
+
+        return Result(true, CharacterAiBranch.Critical, "HasCriticalState", actor.CurrentLifecycleState.ToString(), blackboard);
+    }
+
+    public bool HasMacroGoal(CharacterActor actor)
+    {
+        return actor != null && actor.Blackboard != null && actor.Blackboard.HasActiveMacroGoal();
+    }
+
+    public bool HasContinuableCurrentAction(CharacterActor actor)
+    {
+        return actor != null
+            && actor.Brain != null
+            && actor.Brain.CanContinueCurrentAction(out _);
+    }
+
+    public bool ShouldStopCurrentActionForReplan(CharacterActor actor)
+    {
+        return actor != null
+            && actor.Brain != null
+            && actor.Brain.ShouldStopCurrentActionForReplan(out _);
+    }
+
+    public CharacterAiDecisionTickResult ContinueCurrentAction(CharacterActor actor)
+    {
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.ContinueCurrent, "Continue Current Action", error, blackboard);
+        }
+
+        if (actor.Brain == null)
+        {
+            return Result(false, CharacterAiBranch.ContinueCurrent, "Continue Current Action", "AIBrain is missing.", blackboard);
+        }
+
+        if (!actor.Brain.CanContinueCurrentAction(out string status))
+        {
+            return Result(false, CharacterAiBranch.ContinueCurrent, "Continue Current Action", status, blackboard);
+        }
+
+        AIAction runningAction = actor.Brain.bestAction;
+        actor.Brain.isBestActionEnd = false;
+        runningAction?.actionset?.RefreshDestinationReservation(actor, runningAction.destination);
+        blackboard.RefreshCommitment(runningAction);
+        blackboard.SetIntent(
+            CharacterAiBranch.ContinueCurrent,
+            GetActionLabel(runningAction?.actionset),
+            "Continue Current Action",
+            status);
+        return Result(true, CharacterAiBranch.ContinueCurrent, "Continue Current Action", status, blackboard);
+    }
+
+    public CharacterAiDecisionTickResult StopCurrentActionForReplan(CharacterActor actor)
+    {
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.StopCurrent, "Stop Current Action", error, blackboard);
+        }
+
+        if (actor.Brain == null)
+        {
+            return Result(false, CharacterAiBranch.StopCurrent, "Stop Current Action", "AIBrain is missing.", blackboard);
+        }
+
+        if (!actor.Brain.ShouldStopCurrentActionForReplan(out string stopReason))
+        {
+            return Result(false, CharacterAiBranch.StopCurrent, "Stop Current Action", "Current action does not need replan.", blackboard);
+        }
+
+        AIAction runningAction = actor.Brain.bestAction;
+        string actionLabel = GetActionLabel(runningAction?.actionset);
+        actor.Brain.StopCurrentActionForReplan(stopReason);
+        blackboard.ClearCommitment(CharacterAiInterruptReason.CurrentActionStopped, stopReason);
+        blackboard.SetIntent(
+            CharacterAiBranch.StopCurrent,
+            actionLabel,
+            "Stop Current Action",
+            stopReason);
+        return Result(true, CharacterAiBranch.StopCurrent, "Stop Current Action", stopReason, blackboard);
+    }
+
+    public CharacterAiDecisionTickResult SelectJobGiverAction(
+        CharacterActor actor,
+        CharacterAiJobGiver jobGiver,
+        string taskName)
+    {
+        CharacterAiBranch branch = jobGiver != null
+            ? jobGiver.Branch
+            : CharacterAiBranch.None;
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, branch, taskName, error, blackboard);
+        }
+
+        if (actor.Brain == null)
+        {
+            return Result(false, branch, taskName, "AIBrain is missing.", blackboard);
+        }
+
+        if (jobGiver == null)
+        {
+            return Result(false, branch, taskName, "JobGiver is missing.", blackboard);
+        }
+
+        if (!blackboard.TryGetCachedJobGiverCandidate(branch, out CharacterAiJobCandidate jobCandidate)
+            && !jobGiver.TryEvaluate(actor, out jobCandidate))
+        {
+            return Result(false, branch, taskName, jobCandidate.DebugSummary, blackboard);
+        }
+
+        blackboard.RecordSelectedJobGiverUtility(jobCandidate);
+        if (!actor.Brain.TryCommitActionCandidate(jobCandidate.ActionCandidate, out AIActionFailure failure))
+        {
+            blackboard.ReportActionFailure(null, failure);
+            return Result(false, branch, taskName, failure.ToString(), blackboard);
+        }
+
+        AIAction selectedAction = actor.Brain.bestAction;
+        string actionLabel = GetActionLabel(selectedAction?.actionset);
+        string destinationLabel = GetBuildingLabel(selectedAction?.destination);
+        string status = $"{destinationLabel} | {jobCandidate.DebugSummary}";
+        blackboard.SetIntent(branch, actionLabel, taskName, status);
+        return Result(true, branch, taskName, status, blackboard);
+    }
+
+    public CharacterAiDecisionTickResult RunSelectedAction(
+        CharacterActor actor,
+        string taskName,
+        CharacterAiBranch branchOverride = CharacterAiBranch.None)
+    {
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.None, taskName, error, blackboard);
+        }
+
+        AIAction selectedAction = actor.Brain != null ? actor.Brain.bestAction : null;
+        CharacterAiBranch branch = branchOverride != CharacterAiBranch.None
+            ? branchOverride
+            : GetBranchForActionSet(selectedAction?.actionset);
+        if (selectedAction == null || selectedAction.actionset == null)
+        {
+            return Result(false, branch, taskName, "No selected AI action.", blackboard);
+        }
+
+        bool executed = actor.TryExecuteSelectedAiAction();
+        if (executed)
+        {
+            blackboard.RefreshCommitment(selectedAction);
+        }
+
+        return Result(
+            executed,
+            branch,
+            taskName,
+            executed ? GetActionLabel(selectedAction.actionset) : "Selected action could not execute.",
+            blackboard);
+    }
+
+    public CharacterAiDecisionTickResult RunMacroGoalDecision(CharacterActor actor)
+    {
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "Run Macro Goal", error, blackboard);
+        }
+
+        CharacterMacroGoal goal = blackboard.ActiveMacroGoal;
+        if (goal == null || !blackboard.HasActiveMacroGoal())
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "Run Macro Goal", "No active macro goal.", blackboard);
+        }
+
+        return goal.type switch
+        {
+            CharacterMacroGoalType.Continue => ClearContinueMacro(actor),
+            CharacterMacroGoalType.SeekFood => RunMacroJobGiverDecision(
+                actor,
+                blackboard,
+                goal,
+                "Seek Food",
+                RequireJobGiverCatalog(actor).GetFood),
+            CharacterMacroGoalType.SeekToilet => RunMacroJobGiverDecision(
+                actor,
+                blackboard,
+                goal,
+                "Seek Toilet",
+                RequireJobGiverCatalog(actor).Toilet),
+            CharacterMacroGoalType.SeekHygiene => RunMacroJobGiverDecision(
+                actor,
+                blackboard,
+                goal,
+                "Seek Hygiene",
+                RequireJobGiverCatalog(actor).Hygiene),
+            CharacterMacroGoalType.SeekFun => RunMacroJobGiverDecision(
+                actor,
+                blackboard,
+                goal,
+                "Seek Fun",
+                RequireJobGiverCatalog(actor).Shopping,
+                RequireJobGiverCatalog(actor).LookAround),
+            CharacterMacroGoalType.AvoidFacility => ApplyAvoidFacility(
+                actor,
+                blackboard,
+                goal),
+            CharacterMacroGoalType.Complain => RunComplainMacro(
+                actor,
+                blackboard,
+                goal),
+            CharacterMacroGoalType.ExitDungeon => RunExitDungeonMacro(
+                actor,
+                blackboard,
+                goal),
+            CharacterMacroGoalType.Vandalize => RunVandalizeMacro(
+                actor,
+                blackboard,
+                goal),
+            _ => Result(false, CharacterAiBranch.MacroGoal, "Run Macro Goal", $"Unsupported macro goal: {goal.type}.", blackboard)
+        };
+    }
+
+    public CharacterAiDecisionTickResult RunIdleBehavior(CharacterActor actor, CharacterBlackboard blackboard)
+    {
+        if (!TryPrepare(actor, out blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.Idle, "RunIdleBehavior", error, blackboard);
+        }
+
+        if (!actor.TryGetAbility(out AbilityMove _))
+        {
+            return Result(false, CharacterAiBranch.Idle, "RunIdleBehavior", "AbilityMove is missing.", blackboard);
+        }
+
+        if (actor.Brain != null)
+        {
+            actor.Brain.isBestActionEnd = false;
+        }
+
+        if (IdleBehaviorRunner.TryRunDefault(actor, 1.0f, true, out string behaviorName, out string failureReason))
+        {
+            actor.Brain?.ClearSelectedActionForIdle(behaviorName);
+            blackboard.ClearCommitment(CharacterAiInterruptReason.ManualReplan, "Idle behavior selected.");
+            blackboard.RecordSelectedUtilitySummary($"AmbientIdle utility=explicit behavior={behaviorName}");
+            blackboard.SetIntent(CharacterAiBranch.Idle, behaviorName, "RunIdleBehavior", behaviorName);
+            actor.AddLog($"AI idle: {behaviorName}");
+            return Result(true, CharacterAiBranch.Idle, "RunIdleBehavior", behaviorName, blackboard);
+        }
+
+        actor.AddLog($"AI idle failed: {failureReason}");
+        if (actor.Brain != null)
+        {
+            actor.Brain.isBestActionEnd = true;
+        }
+
+        return Result(false, CharacterAiBranch.Idle, "RunIdleBehavior", failureReason, blackboard);
+    }
+
+    public bool HasMacroGoalType(CharacterActor actor, CharacterMacroGoalType goalType)
+    {
+        CharacterBlackboard blackboard = actor != null ? actor.Blackboard : null;
+        return blackboard != null
+            && blackboard.HasActiveMacroGoal()
+            && blackboard.ActiveMacroGoal != null
+            && blackboard.ActiveMacroGoal.type == goalType;
+    }
+
+    private CharacterAiDecisionTickResult RunMacroJobGiverDecision(
+        CharacterActor actor,
+        CharacterBlackboard blackboard,
+        CharacterMacroGoal goal,
+        string label,
+        params CharacterAiJobGiver[] jobGivers)
+    {
+        string taskName = $"Macro {label} JobGiver";
+        if (!TryPrepare(actor, out blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, taskName, error, blackboard);
+        }
+
+        if (goal == null || !blackboard.HasActiveMacroGoal())
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, taskName, "Macro goal is missing.", blackboard);
+        }
+
+        CharacterAiJobCandidate bestCandidate = default;
+        bool hasCandidate = false;
+        string lastFailure = "No JobGiver candidates.";
+        if (jobGivers != null)
+        {
+            foreach (CharacterAiJobGiver jobGiver in jobGivers)
+            {
+                if (jobGiver == null)
+                {
+                    continue;
+                }
+
+                if (jobGiver.TryEvaluate(actor, out CharacterAiJobCandidate candidate))
+                {
+                    if (!hasCandidate || candidate.Utility > bestCandidate.Utility)
+                    {
+                        bestCandidate = candidate;
+                        hasCandidate = true;
+                    }
+
+                    continue;
+                }
+
+                lastFailure = candidate.DebugSummary;
+            }
+        }
+
+        if (!hasCandidate)
+        {
+            blackboard.ClearMacroGoal($"{label} macro could not find a JobGiver candidate: {lastFailure}");
+            return Result(false, CharacterAiBranch.MacroGoal, taskName, lastFailure, blackboard);
+        }
+
+        blackboard.RecordSelectedJobGiverUtility(bestCandidate);
+        if (!actor.Brain.TryCommitActionCandidate(bestCandidate.ActionCandidate, out AIActionFailure failure))
+        {
+            blackboard.ReportActionFailure(null, failure);
+            blackboard.ClearMacroGoal($"{label} macro could not commit candidate: {failure}");
+            return Result(false, CharacterAiBranch.MacroGoal, taskName, failure.ToString(), blackboard);
+        }
+
+        CharacterAiDecisionTickResult runResult = RunSelectedAction(
+            actor,
+            $"Run {label} Macro Action",
+            CharacterAiBranch.MacroGoal);
+        string status = $"{runResult.Status} | {bestCandidate.DebugSummary}";
+        if (runResult.Handled)
+        {
+            string reason = goal != null && !string.IsNullOrWhiteSpace(goal.reason)
+                ? goal.reason
+                : $"{label} macro consumed.";
+            blackboard.ClearMacroGoal(reason);
+        }
+        else
+        {
+            blackboard.ClearMacroGoal($"{label} macro action failed: {runResult.Status}");
+        }
+
+        return Result(
+            runResult.Handled,
+            CharacterAiBranch.MacroGoal,
+            $"Run {label} Macro Action",
+            status,
+            blackboard);
+    }
+
+    public CharacterAiDecisionTickResult ClearContinueMacro(CharacterActor actor)
+    {
+        CharacterBlackboard blackboard = actor != null ? actor.Blackboard : null;
+        if (blackboard == null || !blackboard.HasActiveMacroGoal())
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "ContinueMacro", "No active macro goal.", blackboard);
+        }
+
+        blackboard.ClearMacroGoal("Macro goal requested Continue.");
+        return Result(false, CharacterAiBranch.MacroGoal, "ContinueMacro", "Continue.", blackboard);
+    }
+
+    public CharacterAiDecisionTickResult RunComplainMacro(
+        CharacterActor actor,
+        CharacterBlackboard blackboard,
+        CharacterMacroGoal goal)
+    {
+        if (!TryPrepare(actor, out blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "Complain", error, blackboard);
+        }
+
+        goal ??= blackboard.ActiveMacroGoal;
+        if (goal == null)
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "Complain", "Macro goal is missing.", blackboard);
+        }
+
+        actor.AddLog($"AI macro complain: {goal.reason}");
+        blackboard.ClearMacroGoal("Complain emitted.");
+        return Result(true, CharacterAiBranch.MacroGoal, "Complain", "Complain.", blackboard);
+    }
+
+    public CharacterAiDecisionTickResult ApplyAvoidFacility(
+        CharacterActor actor,
+        CharacterBlackboard blackboard,
+        CharacterMacroGoal goal)
+    {
+        if (!TryPrepare(actor, out blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "AvoidFacility", error, blackboard);
+        }
+
+        if (goal == null)
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "AvoidFacility", "Macro goal is missing.", blackboard);
+        }
+
+        BuildableObject target = FindFacility(actor, goal.targetFacilityId, goal.targetFacilityTag);
+        if (target == null)
+        {
+            blackboard.ClearMacroGoal("AvoidFacility target not found.");
+            return Result(false, CharacterAiBranch.MacroGoal, "AvoidFacility", "Target facility not found.", blackboard);
+        }
+
+        blackboard.PutFacilityOnCooldown(target, goal.reason);
+        blackboard.ClearMacroGoal("AvoidFacility cooldown applied.");
+        return Result(true, CharacterAiBranch.MacroGoal, "AvoidFacility", target.name, blackboard);
+    }
+
+    public CharacterAiDecisionTickResult RunExitDungeonMacro(
+        CharacterActor actor,
+        CharacterBlackboard blackboard,
+        CharacterMacroGoal goal)
+    {
+        if (!TryPrepare(actor, out blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "ExitDungeon", error, blackboard);
+        }
+
+        if (goal == null)
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "ExitDungeon", "Macro goal is missing.", blackboard);
+        }
+
+        if (!actor.TryGetAbility(out AbilityMove move))
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "ExitDungeon", "AbilityMove is missing.", blackboard);
+        }
+
+        actor.AddLog($"AI macro exit: {goal.reason}");
+        blackboard.ClearCommitment(CharacterAiInterruptReason.MacroGoalChanged, "ExitDungeon macro.");
+        blackboard.ClearMacroGoal("ExitDungeon started.");
+        if (actor.Brain != null)
+        {
+            actor.Brain.isBestActionEnd = false;
+        }
+
+        move.StartExitDungeon();
+        return Result(true, CharacterAiBranch.MacroGoal, "ExitDungeon", "Exit started.", blackboard);
+    }
+
+    public CharacterAiDecisionTickResult RunVandalizeMacro(
+        CharacterActor actor,
+        CharacterBlackboard blackboard,
+        CharacterMacroGoal goal)
+    {
+        if (!TryPrepare(actor, out blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "Vandalize", error, blackboard);
+        }
+
+        if (goal == null)
+        {
+            return Result(false, CharacterAiBranch.MacroGoal, "Vandalize", "Macro goal is missing.", blackboard);
+        }
+
+        BuildableObject target = FindFacility(actor, goal.targetFacilityId, goal.targetFacilityTag);
+        if (target == null)
+        {
+            blackboard.ClearMacroGoal("Vandalize target not found.");
+            actor.AddLog($"AI macro vandalize failed: target not found - {goal.reason}");
+            return Result(false, CharacterAiBranch.MacroGoal, "Vandalize", "Target facility not found.", blackboard);
+        }
+
+        if (!CanVandalize(target, out string failureReason))
+        {
+            blackboard.ClearMacroGoal($"Vandalize target rejected: {failureReason}");
+            actor.AddLog($"AI macro vandalize failed: {failureReason}");
+            return Result(false, CharacterAiBranch.MacroGoal, "Vandalize", failureReason, blackboard);
+        }
+
+        target.SetDamaged(true);
+        blackboard.ClearCommitment(CharacterAiInterruptReason.MacroGoalChanged, "Vandalize macro executed.");
+        blackboard.ClearMacroGoal("Vandalize completed.");
+        actor.AddLog($"AI macro vandalize: {GetBuildingLabel(target)}");
+        return Result(true, CharacterAiBranch.MacroGoal, "Vandalize", GetBuildingLabel(target), blackboard);
+    }
+
+    private static BuildableObject FindFacility(CharacterActor actor, int id, string tag)
+    {
+        return RequireFacilityLookup(actor).FindFacility(id, tag);
+    }
+
+    public static bool MatchesFacility(BuildableObject building, int id, string tag)
+    {
+        if (building == null)
+        {
+            return false;
+        }
+
+        if (id >= 0 && building.id == id)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(tag)
+            && building.BuildingData != null
+            && !string.IsNullOrWhiteSpace(building.BuildingData.objectName)
+            && building.BuildingData.objectName.IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(tag)
+            && building.Facility != null
+            && building.Facility.roles.ToString().IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static ICharacterAiFacilityLookup RequireFacilityLookup(CharacterActor actor)
+    {
+        if (actor == null || actor.Brain == null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(CharacterAiDecisionPipeline)} requires an actor with {nameof(AIBrain)} for facility lookup.");
+        }
+
+        return actor.Brain.RequireFacilityLookup();
+    }
+
+    private static ICharacterAiJobGiverCatalog RequireJobGiverCatalog(CharacterActor actor)
+    {
+        if (actor == null || actor.Brain == null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(CharacterAiDecisionPipeline)} requires an actor with {nameof(AIBrain)} for job giver lookup.");
+        }
+
+        return actor.Brain.RequireJobGiverCatalog();
+    }
+
+    private static bool CanVandalize(BuildableObject target, out string failureReason)
+    {
+        failureReason = string.Empty;
+        if (target == null)
+        {
+            failureReason = "Target facility is missing.";
+            return false;
+        }
+
+        if (target.isDestroy)
+        {
+            failureReason = "Target facility is destroyed.";
+            return false;
+        }
+
+        if (target.IsDamaged)
+        {
+            failureReason = "Target facility is already damaged.";
+            return false;
+        }
+
+        if (target.IsGridMovement)
+        {
+            failureReason = "Movement buildings cannot be vandalized.";
+            return false;
+        }
+
+        if (target.Facility == null)
+        {
+            failureReason = "Target is not a facility.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string GetBuildingLabel(BuildableObject building)
+    {
+        if (building == null)
+        {
+            return "None";
+        }
+
+        return building.BuildingData != null && !string.IsNullOrWhiteSpace(building.BuildingData.objectName)
+            ? building.BuildingData.objectName
+            : building.name;
+    }
+
+    public static CharacterAiBranch GetBranchForActionSet(AIActionSet actionSet)
+    {
+        return actionSet switch
+        {
+            AIExitDungeon => CharacterAiBranch.ExitDungeon,
+            AIEat => CharacterAiBranch.Eat,
+            AIRest => CharacterAiBranch.Rest,
+            AIFacilityRoleAction roleAction when roleAction.Role == FacilityRole.Toilet => CharacterAiBranch.Toilet,
+            AIFacilityRoleAction roleAction when roleAction.Role == FacilityRole.Hygiene => CharacterAiBranch.Hygiene,
+            AIWork => CharacterAiBranch.Work,
+            AIShopping => CharacterAiBranch.Shopping,
+            AILookAround => CharacterAiBranch.LookAround,
+            AIWait => CharacterAiBranch.Wait,
+            _ => CharacterAiBranch.None
+        };
+    }
+
+    public static string GetActionLabel(AIActionSet actionSet)
+    {
+        if (actionSet == null)
+        {
+            return "None";
+        }
+
+        return !string.IsNullOrWhiteSpace(actionSet.actionName)
+            ? actionSet.actionName
+            : actionSet.GetType().Name;
+    }
+
+    private static bool TryPrepare(
+        CharacterActor actor,
+        out CharacterBlackboard blackboard,
+        out string error,
+        bool requireCanRunAi = true)
+    {
+        blackboard = actor != null ? actor.Blackboard : null;
+        error = string.Empty;
+        if (actor == null)
+        {
+            error = "Actor is missing.";
+            return false;
+        }
+
+        if (blackboard == null)
+        {
+            error = "CharacterBlackboard is missing.";
+            Debug.LogError($"{actor.name}: {error}", actor);
+            return false;
+        }
+
+        if (requireCanRunAi && !actor.CanRunAi)
+        {
+            error = $"AI cannot run in state {actor.CurrentLifecycleState}.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static CharacterAiDecisionTickResult Result(
+        bool handled,
+        CharacterAiBranch branch,
+        string task,
+        string status,
+        CharacterBlackboard blackboard)
+    {
+        blackboard?.RecordBtStatus(branch, task, status);
+        return new CharacterAiDecisionTickResult(handled, branch, task, status);
+    }
+}

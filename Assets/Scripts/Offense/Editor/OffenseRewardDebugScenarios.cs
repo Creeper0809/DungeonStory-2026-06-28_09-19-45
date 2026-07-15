@@ -60,7 +60,7 @@ public static class OffenseRewardDebugScenarios
     private static bool VerifyMoneyStockAndStateRewards()
     {
         using ScenarioContext context = new ScenarioContext(100);
-        IReadOnlyList<OffenseRewardGrantResult> results = OffenseRewardService.GrantRewards(
+        IReadOnlyList<OffenseRewardGrantResult> results = CreateGrantService().GrantRewards(
             new[]
             {
                 Reward(OffenseRewardCategory.Money, "약탈금", 80),
@@ -86,7 +86,7 @@ public static class OffenseRewardDebugScenarios
     private static bool VerifyRareFacilityAndBlueprintRewards()
     {
         using ScenarioContext context = new ScenarioContext(0);
-        IReadOnlyList<OffenseRewardGrantResult> results = OffenseRewardService.GrantRewards(
+        IReadOnlyList<OffenseRewardGrantResult> results = CreateGrantService().GrantRewards(
             new[]
             {
                 Reward(OffenseRewardCategory.RareFacility, "희귀 시설", 1),
@@ -104,11 +104,11 @@ public static class OffenseRewardDebugScenarios
     private static bool VerifyExpeditionCompletionGrantsRewards()
     {
         using ExpeditionRewardScenario scenario = new ExpeditionRewardScenario();
-        Character worker = scenario.CreateCharacter("RewardWorker", CharacterType.NPC, CharacterRole.Regular, 12);
+        CharacterActor worker = scenario.CreateCharacter("RewardWorker", CharacterType.NPC, CharacterRole.Regular, 12);
 
         bool started = scenario.Expedition.Runtime.TryStartExpedition(
             "food_farm",
-            new[] { worker },
+            new[] { CharacterActor.From(worker) },
             out OffenseExpeditionRun expedition,
             out _);
         bool completed = scenario.Expedition.Runtime.CompleteExpeditionForDebug(
@@ -135,6 +135,12 @@ public static class OffenseRewardDebugScenarios
             label = label,
             amount = amount
         };
+    }
+
+    private static IOffenseRewardGrantService CreateGrantService()
+    {
+        return new OffenseRewardGrantService(
+            new OffenseRewardSelector(new EditorOffenseRewardCatalog()));
     }
 
     private static GameData CreateGameData(int holdingMoney)
@@ -195,6 +201,25 @@ public static class OffenseRewardDebugScenarios
         public bool HasWarehouseInventory => true;
     }
 
+    private sealed class EditorOffenseRewardCatalog : IOffenseRewardCatalog
+    {
+        private IReadOnlyCollection<BuildingSO> buildings;
+        private IReadOnlyCollection<FacilityBlueprintSO> blueprints;
+
+        public IReadOnlyCollection<BuildingSO> Buildings => buildings ??= LoadAssets<BuildingSO>();
+        public IReadOnlyCollection<FacilityBlueprintSO> Blueprints => blueprints ??= LoadAssets<FacilityBlueprintSO>();
+
+        private static IReadOnlyCollection<T> LoadAssets<T>()
+            where T : Object
+        {
+            return AssetDatabase.FindAssets($"t:{typeof(T).Name}")
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(AssetDatabase.LoadAssetAtPath<T>)
+                .Where((asset) => asset != null)
+                .ToArray();
+        }
+    }
+
     private sealed class ExpeditionRewardScenario : IDisposable
     {
         private readonly List<Object> objects = new List<Object>();
@@ -212,7 +237,7 @@ public static class OffenseRewardDebugScenarios
             Expedition = new ExpeditionFixture();
         }
 
-        public Character CreateCharacter(
+        public CharacterActor CreateCharacter(
             string name,
             CharacterType type,
             CharacterRole role,
@@ -231,15 +256,18 @@ public static class OffenseRewardDebugScenarios
             objects.Add(obj);
             objects.Add(data);
             obj.AddComponent<SpriteRenderer>();
-            Character character = obj.AddComponent<Character>();
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             obj.AddComponent<AbilityMove>();
             obj.AddComponent<AbilityWork>();
-            obj.AddComponent<AIBrain>();
+            AIBrain brain = obj.AddComponent<AIBrain>();
+            brain.availableActions = type == CharacterType.Customer
+                ? AiDebugScenarioActionFactory.CreateCustomerActions()
+                : AiDebugScenarioActionFactory.CreateStaffActions();
             character.RefreshAbilityCache();
             character.Initialization(data);
-            character.SetLifecycleState(Character.LifecycleState.Active);
-            character.stats[Character.Condition.SLEEP] = 100f;
-            character.stats[Character.Condition.MOOD] = 100f;
+            character.SetLifecycleState(CharacterLifecycleState.Active);
+            character.stats[CharacterCondition.SLEEP] = 100f;
+            character.stats[CharacterCondition.MOOD] = 100f;
             return character;
         }
 

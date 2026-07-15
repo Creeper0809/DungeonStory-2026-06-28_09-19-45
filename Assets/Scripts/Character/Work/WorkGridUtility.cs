@@ -1,8 +1,27 @@
+using System;
 using UnityEngine;
 
-public static class WorkGridUtility
+public interface IWorkGridResolver
 {
-    public static Grid ResolveActiveGrid(
+    Grid ResolveActiveGrid(
+        AbilityWork work,
+        GridPathSearchResult searchResult,
+        Grid priorityGrid = null);
+
+    Vector2Int GetGridPosition(Grid activeGrid, CharacterActor actor);
+}
+
+public sealed class WorkGridResolver : IWorkGridResolver
+{
+    private readonly IGridSystemProvider gridSystemProvider;
+
+    public WorkGridResolver(IGridSystemProvider gridSystemProvider)
+    {
+        this.gridSystemProvider = gridSystemProvider
+            ?? throw new ArgumentNullException(nameof(gridSystemProvider));
+    }
+
+    public Grid ResolveActiveGrid(
         AbilityWork work,
         GridPathSearchResult searchResult,
         Grid priorityGrid = null)
@@ -17,16 +36,16 @@ public static class WorkGridUtility
             return priorityGrid;
         }
 
-        if (GridSystemManager.Instance != null && GridSystemManager.Instance.grid != null)
+        if (gridSystemProvider.TryGetGrid(out Grid grid))
         {
-            return GridSystemManager.Instance.grid;
+            return grid;
         }
 
         work?.EnsureWorkReferences();
         return work != null ? work.CachedGrid : null;
     }
 
-    public static Vector2Int GetGridPosition(Grid activeGrid, Character actor)
+    public Vector2Int GetGridPosition(Grid activeGrid, CharacterActor actor)
     {
         if (activeGrid == null || actor == null)
         {

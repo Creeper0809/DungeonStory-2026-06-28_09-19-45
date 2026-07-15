@@ -147,8 +147,8 @@ public static class InvasionCombatReportDebugScenarios
         }
 
         public InvasionCombatReportRuntime Runtime { get; }
-        public Character Intruder { get; }
-        public Character Owner { get; }
+        public CharacterActor Intruder { get; }
+        public CharacterActor Owner { get; }
 
         public void StartInvasion()
         {
@@ -159,7 +159,7 @@ public static class InvasionCombatReportDebugScenarios
                 0f,
                 0f);
             Runtime.OnTriggerEvent(new InvasionStartedEvent(snapshot));
-            Runtime.OnTriggerEvent(new InvasionSpawnedEvent(Intruder, snapshot));
+            Runtime.OnTriggerEvent(new InvasionSpawnedEvent(CharacterActor.From(Intruder), snapshot));
         }
 
         public void TriggerDefense(DefenseActivationReport report)
@@ -169,12 +169,12 @@ public static class InvasionCombatReportDebugScenarios
 
         public void TriggerFacilityDamaged(BuildableObject facility)
         {
-            Runtime.OnTriggerEvent(new InvasionFacilityDamagedEvent(Intruder, facility));
+            Runtime.OnTriggerEvent(new InvasionFacilityDamagedEvent(CharacterActor.From(Intruder), facility));
         }
 
         public void TriggerFinalCombat()
         {
-            Runtime.OnTriggerEvent(new InvasionFinalCombatStartedEvent(Intruder, Owner));
+            Runtime.OnTriggerEvent(new InvasionFinalCombatStartedEvent(CharacterActor.From(Intruder), CharacterActor.From(Owner)));
         }
 
         public void Resolve(bool defended, float residualRisk)
@@ -192,7 +192,7 @@ public static class InvasionCombatReportDebugScenarios
             DefenseFacility facility = CreateFacility(buildingName, concept) as DefenseFacility;
             DefenseActivationReport report = new DefenseActivationReport(
                 facility,
-                Intruder,
+                CharacterActor.From(Intruder),
                 DefenseTriggerTiming.OnEnter);
             report.AddDamage(damage);
             report.AddMovementDelay(delay);
@@ -242,11 +242,11 @@ public static class InvasionCombatReportDebugScenarios
             }
         }
 
-        private Character CreateCharacter(string name)
+        private CharacterActor CreateCharacter(string name)
         {
             GameObject characterObject = new GameObject(name);
-            Character character = characterObject.AddComponent<Character>();
-            character.SetLifecycleState(Character.LifecycleState.Active);
+            CharacterActor character = characterObject.AddComponent<CharacterActor>();
+            character.SetLifecycleState(CharacterLifecycleState.Active);
             objects.Add(characterObject);
             return character;
         }

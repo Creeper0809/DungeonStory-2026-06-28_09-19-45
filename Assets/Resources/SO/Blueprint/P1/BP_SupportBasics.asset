@@ -29,5 +29,5 @@ MonoBehaviour:
   defaultCost: 130
   researchWorkRequired: 20
   unlockBuildingIds: 
-  unlockBasicPurchaseBuildingIds: 120000000f00000010000000
+  unlockBasicPurchaseBuildingIds: 120000000e0000003c0000003d0000000f00000010000000
   unlockRecipeIds: []

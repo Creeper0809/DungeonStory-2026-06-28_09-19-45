@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/ExitDungeon", order = 0)]
@@ -7,27 +5,28 @@ public class AIExitDungeon : AIActionSet
 {
     public override bool RequiresDestination => false;
 
-    public override bool CanStart(Character character)
+    public override bool CanStart(CharacterActor actor)
     {
         AbilityShopping shopping = null;
-        character?.TryGetAbility(out shopping);
-        return character != null
+        actor?.TryGetAbility(out shopping);
+        return actor != null
             && shopping != null
             && shopping.ShouldExitDungeon();
     }
 
-    public override void Execute(Character character)
+    public override void Execute(CharacterActor actor)
     {
-        character.TryGetAbility(out AbilityMove move);
+        AbilityMove move = null;
+        actor?.TryGetAbility(out move);
         if (move != null)
         {
             move.StartExitDungeon();
             return;
         }
 
-        if (character.ai != null)
+        if (actor != null && actor.Brain != null)
         {
-            character.ai.isBestActionEnd = true;
+            actor.Brain.isBestActionEnd = true;
         }
     }
 }

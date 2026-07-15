@@ -66,10 +66,10 @@ public static class PriorityCommandDebugScenarios
     {
         GameObject controllerObject = new GameObject("Priority Command Controller");
         OwnerCommandController controller = controllerObject.AddComponent<OwnerCommandController>();
-        Character actor = CreateCharacter("Owner_Orc");
+        CharacterActor actor = CreateCharacter("Owner_Orc");
 
-        controller.OnTriggerEvent(new InfoFeedEvent(actor));
-        bool valid = controller.SelectedCharacter == actor;
+        controller.OnTriggerEvent(new InfoFeedEvent(CharacterActor.From(actor)));
+        bool valid = controller.SelectedActor == CharacterActor.From(actor);
 
         Object.DestroyImmediate(actor.gameObject);
         Object.DestroyImmediate(controllerObject);
@@ -79,11 +79,11 @@ public static class PriorityCommandDebugScenarios
     private static bool VerifyDamagedFacilityResolvesRepair()
     {
         using CommandScenarioWorld world = new CommandScenarioWorld();
-        Character actor = CreateCharacter("Owner_Orc");
+        CharacterActor actor = CreateCharacter("Owner_Orc");
         BuildableObject restRoom = world.Place("P1_RestRoom", new Vector2Int(2, 0));
         restRoom.SetDamaged(true);
 
-        bool valid = WorkCommandResolver.TryResolveFacilityCommand(actor, restRoom, out FacilityWorkType workType, out _)
+        bool valid = WorkCommandResolver.TryResolveFacilityCommand(CharacterActor.From(actor), restRoom, out FacilityWorkType workType, out _)
             && workType == FacilityWorkType.Repair;
 
         Object.DestroyImmediate(actor.gameObject);
@@ -93,11 +93,11 @@ public static class PriorityCommandDebugScenarios
     private static bool VerifyEmptyStockResolvesRestock()
     {
         using CommandScenarioWorld world = new CommandScenarioWorld();
-        Character actor = CreateCharacter("Owner_Slime");
+        CharacterActor actor = CreateCharacter("Owner_Slime");
         BuildableObject shop = world.Place("P1_LowFoodShop", new Vector2Int(2, 0));
         ClearShopStock(shop);
 
-        bool valid = WorkCommandResolver.TryResolveFacilityCommand(actor, shop, out FacilityWorkType workType, out _)
+        bool valid = WorkCommandResolver.TryResolveFacilityCommand(CharacterActor.From(actor), shop, out FacilityWorkType workType, out _)
             && workType == FacilityWorkType.Restock;
 
         Object.DestroyImmediate(actor.gameObject);
@@ -107,10 +107,10 @@ public static class PriorityCommandDebugScenarios
     private static bool VerifyResearchFacilityResolvesResearch()
     {
         using CommandScenarioWorld world = new CommandScenarioWorld();
-        Character actor = CreateCharacter("Owner_Vampire");
+        CharacterActor actor = CreateCharacter("Owner_Vampire");
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(2, 0));
 
-        bool valid = WorkCommandResolver.TryResolveFacilityCommand(actor, lab, out FacilityWorkType workType, out _)
+        bool valid = WorkCommandResolver.TryResolveFacilityCommand(CharacterActor.From(actor), lab, out FacilityWorkType workType, out _)
             && workType == FacilityWorkType.Research;
 
         Object.DestroyImmediate(actor.gameObject);
@@ -120,9 +120,10 @@ public static class PriorityCommandDebugScenarios
     private static bool VerifyDirectCommandBypassesOffPriority()
     {
         using CommandScenarioWorld world = new CommandScenarioWorld();
-        Character actor = CreateCharacter("Owner_Slime");
+        CharacterActor actor = CreateCharacter("Owner_Slime");
         AbilityWork work = actor.GetAbility<AbilityWork>();
         BuildableObject shop = world.Place("P1_LowFoodShop", new Vector2Int(2, 0));
+        world.Place("P1_Warehouse", new Vector2Int(8, 0));
         ClearShopStock(shop);
         work.SetWorkPriority(FacilityWorkType.Restock, WorkPriorityLevel.Off);
 
@@ -138,7 +139,7 @@ public static class PriorityCommandDebugScenarios
     private static bool VerifyUnreachableCommandFails()
     {
         using CommandScenarioWorld world = new CommandScenarioWorld(12, 5);
-        Character actor = CreateCharacter("Owner_Vampire");
+        CharacterActor actor = CreateCharacter("Owner_Vampire");
         AbilityWork work = actor.GetAbility<AbilityWork>();
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(10, 0));
 
@@ -154,21 +155,25 @@ public static class PriorityCommandDebugScenarios
     private static bool VerifySuppressPriorityCommand()
     {
         using CommandScenarioWorld world = new CommandScenarioWorld();
-        Character actor = CreateCharacter("Owner_Orc");
+        CharacterActor actor = CreateCharacter("Owner_Orc");
         actor.transform.position = world.Grid.GetWorldPos(Vector2Int.zero);
         BuildableObject destination = world.Place("P1_LowFoodShop", new Vector2Int(4, 0));
-        Character intruder = CreateIntruder("Intruder_Breakthrough", world.Grid.GetWorldPos(new Vector2Int(4, 0)));
+        CharacterActor intruder = CreateIntruder("Intruder_Breakthrough", world.Grid.GetWorldPos(new Vector2Int(4, 0)));
         AbilityWork work = actor.GetAbility<AbilityWork>();
         GridPathSearchResult search = world.Grid.SearchPath(Vector2Int.zero);
         AIWork action = ScriptableObject.CreateInstance<AIWork>();
 
-        bool valid = WorkCommandResolver.TryResolveSuppressCommand(actor, intruder, out _)
-            && work.TrySetPrioritySuppressTarget(intruder, search, out _)
-            && work.PrioritySuppressTarget == intruder
+        bool valid = WorkCommandResolver.TryResolveSuppressCommand(
+                CharacterActor.From(actor),
+                CharacterActor.From(intruder),
+                _ => false,
+                out _)
+            && work.TrySetPrioritySuppressTarget(CharacterActor.From(intruder), search, out _)
+            && work.PrioritySuppressActor == CharacterActor.From(intruder)
             && work.PriorityWorkType == FacilityWorkType.Guard
             && work.TryGetPrioritySuppressDestination(search, out BuildableObject suppressDestination)
             && suppressDestination == destination
-            && action.GetDestinationCandidates(actor, search).Contains(destination);
+            && action.GetDestinationCandidates(CharacterActor.From(actor), search).Contains(destination);
 
         Object.DestroyImmediate(action);
         Object.DestroyImmediate(actor.gameObject);
@@ -176,7 +181,7 @@ public static class PriorityCommandDebugScenarios
         return valid;
     }
 
-    private static Character CreateCharacter(string ownerAssetName)
+    private static CharacterActor CreateCharacter(string ownerAssetName)
     {
         CharacterSO data = AssetDatabase.LoadAssetAtPath<CharacterSO>(
             $"Assets/Resources/SO/Character/Owners/{ownerAssetName}.asset");
@@ -184,20 +189,20 @@ public static class PriorityCommandDebugScenarios
         GameObject obj = new GameObject(ownerAssetName);
         obj.transform.position = Vector3.zero;
         obj.AddComponent<SpriteRenderer>();
-        obj.AddComponent<Character>();
+        obj.AddComponent<CharacterActor>();
         obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityWork>();
         obj.AddComponent<AIBrain>();
 
-        Character character = obj.GetComponent<Character>();
+        CharacterActor character = obj.GetComponent<CharacterActor>();
         InvokeAwake(character);
         character.RefreshAbilityCache();
         character.Initialization(data);
-        character.SetLifecycleState(Character.LifecycleState.Active);
+        character.SetLifecycleState(CharacterLifecycleState.Active);
         return character;
     }
 
-    private static Character CreateIntruder(string intruderAssetName, Vector3 position)
+    private static CharacterActor CreateIntruder(string intruderAssetName, Vector3 position)
     {
         CharacterSO data = AssetDatabase.LoadAssetAtPath<CharacterSO>(
             $"Assets/Resources/SO/Character/Intruders/{intruderAssetName}.asset");
@@ -205,18 +210,18 @@ public static class PriorityCommandDebugScenarios
         GameObject obj = new GameObject(intruderAssetName);
         obj.transform.position = position;
         obj.AddComponent<SpriteRenderer>();
-        obj.AddComponent<Character>();
+        obj.AddComponent<CharacterActor>();
 
-        Character character = obj.GetComponent<Character>();
+        CharacterActor character = obj.GetComponent<CharacterActor>();
         InvokeAwake(character);
         character.Initialization(data);
-        character.SetLifecycleState(Character.LifecycleState.Active);
+        character.SetLifecycleState(CharacterLifecycleState.Active);
         return character;
     }
 
-    private static void InvokeAwake(Character character)
+    private static void InvokeAwake(CharacterActor character)
     {
-        typeof(Character)
+        typeof(CharacterActor)
             .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.Invoke(character, null);
     }

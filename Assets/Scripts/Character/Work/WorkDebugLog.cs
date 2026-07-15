@@ -1,35 +1,51 @@
 public static class WorkDebugLog
 {
-    public static void LogProgress(Character character)
+    public static void LogStarted(CharacterActor actor)
     {
-        character?.AddLog($"[{GetCharacterName(character)}] 작업 진행");
+        if (TryGetWorkContext(actor, out string context))
+        {
+            actor.AddLog($"작업 시작 · {context}");
+        }
     }
 
-    public static void LogEnd(Character character, string reason = null)
+    public static void LogEnd(CharacterActor actor, string reason = null)
     {
-        string message = $"[{GetCharacterName(character)}] 작업 종료";
+        if (!TryGetWorkContext(actor, out string context))
+        {
+            return;
+        }
+
+        string message = $"작업 종료 · {context}";
         if (!string.IsNullOrWhiteSpace(reason))
         {
-            message += $" ({reason})";
+            message += $" · {reason}";
         }
 
-        character?.AddLog(message);
+        actor?.AddLog(message);
     }
 
-    private static string GetCharacterName(Character character)
+    private static bool TryGetWorkContext(CharacterActor actor, out string context)
     {
-        if (character == null)
+        if (actor == null || !actor.TryGetAbility(out AbilityWork work))
         {
-            return "알 수 없음";
+            context = string.Empty;
+            return false;
         }
 
-        if (character.data != null && !string.IsNullOrWhiteSpace(character.data.characterName))
+        if (work.AssignedWorkType == FacilityWorkType.None || work.assignedShop == null)
         {
-            return character.data.characterName;
+            context = string.Empty;
+            return false;
         }
 
-        return !string.IsNullOrWhiteSpace(character.name)
-            ? character.name
-            : "알 수 없음";
+        string workName = WorkTaskCatalog.GetDisplayName(work.AssignedWorkType);
+        BuildableObject target = work.assignedShop;
+        string targetName = target != null && target.BuildingData != null
+            && !string.IsNullOrWhiteSpace(target.BuildingData.objectName)
+                ? target.BuildingData.objectName
+                : target.name;
+
+        context = $"{workName} · {targetName}";
+        return true;
     }
 }

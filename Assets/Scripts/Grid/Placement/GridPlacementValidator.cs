@@ -34,7 +34,7 @@ public class GridPlacementValidator
             if (pos.y != bottomY || pos.y == 0) continue;
 
             GridCell supportCell = grid.GetGridCell(pos + Vector2Int.down);
-            if (supportCell == null || !supportCell.HasOccupant())
+            if (supportCell == null || !supportCell.HasPlacementSupport())
             {
                 return false;
             }
@@ -58,8 +58,7 @@ public class GridPlacementValidator
             GridCell upperCell = grid.GetGridCell(pos + Vector2Int.up);
             if (currentCell == null || upperCell == null || !upperCell.HasOccupant()) continue;
 
-            bool hasRemainingSupport = currentCell.GetAllOccupants()
-                .Any((occupant) => !ReferenceEquals(occupant, occupantToRemove));
+            bool hasRemainingSupport = HasRemainingPlacementSupport(currentCell, occupantToRemove);
             if (!hasRemainingSupport)
             {
                 return false;
@@ -67,5 +66,22 @@ public class GridPlacementValidator
         }
 
         return true;
+    }
+
+    private static bool HasRemainingPlacementSupport(GridCell cell, IGridOccupant occupantToRemove)
+    {
+        if (cell == null)
+        {
+            return false;
+        }
+
+        IGridOccupant hallway = cell.GetOccupant(GridLayer.Hallway);
+        if (hallway != null && !ReferenceEquals(hallway, occupantToRemove))
+        {
+            return true;
+        }
+
+        IGridOccupant building = cell.GetOccupant(GridLayer.Building);
+        return building != null && !ReferenceEquals(building, occupantToRemove);
     }
 }

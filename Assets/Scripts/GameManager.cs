@@ -1,12 +1,9 @@
 using DamageNumbersPro;
 using DG.Tweening;
-using System;
+using Sirenix.OdinInspector;
 using System.Collections;
 using System.Collections.Generic;
-using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.Tilemaps;
 public enum TimeOfDay
 {
     None,
@@ -20,39 +17,15 @@ public enum NumberCondition
     ONBUYINGITEM,
     ONEARNMONEY
 }
-public class GameManager : UtilSingleton<GameManager>
+public class GameManager : SerializedMonoBehaviour
 {
-    private static readonly Type[] RequiredRuntimeTypes =
-    {
-        typeof(OperatingDaySettlementRuntime),
-        typeof(CharacterAiScheduler),
-        typeof(EventAlertRuntime),
-        typeof(OperatingDayReportAlertBridge),
-        typeof(RunVariableRuntime),
-        typeof(MetaProgressionRuntime),
-        typeof(OffenseWorldMapRuntime),
-        typeof(OffenseRewardRuntime),
-        typeof(OffenseExpeditionRuntime),
-        typeof(InvasionThreatRuntime),
-        typeof(InvasionDirectorRuntime),
-        typeof(InvasionCombatReportRuntime),
-        typeof(DailyFacilityShopRuntime),
-        typeof(BlueprintResearchRuntime),
-        typeof(FacilitySynthesisRuntime),
-        typeof(CodexRuntime),
-        typeof(RegularCustomerRuntime),
-        typeof(StaffDiscontentRuntime)
-    };
-
     public GameData gameData;
     public Dictionary<NumberCondition,DamageNumber> numbers;
     public bool isPause;
 
-    protected override void Awake()
+    private void Awake()
     {
-        base.Awake();
         DOTween.Init();
-        EnsureOperatingDaySystems();
     }
     void Start()
     {
@@ -130,22 +103,4 @@ public class GameManager : UtilSingleton<GameManager>
         }
     }
 
-    private void EnsureOperatingDaySystems()
-    {
-        foreach (Type runtimeType in RequiredRuntimeTypes)
-        {
-            EnsureRuntimeComponent(runtimeType);
-        }
-    }
-
-    private Component EnsureRuntimeComponent(Type runtimeType)
-    {
-        return GetComponent(runtimeType) ?? gameObject.AddComponent(runtimeType);
-    }
-
-    public Vector3 GetMouseWorldPos()
-    {
-        return Camera.main.ScreenToWorldPoint(new Vector3(Input.mousePosition.x,Input.mousePosition.y,
-            -Camera.main.transform.position.z));
-    }
 }

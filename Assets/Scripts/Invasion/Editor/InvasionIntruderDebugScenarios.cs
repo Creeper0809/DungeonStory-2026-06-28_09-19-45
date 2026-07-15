@@ -107,9 +107,9 @@ public static class InvasionIntruderDebugScenarios
     {
         using IntruderScenarioWorld world = new IntruderScenarioWorld(10);
         BuildableObject facility = world.Place("P1_LowFoodShop", new Vector2Int(2, 0));
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
         InvasionIntruderRuntime runtime = intruder.gameObject.AddComponent<InvasionIntruderRuntime>();
-        SetPrivateField(runtime, "intruder", intruder);
+        SetPrivateField(runtime, "intruderActor", CharacterActor.From(intruder));
 
         CountingFacilityDamageListener listener = new CountingFacilityDamageListener();
         bool damaged = runtime.TryDamageNearbyFacility(world.Grid);
@@ -134,22 +134,22 @@ public static class InvasionIntruderDebugScenarios
         OwnerRunManager manager = managerObject.AddComponent<OwnerRunManager>();
         manager.SelectOwner(ownerData);
 
-        Character owner = manager.CurrentOwner;
+        CharacterActor owner = manager.CurrentOwnerActor;
         if (owner == null)
         {
             return false;
         }
 
-        Character intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
         InvasionIntruderRuntime runtime = intruder.gameObject.AddComponent<InvasionIntruderRuntime>();
-        SetPrivateField(runtime, "intruder", intruder);
+        SetPrivateField(runtime, "intruderActor", CharacterActor.From(intruder));
         SetPrivateField(runtime, "settings", new InvasionIntruderSettings
         {
             finalCombatDamage = owner.MaxHealth + 10f,
             finalCombatWindupSeconds = 0f
         });
 
-        runtime.ApplyFinalCombat(owner);
+        runtime.ApplyFinalCombat(CharacterActor.From(owner));
 
         return owner.IsDead && manager.IsRunEnded && runtime.State == InvasionIntruderState.FinalCombat;
     }
@@ -181,20 +181,16 @@ public static class InvasionIntruderDebugScenarios
             typeof(GridSystemManager).GetField("instance", BindingFlags.Static | BindingFlags.NonPublic);
         private static readonly FieldInfo GridField =
             typeof(GridSystemManager).GetField("<grid>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
-        private static readonly FieldInfo OwnerInstanceField =
-            typeof(UtilSingleton<OwnerRunManager>).GetField("_instance", BindingFlags.Static | BindingFlags.NonPublic);
         private static readonly MethodInfo CharacterAwakeMethod =
-            typeof(Character).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(CharacterActor).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly GridSystemManager previousGridSystem;
-        private readonly OwnerRunManager previousOwnerRunManager;
         private readonly List<GameObject> objects = new List<GameObject>();
         private readonly GameObject gridSystemObject;
 
         public IntruderScenarioWorld(int width)
         {
             previousGridSystem = GridSystemInstanceField?.GetValue(null) as GridSystemManager;
-            previousOwnerRunManager = OwnerInstanceField?.GetValue(null) as OwnerRunManager;
 
             Grid = new Grid(width, 1);
             for (int x = 0; x < Grid.width; x++)
@@ -207,7 +203,6 @@ public static class InvasionIntruderDebugScenarios
             GridSystemManager manager = gridSystemObject.AddComponent<GridSystemManager>();
             GridField?.SetValue(manager, Grid);
             GridSystemInstanceField?.SetValue(null, manager);
-            OwnerInstanceField?.SetValue(null, null);
         }
 
         public Grid Grid { get; }
@@ -252,17 +247,17 @@ public static class InvasionIntruderDebugScenarios
             return building;
         }
 
-        public Character CreateIntruder(Vector2Int position)
+        public CharacterActor CreateIntruder(Vector2Int position)
         {
             GameObject obj = new GameObject("Intruder Scenario Character");
             objects.Add(obj);
             obj.AddComponent<SpriteRenderer>();
             obj.AddComponent<AbilityMove>();
-            Character character = obj.AddComponent<Character>();
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             CharacterAwakeMethod?.Invoke(character, null);
             character.RefreshAbilityCache();
             character.Initialization(LoadIntruder());
-            character.SetLifecycleState(Character.LifecycleState.Active);
+            character.SetLifecycleState(CharacterLifecycleState.Active);
             obj.transform.position = Grid.GetWorldPos(position);
             return character;
         }
@@ -270,7 +265,6 @@ public static class InvasionIntruderDebugScenarios
         public void Dispose()
         {
             GridSystemInstanceField?.SetValue(null, previousGridSystem);
-            OwnerInstanceField?.SetValue(null, previousOwnerRunManager);
             foreach (GameObject obj in objects.Where((obj) => obj != null))
             {
                 Object.DestroyImmediate(obj);

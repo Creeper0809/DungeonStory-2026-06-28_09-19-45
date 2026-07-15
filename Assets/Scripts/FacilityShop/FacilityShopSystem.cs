@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using VContainer;
 
 public enum FacilityShopOfferType
 {
@@ -224,24 +225,49 @@ public static class FacilityShopService
     private const int GuaranteedBlueprintSlots = 1;
     private const float RareOfferChance = 0.35f;
 
-    public static IReadOnlyList<FacilityShopOffer> CreateDailyOffers(int day)
+    public static IReadOnlyList<FacilityShopOffer> CreateDailyOffers(
+        int day,
+        IFacilityShopCatalog catalog,
+        IRunVariableRuntimeReader runVariableReader)
     {
+        if (catalog == null)
+        {
+            throw new ArgumentNullException(nameof(catalog));
+        }
+
+        if (runVariableReader == null)
+        {
+            throw new ArgumentNullException(nameof(runVariableReader));
+        }
+
         return CreateDailyOffers(
             day,
-            LoadAllBuildings(),
-            LoadAllBlueprints());
+            catalog.Buildings,
+            catalog.Blueprints,
+            runVariableReader.GetInitialShopSeed(),
+            runVariableReader.GetFacilityShopCostMultiplier,
+            runVariableReader.GetBlueprintCostMultiplier);
     }
 
     public static IReadOnlyList<FacilityShopOffer> CreateDailyOffers(
         int day,
         IEnumerable<BuildingSO> buildings,
-        IEnumerable<FacilityBlueprintSO> blueprints)
+        IEnumerable<FacilityBlueprintSO> blueprints,
+        int runShopSeed,
+        Func<BuildingSO, float> buildingCostMultiplier,
+        Func<FacilityBlueprintSO, float> blueprintCostMultiplier)
     {
+        if (buildingCostMultiplier == null)
+        {
+            throw new ArgumentNullException(nameof(buildingCostMultiplier));
+        }
+
+        if (blueprintCostMultiplier == null)
+        {
+            throw new ArgumentNullException(nameof(blueprintCostMultiplier));
+        }
+
         int safeDay = Mathf.Max(1, day);
-        int runShopSeed = RunVariableRuntime.Instance != null
-            && RunVariableRuntime.Instance.State.StartVariables != null
-            ? RunVariableRuntime.Instance.State.StartVariables.initialShopSeed
-            : 0;
         System.Random random = new System.Random(7919 + (safeDay * 104729) + runShopSeed);
         List<FacilityShopOffer> offers = new List<FacilityShopOffer>();
 
@@ -253,7 +279,7 @@ public static class FacilityShopService
 
         foreach (BuildingSO building in buildingPool.Take(RandomBuildingSlots))
         {
-            offers.Add(CreateBuildingOffer(building, false, true));
+            offers.Add(CreateBuildingOffer(building, false, true, buildingCostMultiplier));
         }
 
         List<FacilityBlueprintSO> commonBlueprints = blueprints?
@@ -264,7 +290,7 @@ public static class FacilityShopService
 
         foreach (FacilityBlueprintSO blueprint in commonBlueprints.Take(GuaranteedBlueprintSlots))
         {
-            offers.Add(CreateBlueprintOffer(blueprint, true));
+            offers.Add(CreateBlueprintOffer(blueprint, true, blueprintCostMultiplier));
         }
 
         List<FacilityBlueprintSO> rareBlueprints = blueprints?
@@ -275,21 +301,51 @@ public static class FacilityShopService
 
         if (rareBlueprints.Count > 0 && random.NextDouble() <= RareOfferChance)
         {
-            offers.Add(CreateBlueprintOffer(rareBlueprints[0], true));
+            offers.Add(CreateBlueprintOffer(rareBlueprints[0], true, blueprintCostMultiplier));
         }
 
         return offers.Where((offer) => offer != null && offer.IsValid).ToList();
     }
 
-    public static IReadOnlyList<FacilityShopOffer> CreateBasicPurchaseOffers(FacilityShopUnlockState unlockState)
+    public static IReadOnlyList<FacilityShopOffer> CreateBasicPurchaseOffers(
+        IFacilityShopCatalog catalog,
+        FacilityShopUnlockState unlockState,
+        IMetaProgressionRuntimeReader metaProgressionReader,
+        IRunVariableRuntimeReader runVariableReader)
     {
-        return CreateBasicPurchaseOffers(LoadAllBuildings(), unlockState);
+        if (catalog == null)
+        {
+            throw new ArgumentNullException(nameof(catalog));
+        }
+
+        if (metaProgressionReader == null)
+        {
+            throw new ArgumentNullException(nameof(metaProgressionReader));
+        }
+
+        if (runVariableReader == null)
+        {
+            throw new ArgumentNullException(nameof(runVariableReader));
+        }
+
+        return CreateBasicPurchaseOffers(
+            catalog.Buildings,
+            unlockState,
+            metaProgressionReader.GetExpandedBasicPurchaseBuildingIds(catalog.Buildings),
+            runVariableReader.GetFacilityShopCostMultiplier);
     }
 
     public static IReadOnlyList<FacilityShopOffer> CreateBasicPurchaseOffers(
         IEnumerable<BuildingSO> buildings,
-        FacilityShopUnlockState unlockState)
+        FacilityShopUnlockState unlockState,
+        IEnumerable<int> expandedBasicPurchaseBuildingIds,
+        Func<BuildingSO, float> buildingCostMultiplier)
     {
+        if (buildingCostMultiplier == null)
+        {
+            throw new ArgumentNullException(nameof(buildingCostMultiplier));
+        }
+
         if (unlockState == null)
         {
             return Array.Empty<FacilityShopOffer>();
@@ -299,15 +355,14 @@ public static class FacilityShopService
             .Where((building) => building != null)
             .ToList()
             ?? new List<BuildingSO>();
-        HashSet<int> metaBasicPurchaseIds = MetaProgressionRuntime.Instance != null
-            ? MetaProgressionRuntime.Instance.GetExpandedBasicPurchaseBuildingIds(buildingList).ToHashSet()
-            : new HashSet<int>();
+        HashSet<int> metaBasicPurchaseIds = expandedBasicPurchaseBuildingIds?.ToHashSet()
+            ?? throw new ArgumentNullException(nameof(expandedBasicPurchaseBuildingIds));
 
         return buildingList
             .Where((building) => (unlockState.IsBasicPurchaseUnlocked(building) || metaBasicPurchaseIds.Contains(building.id))
                 && CanEnterBasicPurchase(building))
             .OrderBy((building) => building.id)
-            .Select((building) => CreateBuildingOffer(building, true, false))
+            .Select((building) => CreateBuildingOffer(building, true, false, buildingCostMultiplier))
             .Where((offer) => offer != null && offer.IsValid)
             .ToList()
             ?? new List<FacilityShopOffer>();
@@ -383,17 +438,26 @@ public static class FacilityShopService
         return string.IsNullOrWhiteSpace(building.objectName) ? building.name : building.objectName;
     }
 
-    public static BuildingSO FindBuildingById(int buildingId)
+    public static BuildingSO FindBuildingById(IFacilityShopCatalog catalog, int buildingId)
     {
+        if (catalog == null)
+        {
+            throw new ArgumentNullException(nameof(catalog));
+        }
+
         if (buildingId < 0)
         {
             return null;
         }
 
-        return LoadAllBuildings().FirstOrDefault((building) => building.id == buildingId);
+        return catalog.FindBuildingById(buildingId);
     }
 
-    private static FacilityShopOffer CreateBuildingOffer(BuildingSO building, bool basicPurchase, bool randomOffer)
+    private static FacilityShopOffer CreateBuildingOffer(
+        BuildingSO building,
+        bool basicPurchase,
+        bool randomOffer,
+        Func<BuildingSO, float> buildingCostMultiplier)
     {
         if (building == null)
         {
@@ -401,11 +465,14 @@ public static class FacilityShopService
         }
 
         FacilityShopRarity rarity = ResolveBuildingRarity(building);
-        int cost = CalculateBuildingCost(building, basicPurchase, rarity);
+        int cost = CalculateBuildingCost(building, basicPurchase, rarity, buildingCostMultiplier);
         return new FacilityShopOffer(building, cost, rarity, basicPurchase, randomOffer);
     }
 
-    private static FacilityShopOffer CreateBlueprintOffer(FacilityBlueprintSO blueprint, bool randomOffer)
+    private static FacilityShopOffer CreateBlueprintOffer(
+        FacilityBlueprintSO blueprint,
+        bool randomOffer,
+        Func<FacilityBlueprintSO, float> blueprintCostMultiplier)
     {
         if (blueprint == null)
         {
@@ -414,7 +481,7 @@ public static class FacilityShopService
 
         return new FacilityShopOffer(
             blueprint,
-            Mathf.Max(0, Mathf.RoundToInt(blueprint.defaultCost * GetBlueprintCostMultiplier(blueprint))),
+            Mathf.Max(0, Mathf.RoundToInt(blueprint.defaultCost * GetBlueprintCostMultiplier(blueprint, blueprintCostMultiplier))),
             blueprint.rarity,
             randomOffer);
     }
@@ -438,7 +505,11 @@ public static class FacilityShopService
         return FacilityShopRarity.Common;
     }
 
-    private static int CalculateBuildingCost(BuildingSO building, bool basicPurchase, FacilityShopRarity rarity)
+    private static int CalculateBuildingCost(
+        BuildingSO building,
+        bool basicPurchase,
+        FacilityShopRarity rarity,
+        Func<BuildingSO, float> buildingCostMultiplier)
     {
         int star = Mathf.Max(1, GetBuildingStar(building));
         int categoryWeight = building.category switch
@@ -459,21 +530,19 @@ public static class FacilityShopService
         };
         int basicDiscount = basicPurchase ? 20 : 0;
         int baseCost = Mathf.Max(25, (star * categoryWeight) + rarityWeight - basicDiscount);
-        return Mathf.Max(1, Mathf.RoundToInt(baseCost * GetBuildingCostMultiplier(building)));
+        return Mathf.Max(1, Mathf.RoundToInt(baseCost * GetBuildingCostMultiplier(building, buildingCostMultiplier)));
     }
 
-    private static float GetBuildingCostMultiplier(BuildingSO building)
+    private static float GetBuildingCostMultiplier(BuildingSO building, Func<BuildingSO, float> buildingCostMultiplier)
     {
-        return RunVariableRuntime.Instance != null
-            ? Mathf.Max(0.05f, RunVariableRuntime.Instance.GetFacilityShopCostMultiplier(building))
-            : 1f;
+        return Mathf.Max(0.05f, buildingCostMultiplier(building));
     }
 
-    private static float GetBlueprintCostMultiplier(FacilityBlueprintSO blueprint)
+    private static float GetBlueprintCostMultiplier(
+        FacilityBlueprintSO blueprint,
+        Func<FacilityBlueprintSO, float> blueprintCostMultiplier)
     {
-        return RunVariableRuntime.Instance != null
-            ? Mathf.Max(0.05f, RunVariableRuntime.Instance.GetBlueprintCostMultiplier(blueprint))
-            : 1f;
+        return Mathf.Max(0.05f, blueprintCostMultiplier(blueprint));
     }
 
     private static string ApplyPurchase(FacilityShopOffer offer, FacilityShopUnlockState unlockState)
@@ -494,17 +563,6 @@ public static class FacilityShopService
         return $"{offer.DisplayName} 설계도 획득";
     }
 
-    private static IEnumerable<BuildingSO> LoadAllBuildings()
-    {
-        return Resources.LoadAll<BuildingSO>("SO/Building")
-            .Where((building) => building != null);
-    }
-
-    private static IEnumerable<FacilityBlueprintSO> LoadAllBlueprints()
-    {
-        return Resources.LoadAll<FacilityBlueprintSO>("SO/Blueprint")
-            .Where((blueprint) => blueprint != null);
-    }
 }
 
 public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<OperatingDayEndedEvent>
@@ -514,11 +572,33 @@ public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<Operati
     private readonly List<FacilityShopOffer> currentDailyOffers = new List<FacilityShopOffer>();
     private readonly FacilityShopUnlockState unlockState = new FacilityShopUnlockState();
     private int currentOfferDay = 1;
+    private IFacilityShopCatalog facilityShopCatalog;
+    private IRunVariableRuntimeReader runVariableReader;
+    private IMetaProgressionRuntimeReader metaProgressionReader;
 
     public IReadOnlyList<FacilityShopOffer> CurrentDailyOffers => currentDailyOffers;
-    public IReadOnlyList<FacilityShopOffer> CurrentBasicPurchaseOffers => FacilityShopService.CreateBasicPurchaseOffers(unlockState);
+    public IReadOnlyList<FacilityShopOffer> CurrentBasicPurchaseOffers =>
+        FacilityShopService.CreateBasicPurchaseOffers(
+            ResolveFacilityShopCatalog(),
+            unlockState,
+            ResolveMetaProgressionReader(),
+            ResolveRunVariableReader());
     public FacilityShopUnlockState UnlockState => unlockState;
     public int CurrentOfferDay => currentOfferDay;
+
+    [Inject]
+    public void ConstructDailyFacilityShopRuntime(
+        IFacilityShopCatalog facilityShopCatalog,
+        IRunVariableRuntimeReader runVariableReader,
+        IMetaProgressionRuntimeReader metaProgressionReader)
+    {
+        this.facilityShopCatalog = facilityShopCatalog
+            ?? throw new ArgumentNullException(nameof(facilityShopCatalog));
+        this.runVariableReader = runVariableReader
+            ?? throw new ArgumentNullException(nameof(runVariableReader));
+        this.metaProgressionReader = metaProgressionReader
+            ?? throw new ArgumentNullException(nameof(metaProgressionReader));
+    }
 
     private void Start()
     {
@@ -537,7 +617,10 @@ public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<Operati
     {
         currentOfferDay = Mathf.Max(1, day);
         currentDailyOffers.Clear();
-        currentDailyOffers.AddRange(FacilityShopService.CreateDailyOffers(currentOfferDay));
+        currentDailyOffers.AddRange(FacilityShopService.CreateDailyOffers(
+            currentOfferDay,
+            ResolveFacilityShopCatalog(),
+            ResolveRunVariableReader()));
 
         IReadOnlyList<FacilityShopOffer> basicPurchaseOffers = CurrentBasicPurchaseOffers;
         FacilityShopRefreshedEvent.Trigger(currentOfferDay, currentDailyOffers, basicPurchaseOffers);
@@ -622,5 +705,23 @@ public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<Operati
             lines.Add("- 없음");
         }
         return string.Join("\n", lines);
+    }
+
+    private IFacilityShopCatalog ResolveFacilityShopCatalog()
+    {
+        return facilityShopCatalog
+            ?? throw new InvalidOperationException($"{nameof(DailyFacilityShopRuntime)} requires {nameof(IFacilityShopCatalog)} injection.");
+    }
+
+    private IRunVariableRuntimeReader ResolveRunVariableReader()
+    {
+        return runVariableReader
+            ?? throw new InvalidOperationException($"{nameof(DailyFacilityShopRuntime)} requires {nameof(IRunVariableRuntimeReader)} injection.");
+    }
+
+    private IMetaProgressionRuntimeReader ResolveMetaProgressionReader()
+    {
+        return metaProgressionReader
+            ?? throw new InvalidOperationException($"{nameof(DailyFacilityShopRuntime)} requires {nameof(IMetaProgressionRuntimeReader)} injection.");
     }
 }

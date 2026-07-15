@@ -30,7 +30,8 @@ ImplementedScenarioDebugRunner.RunForBatchMode
 ```text
 P1 방어/상점/합성 에셋 보정
 -> P0 Grid foundation 시나리오
--> P1 경영/AI/침입/연구/합성/도감 시나리오
+-> P1 Behavior Designer + Utility AI + Local LLM 계획 시나리오
+-> P1 경영/AI/침입/연구/합성/시설 계보 진화/도감 시나리오
 -> P2 영입/내부 위협/런 변수/메타 진행 시나리오
 -> P3 오펜스 월드맵/원정/보상 시나리오
 -> 전체 성공/실패 요약 출력
@@ -68,10 +69,20 @@ JSON 리포트는 자동 검증에서 `success`, `passed`, `failed`, `results[]`
 
 이 러너는 Unity Editor 안에서 실행해야 한다.
 
-현재 Codex 쪽 Unity MCP 연결은 Editor 승인 문제로 막혀 있으므로, 자동 실행 검증은 승인 복구 후 다시 수행해야 한다.
+batchmode 실행은 프로젝트가 이미 Unity Editor에 열려 있으면 동시 실행 제한에 걸릴 수 있다.
 
-batchmode 실행도 시도했지만, 현재 같은 프로젝트가 Unity Editor에 열려 있어 동시 실행 제한에 걸렸다.
+따라서 자동화 환경에서는 Editor 인스턴스 상태를 정리한 뒤 `ImplementedScenarioDebugRunner.RunForBatchMode`를 호출해야 한다.
 
-복사본 프로젝트와 `-noUpm` 옵션으로도 시도했지만, 현재 Codex 실행 환경에서는 Unity Package Manager 또는 Bee/IL Post Processor의 IPC 생성이 막혀 시나리오 실행까지 도달하지 못했다.
+## 최근 검증
 
-따라서 통합 시나리오의 실제 통과 여부는 현재 열려 있는 Editor에서 직접 메뉴를 실행하거나, Editor/MCP 승인 상태가 정상인 환경에서 batchmode로 다시 확인해야 한다.
+```text
+Generated: 2026-07-04 06:19:15
+Suites: 29
+Passed: 29
+Failed: 0
+P1 Plan character AI: PASS
+P1 Facility evolution: PASS
+P1 Codex: PASS
+Console errors: 0
+Console warnings: 9
+```

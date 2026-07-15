@@ -12,15 +12,15 @@ public class ConsiderationWorkNeed : Consideration
         set => workType = value;
     }
 
-    public override float ScoreConsideration(Character character)
+    public override float ScoreConsideration(CharacterActor actor)
     {
-        if (character == null || !character.TryGetAbility(out AbilityWork work))
+        if (actor == null || !actor.TryGetAbility(out AbilityWork work))
         {
             return 0f;
         }
 
-        GridPathSearchResult searchResult = character.ai != null
-            ? character.ai.GetPathSearch(character)
+        GridPathSearchResult searchResult = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
             : null;
         float utilityScore = work.GetWorkUtilityScore(workType, searchResult);
         if (utilityScore <= 0f)

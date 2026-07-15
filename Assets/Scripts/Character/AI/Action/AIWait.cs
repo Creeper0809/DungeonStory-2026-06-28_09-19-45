@@ -11,19 +11,19 @@ public class AIWait : AIActionSet
 
     public override bool RequiresDestination => false;
 
-    public override float AdjustScore(Character character, float baseScore)
+    public override float AdjustScore(CharacterActor actor, float baseScore)
     {
-        if (!CharacterWorkRoleUtility.TryGetWork(character, out AbilityWork work))
+        if (!CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work))
         {
             return Mathf.Clamp01(baseScore);
         }
 
         if (work.IsOffDuty)
         {
-            GridPathSearchResult searchResult = character != null && character.ai != null
-                ? character.ai.GetPathSearch(character)
+            GridPathSearchResult searchResult = actor != null && actor.Brain != null
+                ? actor.Brain.GetPathSearch(actor)
                 : null;
-            if (HasOffDutyVisitCandidate(character, searchResult))
+            if (HasOffDutyVisitCandidate(actor, searchResult))
             {
                 return Mathf.Clamp01(Mathf.Min(baseScore, offDutyVisitAvailableScore));
             }
@@ -33,8 +33,8 @@ public class AIWait : AIActionSet
 
         if (!work.IsOffDuty)
         {
-            GridPathSearchResult searchResult = character.ai != null
-                ? character.ai.GetPathSearch(character)
+            GridPathSearchResult searchResult = actor.Brain != null
+                ? actor.Brain.GetPathSearch(actor)
                 : null;
             if (work.GetWorkUtilityScore(FacilityWorkType.None, searchResult) > 0f)
             {
@@ -45,16 +45,14 @@ public class AIWait : AIActionSet
         return Mathf.Clamp01(baseScore);
     }
 
-    public override bool CanStart(Character character)
+    public override bool CanStart(CharacterActor actor)
     {
-        if (character == null) return false;
-
-        return CharacterWorkRoleUtility.TryGetWork(character, out _);
+        return actor != null && CharacterWorkRoleUtility.TryGetWork(actor, out _);
     }
 
-    public override void Execute(Character character)
+    public override void Execute(CharacterActor actor)
     {
-        if (CharacterWorkRoleUtility.TryGetWork(character, out AbilityWork work)
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work)
             && (work.IsOffDuty || work.ShouldUseRestProtection()))
         {
             float recovery = Mathf.Max(0f, work.RestRecoveryOnWait);
@@ -65,45 +63,46 @@ public class AIWait : AIActionSet
         float maximumWait = Mathf.Max(minimumWait, maxDuration);
         float duration = Random.Range(minimumWait, maximumWait);
         bool ranIdleBehavior = IdleBehaviorRunner.TryRunDefault(
-            character,
+            actor,
             duration,
             true,
             out string behaviorName,
             out string failureReason);
         if (ranIdleBehavior)
         {
-            character?.AddLog($"대기: {behaviorName}");
             return;
         }
 
-        character?.AddLog($"대기 이동 불가: {failureReason}");
+        actor?.AddLog($"대기 이동 불가: {failureReason}");
         if (IdleBehaviorRunner.TryRunStatic(
-            character,
+            actor,
             duration,
             out behaviorName,
             out failureReason))
         {
-            character?.AddLog($"대기: {behaviorName}");
             return;
         }
 
-        character?.AddLog($"대기 실패: {failureReason}");
+        actor?.AddLog($"대기 실패: {failureReason}");
 
-        if (character != null && character.ai != null)
+        if (actor != null && actor.Brain != null)
         {
-            character.ai.isBestActionEnd = true;
+            actor.Brain.isBestActionEnd = true;
         }
     }
 
-    private static bool HasOffDutyVisitCandidate(Character character, GridPathSearchResult searchResult)
+    private static bool HasOffDutyVisitCandidate(CharacterActor actor, GridPathSearchResult searchResult)
     {
-        if (character == null)
+        if (actor == null)
         {
             return false;
         }
 
-        return FacilityCandidateScorer.HasCandidate(character, searchResult, FacilityRole.Meal)
-            || FacilityCandidateScorer.HasCandidate(character, searchResult, FacilityRole.Rest)
-            || FacilityCandidateScorer.HasCandidate(character, searchResult, AIShopping.CustomerInterestRoles);
+        FacilityRole interestRoles = actor.TryGetAbility(out AbilityShopping shopping)
+            ? shopping.GetInterestRoles()
+            : CharacterVisitPolicy.CustomerInterestRoles;
+        return FacilityCandidateScorer.HasCandidate(actor, searchResult, FacilityRole.Meal)
+            || FacilityCandidateScorer.HasCandidate(actor, searchResult, FacilityRole.Rest)
+            || FacilityCandidateScorer.HasCandidate(actor, searchResult, interestRoles);
     }
 }

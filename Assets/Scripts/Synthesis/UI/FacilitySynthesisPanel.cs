@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
+using VContainer;
 
 public class FacilitySynthesisPanel :
     MonoBehaviour,
@@ -12,48 +12,15 @@ public class FacilitySynthesisPanel :
 {
     [SerializeField] private FacilitySynthesisRuntime runtime;
     [SerializeField] private TMP_Text summaryText;
+    private IFacilitySynthesisRuntimeProvider runtimeProvider;
 
     public string LastRenderedText { get; private set; } = string.Empty;
 
-    public static FacilitySynthesisPanel CreateDefaultPanel(FacilitySynthesisRuntime runtime)
+    [Inject]
+    public void Construct(IFacilitySynthesisRuntimeProvider runtimeProvider)
     {
-        GameObject canvasObject = new GameObject("FacilitySynthesisCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-        Canvas canvas = canvasObject.GetComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920f, 1080f);
-
-        GameObject panelObject = new GameObject("FacilitySynthesisPanel", typeof(RectTransform), typeof(Image));
-        panelObject.transform.SetParent(canvasObject.transform, false);
-        RectTransform rect = panelObject.GetComponent<RectTransform>();
-        rect.anchorMin = new Vector2(1f, 0.5f);
-        rect.anchorMax = new Vector2(1f, 0.5f);
-        rect.pivot = new Vector2(1f, 0.5f);
-        rect.anchoredPosition = new Vector2(-24f, 0f);
-        rect.sizeDelta = new Vector2(420f, 520f);
-        panelObject.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.1f, 0.88f);
-
-        GameObject textObject = new GameObject("Summary", typeof(RectTransform), typeof(TextMeshProUGUI));
-        textObject.transform.SetParent(panelObject.transform, false);
-        RectTransform textRect = textObject.GetComponent<RectTransform>();
-        textRect.anchorMin = new Vector2(0f, 0f);
-        textRect.anchorMax = new Vector2(1f, 1f);
-        textRect.offsetMin = new Vector2(18f, 18f);
-        textRect.offsetMax = new Vector2(-18f, -18f);
-
-        TMP_Text text = textObject.GetComponent<TMP_Text>();
-        TMPKoreanFont.Apply(text);
-        text.fontSize = 22f;
-        text.color = Color.white;
-        text.textWrappingMode = TextWrappingModes.Normal;
-        text.alignment = TextAlignmentOptions.TopLeft;
-
-        FacilitySynthesisPanel panel = panelObject.AddComponent<FacilitySynthesisPanel>();
-        panel.Bind(runtime);
-        panel.summaryText = text;
-        panel.Refresh();
-        return panel;
+        this.runtimeProvider = runtimeProvider
+            ?? throw new System.ArgumentNullException(nameof(runtimeProvider));
     }
 
     public void Bind(FacilitySynthesisRuntime nextRuntime)
@@ -62,16 +29,16 @@ public class FacilitySynthesisPanel :
         Refresh();
     }
 
+    internal void BindGeneratedView(TMP_Text summaryText)
+    {
+        this.summaryText = summaryText
+            ?? throw new System.ArgumentNullException(nameof(summaryText));
+        ApplyText();
+    }
+
     public void Refresh()
     {
-        FacilitySynthesisRuntime activeRuntime = runtime != null ? runtime : FacilitySynthesisRuntime.Instance;
-        if (activeRuntime == null)
-        {
-            LastRenderedText = "시설 합성\n런타임 없음";
-            ApplyText();
-            return;
-        }
-
+        FacilitySynthesisRuntime activeRuntime = ResolveRuntime();
         List<string> lines = new List<string>
         {
             "시설 합성",
@@ -102,7 +69,7 @@ public class FacilitySynthesisPanel :
         {
             lines.AddRange(recipes.Select((recipe) =>
             {
-                FacilitySynthesisRecipeSnapshot snapshot = FacilitySynthesisService.ToSnapshot(recipe, activeRuntime.ResearchState);
+                FacilitySynthesisRecipeSnapshot snapshot = activeRuntime.ToSnapshot(recipe);
                 return snapshot != null ? $"- {snapshot.ToSummaryText()}" : "- 조합식 오류";
             }));
         }
@@ -132,6 +99,15 @@ public class FacilitySynthesisPanel :
         {
             summaryText.text = LastRenderedText;
         }
+    }
+
+    private FacilitySynthesisRuntime ResolveRuntime()
+    {
+        if (runtime != null) return runtime;
+
+        return (runtimeProvider
+                ?? throw new System.InvalidOperationException($"{nameof(FacilitySynthesisPanel)} requires {nameof(IFacilitySynthesisRuntimeProvider)} injection or an explicit runtime binding."))
+            .Runtime;
     }
 
     private void OnEnable()

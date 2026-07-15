@@ -5,17 +5,21 @@ public class ConditionNeedMoney : IBuildingCondition
 {
     [SerializeField]private int cost;
 
-    public void OnBuild()
+    public void OnBuild(BuildingConditionContext context)
     {
-        GameData gameData = GetGameData();
+        GameData gameData = context.GameData;
         if (gameData == null) return;
 
         gameData.holdingMoney.Value -= cost;
     }
 
-    public bool IsSatisfy(Grid grid, List<Vector2Int> buildPos,out string errorMessage)
+    public bool IsSatisfy(
+        Grid grid,
+        List<Vector2Int> buildPos,
+        BuildingConditionContext context,
+        out string errorMessage)
     {
-        GameData gameData = GetGameData();
+        GameData gameData = context.GameData;
         if (gameData == null)
         {
             errorMessage = "게임 데이터가 초기화되지 않았습니다";
@@ -32,8 +36,4 @@ public class ConditionNeedMoney : IBuildingCondition
         return true;
     }
 
-    private GameData GetGameData()
-    {
-        return GameManager.Current != null ? GameManager.Current.gameData : null;
-    }
 }

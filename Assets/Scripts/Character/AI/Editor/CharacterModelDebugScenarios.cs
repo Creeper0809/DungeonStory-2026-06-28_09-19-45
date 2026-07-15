@@ -127,8 +127,8 @@ public static class CharacterModelDebugScenarios
         CharacterSO data = CreateCharacterData("Species_Vampire", "Trait_Researcher");
         GameObject obj = new GameObject("Character Model Scenario Character");
         obj.AddComponent<SpriteRenderer>();
-        Character character = obj.AddComponent<Character>();
-        typeof(Character)
+        CharacterActor character = obj.AddComponent<CharacterActor>();
+        typeof(CharacterActor)
             .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.Invoke(character, null);
 

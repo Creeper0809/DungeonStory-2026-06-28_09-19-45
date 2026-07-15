@@ -3,18 +3,29 @@ using UnityEngine;
 
 public class GridGhostObject : MonoBehaviour
 {
+    private const float BlockedPreviewTintStrength = 0.45f;
+    private const float PreviewAlpha = 1f;
+    private const string MinimumPreviewSortingLayerName = "Default";
+    private const int MinimumPreviewSortingOrder = 200;
+
     [SerializeField] private GameObject ghostObject;
-    [SerializeField] private Color buildableColor = Color.green;
     [SerializeField] private Color blockedColor = Color.red;
+    [SerializeField] private string previewSortingLayerName = MinimumPreviewSortingLayerName;
+    [SerializeField] private int previewSortingOrder = 200;
 
     private SpriteRenderer ghostSpriteRenderer;
     private readonly List<SpriteRenderer> repeatedSpriteRenderers = new List<SpriteRenderer>();
-    private Vector2 footprintSize = Vector2.zero;
+    private Vector2 visualSize = Vector2.zero;
     private Vector3 anchorOffset = Vector3.zero;
 
     public bool IsHidden { get; private set; } = true;
 
     private void Awake()
+    {
+        Initialize();
+    }
+
+    private void OnValidate()
     {
         Initialize();
     }
@@ -35,10 +46,14 @@ public class GridGhostObject : MonoBehaviour
             ? ghostObject.GetComponent<SpriteRenderer>()
             : null;
 
+        ConfigurePreviewRenderer(ghostSpriteRenderer);
+
         if (ghostSpriteRenderer != null && repeatedSpriteRenderers.Count == 0)
         {
             repeatedSpriteRenderers.Add(ghostSpriteRenderer);
         }
+
+        ConfigurePreviewRenderers();
     }
 
     public void Show(Sprite sprite)
@@ -50,6 +65,7 @@ public class GridGhostObject : MonoBehaviour
         {
             ghostSpriteRenderer.gameObject.SetActive(true);
             ghostSpriteRenderer.sprite = sprite;
+            ghostSpriteRenderer.color = GetPreviewColor(true);
             ApplyFootprintSize();
         }
     }
@@ -57,7 +73,7 @@ public class GridGhostObject : MonoBehaviour
     public void ShowRepeated(
         Sprite sprite,
         IReadOnlyList<Vector3> worldPositions,
-        Vector2 tileFootprintSize,
+        Vector2 tileVisualSize,
         IReadOnlyList<bool> buildableStates = null)
     {
         EnsureInitialized();
@@ -88,8 +104,8 @@ public class GridGhostObject : MonoBehaviour
             bool buildable = buildableStates == null
                 || i >= buildableStates.Count
                 || buildableStates[i];
-            renderer.color = buildable ? buildableColor : blockedColor;
-            Vector3 tileAnchorOffset = ApplyFootprintSize(renderer, tileFootprintSize);
+            renderer.color = GetPreviewColor(buildable);
+            Vector3 tileAnchorOffset = ApplyVisualSize(renderer, tileVisualSize);
             renderer.transform.position = worldPositions[i] + tileAnchorOffset;
         }
     }
@@ -112,34 +128,31 @@ public class GridGhostObject : MonoBehaviour
         EnsureInitialized();
         if (ghostSpriteRenderer != null)
         {
-            ghostSpriteRenderer.color = buildable ? buildableColor : blockedColor;
+            ghostSpriteRenderer.color = GetPreviewColor(buildable);
         }
     }
 
-    public void SetWorldPosition(Vector3 worldPosition, float lerpSpeed = 0f)
+    public void SetWorldPosition(Vector3 worldPosition)
     {
         EnsureInitialized();
         if (ghostObject == null) return;
 
-        Vector3 targetPosition = worldPosition + anchorOffset;
-        ghostObject.transform.position = lerpSpeed > 0f
-            ? Vector3.Lerp(ghostObject.transform.position, targetPosition, Time.unscaledDeltaTime * lerpSpeed)
-            : targetPosition;
+        ghostObject.transform.position = worldPosition + anchorOffset;
     }
 
     public void SetSize(Vector2 size)
     {
         EnsureInitialized();
-        footprintSize = size;
+        visualSize = size;
         ApplyFootprintSize();
     }
 
     private void ApplyFootprintSize()
     {
-        anchorOffset = ApplyFootprintSize(ghostSpriteRenderer, footprintSize);
+        anchorOffset = ApplyVisualSize(ghostSpriteRenderer, visualSize);
     }
 
-    private Vector3 ApplyFootprintSize(SpriteRenderer renderer, Vector2 size)
+    private Vector3 ApplyVisualSize(SpriteRenderer renderer, Vector2 size)
     {
         if (renderer == null
             || renderer.sprite == null
@@ -170,6 +183,20 @@ public class GridGhostObject : MonoBehaviour
         return desiredCenter - scaledBoundsCenter;
     }
 
+    private Color GetPreviewColor(bool buildable)
+    {
+        Color tint = buildable
+            ? Color.white
+            : Color.Lerp(Color.white, blockedColor, BlockedPreviewTintStrength);
+        return WithPreviewAlpha(tint);
+    }
+
+    private Color WithPreviewAlpha(Color color)
+    {
+        color.a = PreviewAlpha;
+        return color;
+    }
+
     private void EnsureRepeatedRendererCount(int count)
     {
         if (ghostSpriteRenderer == null) return;
@@ -185,11 +212,45 @@ public class GridGhostObject : MonoBehaviour
             repeatedObject.transform.SetParent(transform, false);
 
             SpriteRenderer renderer = repeatedObject.AddComponent<SpriteRenderer>();
-            renderer.sortingLayerID = ghostSpriteRenderer.sortingLayerID;
-            renderer.sortingOrder = ghostSpriteRenderer.sortingOrder;
             renderer.sharedMaterial = ghostSpriteRenderer.sharedMaterial;
+            ConfigurePreviewRenderer(renderer);
             repeatedSpriteRenderers.Add(renderer);
         }
+    }
+
+    private void ConfigurePreviewRenderers()
+    {
+        foreach (SpriteRenderer renderer in repeatedSpriteRenderers)
+        {
+            ConfigurePreviewRenderer(renderer);
+        }
+    }
+
+    private void ConfigurePreviewRenderer(SpriteRenderer renderer)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        renderer.drawMode = SpriteDrawMode.Simple;
+        string targetSortingLayer = ResolvePreviewSortingLayerName();
+        renderer.sortingLayerName = targetSortingLayer;
+        renderer.sortingOrder = Mathf.Max(previewSortingOrder, MinimumPreviewSortingOrder);
+    }
+
+    private string ResolvePreviewSortingLayerName()
+    {
+        if (string.IsNullOrWhiteSpace(previewSortingLayerName))
+        {
+            return MinimumPreviewSortingLayerName;
+        }
+
+        int requestedLayerValue = SortingLayer.GetLayerValueFromName(previewSortingLayerName);
+        int minimumLayerValue = SortingLayer.GetLayerValueFromName(MinimumPreviewSortingLayerName);
+        return requestedLayerValue >= minimumLayerValue
+            ? previewSortingLayerName
+            : MinimumPreviewSortingLayerName;
     }
 
     private void HideRepeatedRenderers(int keepActiveCount)

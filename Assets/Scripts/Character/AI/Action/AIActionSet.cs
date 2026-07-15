@@ -1,6 +1,5 @@
 using Sirenix.OdinInspector;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -18,23 +17,23 @@ public abstract class AIActionSet : SerializedScriptableObject
     public virtual float MinimumDuration => 0f;
     public virtual int InterruptPriority => defaultInterruptPriority;
 
-    public virtual bool CanStart(Character character)
+    public virtual bool CanStart(CharacterActor actor)
     {
         return true;
     }
 
-    public virtual float AdjustScore(Character character, float baseScore)
+    public virtual float AdjustScore(CharacterActor actor, float baseScore)
     {
         return Mathf.Clamp01(baseScore);
     }
 
     public virtual bool CanStartWithContext(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         out string failureReason)
     {
         failureReason = string.Empty;
-        if (!CanStart(character))
+        if (!CanStart(actor))
         {
             failureReason = "cannot start";
             return false;
@@ -45,7 +44,7 @@ public abstract class AIActionSet : SerializedScriptableObject
             return true;
         }
 
-        if (!TryResolveDestination(character, searchResult, out BuildableObject destination, out failureReason))
+        if (!TryResolveDestination(actor, searchResult, out BuildableObject destination, out failureReason))
         {
             if (string.IsNullOrWhiteSpace(failureReason))
             {
@@ -65,11 +64,11 @@ public abstract class AIActionSet : SerializedScriptableObject
     }
 
     public virtual bool CanStartWithFailure(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         out AIActionFailure failure)
     {
-        if (CanStartWithContext(character, searchResult, out string failureReason))
+        if (CanStartWithContext(actor, searchResult, out string failureReason))
         {
             failure = AIActionFailure.None;
             return true;
@@ -81,32 +80,38 @@ public abstract class AIActionSet : SerializedScriptableObject
         return false;
     }
 
-    public virtual bool CanContinue(Character character, AIAction runningAction, out string stopReason)
+    public virtual bool CanContinue(CharacterActor actor, AIAction runningAction, out string stopReason)
     {
         stopReason = string.Empty;
         return true;
     }
 
-    public virtual bool CanInterrupt(Character character, AIAction runningAction, out string interruptReason)
+    public virtual bool CanInterrupt(CharacterActor actor, AIAction runningAction, out string interruptReason)
     {
         interruptReason = string.Empty;
         return false;
     }
 
-    public abstract void Execute(Character character);
+    public virtual void Execute(CharacterActor actor)
+    {
+    }
+
+    public virtual void OnStop(CharacterActor actor, AIAction runningAction, string reason)
+    {
+    }
 
     public virtual IReadOnlyList<BuildableObject> GetDestinationCandidates(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult)
     {
-        BuildableObject legacyDestination = GetDestination(character);
-        return legacyDestination != null
-            ? new[] { legacyDestination }
+        BuildableObject destination = GetDestination(actor);
+        return destination != null
+            ? new[] { destination }
             : Array.Empty<BuildableObject>();
     }
 
     public virtual BuildableObject SelectDestination(
-        Character character,
+        CharacterActor actor,
         IReadOnlyList<BuildableObject> candidates)
     {
         return candidates != null
@@ -115,7 +120,7 @@ public abstract class AIActionSet : SerializedScriptableObject
     }
 
     public virtual bool TryResolveDestination(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
         out string failureReason)
@@ -128,14 +133,14 @@ public abstract class AIActionSet : SerializedScriptableObject
             return true;
         }
 
-        IReadOnlyList<BuildableObject> candidates = GetDestinationCandidates(character, searchResult);
+        IReadOnlyList<BuildableObject> candidates = GetDestinationCandidates(actor, searchResult);
         if (candidates == null || candidates.Count == 0)
         {
             failureReason = "목적지 없음";
             return false;
         }
 
-        destination = SelectDestination(character, candidates);
+        destination = SelectDestination(actor, candidates);
         if (destination == null)
         {
             failureReason = "목적지 선택 실패";
@@ -146,12 +151,12 @@ public abstract class AIActionSet : SerializedScriptableObject
     }
 
     public virtual bool TryResolveDestinationWithFailure(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
         out AIActionFailure failure)
     {
-        if (TryResolveDestination(character, searchResult, out destination, out string failureReason))
+        if (TryResolveDestination(actor, searchResult, out destination, out string failureReason))
         {
             failure = AIActionFailure.None;
             return true;
@@ -165,7 +170,7 @@ public abstract class AIActionSet : SerializedScriptableObject
     }
 
     public virtual bool TryReserveDestination(
-        Character character,
+        CharacterActor actor,
         BuildableObject destination,
         out AIActionFailure failure)
     {
@@ -174,19 +179,20 @@ public abstract class AIActionSet : SerializedScriptableObject
     }
 
     public virtual void RefreshDestinationReservation(
-        Character character,
+        CharacterActor actor,
         BuildableObject destination)
     {
     }
 
     public virtual void ReleaseDestinationReservation(
-        Character character,
+        CharacterActor actor,
         BuildableObject destination)
     {
     }
 
-    public virtual BuildableObject GetDestination(Character character)
+    public virtual BuildableObject GetDestination(CharacterActor actor)
     {
         return null;
     }
+
 }

@@ -483,8 +483,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: "\uC0AC\uC7A5 \uC120\uD0DD"
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: eb7dd2a908a53db4fb349b9fa2f3505c, type: 2}
+  m_sharedMaterial: {fileID: 406543024755049488, guid: eb7dd2a908a53db4fb349b9fa2f3505c, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []

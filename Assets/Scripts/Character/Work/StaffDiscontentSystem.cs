@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using VContainer;
 
 public enum StaffDiscontentStage
 {
@@ -78,7 +79,7 @@ public sealed class StaffDiscontentSnapshot
 
 public sealed class StaffDiscontentRecord
 {
-    public StaffDiscontentRecord(int staffId, Character staff)
+    public StaffDiscontentRecord(int staffId, CharacterActor staff)
     {
         StaffId = staffId;
         DisplayName = StaffDiscontentService.GetStaffDisplayName(staff, staffId);
@@ -97,7 +98,7 @@ public sealed class StaffDiscontentRecord
     public bool IsIsolated { get; private set; }
     public bool IsSuppressed { get; private set; }
 
-    public StaffDiscontentOutcome Update(Character staff, StaffDiscontentRules rules)
+    public StaffDiscontentOutcome Update(CharacterActor staff, StaffDiscontentRules rules)
     {
         rules ??= StaffDiscontentRules.CreateDefault();
         if (staff != null)
@@ -188,7 +189,7 @@ public sealed class StaffDiscontentRecord
         return true;
     }
 
-    public bool TryCalm(Character staff, StaffDiscontentRules rules, out string failureReason)
+    public bool TryCalm(CharacterActor staff, StaffDiscontentRules rules, out string failureReason)
     {
         rules ??= StaffDiscontentRules.CreateDefault();
         failureReason = string.Empty;
@@ -211,7 +212,12 @@ public sealed class StaffDiscontentRecord
             return false;
         }
 
-        staff?.ChangesStat(Character.Condition.MOOD, Mathf.Max(0f, rules.calmMoodRecovery));
+        staff?.Stats?.ApplyMoodFactor(
+            "management:calmed",
+            "상담으로 진정됨",
+            Mathf.Max(0f, rules.calmMoodRecovery),
+            240f,
+            1);
         LastMood = StaffDiscontentService.GetMood(staff);
         LowMoodDays = 0;
         Stage = StaffDiscontentService.EvaluateStage(LastMood, LowMoodDays, rules);
@@ -244,7 +250,7 @@ public readonly struct StaffRebellionResponseResult
         bool success,
         StaffRebellionResponseType responseType,
         StaffDiscontentSnapshot snapshot,
-        Character actor,
+        CharacterActor actor,
         string message)
     {
         Success = success;
@@ -257,7 +263,7 @@ public readonly struct StaffRebellionResponseResult
     public bool Success { get; }
     public StaffRebellionResponseType ResponseType { get; }
     public StaffDiscontentSnapshot Snapshot { get; }
-    public Character Actor { get; }
+    public CharacterActor Actor { get; }
     public string Message { get; }
 }
 
@@ -267,7 +273,7 @@ public sealed class StaffDiscontentState
 
     public IReadOnlyCollection<StaffDiscontentRecord> Records => records.Values;
 
-    public StaffDiscontentRecord ProcessStaff(Character staff, StaffDiscontentRules rules, out StaffDiscontentOutcome outcome)
+    public StaffDiscontentRecord ProcessStaff(CharacterActor staff, StaffDiscontentRules rules, out StaffDiscontentOutcome outcome)
     {
         outcome = StaffDiscontentOutcome.None;
         if (!StaffDiscontentService.IsTrackableStaff(staff))
@@ -281,7 +287,7 @@ public sealed class StaffDiscontentState
         return record;
     }
 
-    public bool TryGetRecord(Character staff, out StaffDiscontentRecord record)
+    public bool TryGetRecord(CharacterActor staff, out StaffDiscontentRecord record)
     {
         record = null;
         if (!StaffDiscontentService.IsTrackableStaff(staff))
@@ -292,12 +298,12 @@ public sealed class StaffDiscontentState
         return records.TryGetValue(StaffDiscontentService.GetStaffId(staff), out record);
     }
 
-    public bool IsPermanentLoss(Character staff)
+    public bool IsPermanentLoss(CharacterActor staff)
     {
         return TryGetRecord(staff, out StaffDiscontentRecord record) && record.IsPermanentLoss;
     }
 
-    private StaffDiscontentRecord GetOrCreate(int staffId, Character staff)
+    private StaffDiscontentRecord GetOrCreate(int staffId, CharacterActor staff)
     {
         if (!records.TryGetValue(staffId, out StaffDiscontentRecord record))
         {
@@ -365,32 +371,36 @@ public struct StaffRebellionResponseEvent
 
 public static class StaffDiscontentService
 {
-    public static bool IsTrackableStaff(Character staff)
+    public static bool IsTrackableStaff(CharacterActor staff)
     {
+        CharacterIdentity identity = staff != null ? staff.Identity : null;
         return staff != null
-            && !staff.IsOwner
-            && staff.characterType == CharacterType.NPC
+            && identity != null
+            && !identity.IsOwner
+            && identity.CharacterType == CharacterType.NPC
             && staff.TryGetAbility(out AbilityWork _);
     }
 
-    public static int GetStaffId(Character staff)
+    public static int GetStaffId(CharacterActor staff)
     {
         if (staff == null)
         {
             return -1;
         }
 
-        return staff.data != null ? staff.data.id : staff.GetInstanceID();
+        CharacterIdentity identity = staff.Identity;
+        return identity != null ? identity.StableId : staff.GetInstanceID();
     }
 
-    public static string GetStaffDisplayName(Character staff, int staffId)
+    public static string GetStaffDisplayName(CharacterActor staff, int staffId)
     {
-        if (!string.IsNullOrWhiteSpace(staff?.data?.characterName))
+        CharacterIdentity identity = staff != null ? staff.Identity : null;
+        if (!string.IsNullOrWhiteSpace(identity != null ? identity.DisplayName : null))
         {
-            return staff.data.characterName;
+            return identity.DisplayName;
         }
 
-        if (!string.IsNullOrWhiteSpace(staff?.name))
+        if (!string.IsNullOrWhiteSpace(staff != null ? staff.name : null))
         {
             return staff.name;
         }
@@ -398,14 +408,15 @@ public static class StaffDiscontentService
         return $"Staff {staffId}";
     }
 
-    public static float GetMood(Character staff)
+    public static float GetMood(CharacterActor staff)
     {
-        if (staff == null || staff.stats == null)
+        CharacterStats stats = staff != null ? staff.Stats : null;
+        if (stats == null)
         {
             return 100f;
         }
 
-        return staff.stats.TryGetValue(Character.Condition.MOOD, out float mood)
+        return stats.Stats.TryGetValue(CharacterCondition.MOOD, out float mood)
             ? Mathf.Clamp(mood, 0f, 100f)
             : 100f;
     }
@@ -484,17 +495,24 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
     [SerializeField] private StaffDiscontentRules rules = StaffDiscontentRules.CreateDefault();
 
     private readonly StaffDiscontentState state = new StaffDiscontentState();
+    private IDungeonSceneComponentQuery sceneQuery;
 
-    public static StaffDiscontentRuntime Instance => FindFirstObjectByType<StaffDiscontentRuntime>();
     public StaffDiscontentState State => state;
     public StaffDiscontentRules Rules => rules;
+
+    [Inject]
+    public void Construct(IDungeonSceneComponentQuery sceneQuery)
+    {
+        this.sceneQuery = sceneQuery
+            ?? throw new ArgumentNullException(nameof(sceneQuery));
+    }
 
     public void OnTriggerEvent(OperatingDayEndedEvent eventType)
     {
         ProcessAllStaff();
     }
 
-    public StaffDiscontentRecord ProcessStaff(Character staff, out StaffDiscontentOutcome outcome)
+    public StaffDiscontentRecord ProcessStaff(CharacterActor staff, out StaffDiscontentOutcome outcome)
     {
         StaffDiscontentRecord record = state.ProcessStaff(staff, rules, out outcome);
         if (record == null)
@@ -512,14 +530,14 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
 
     public void ProcessAllStaff()
     {
-        Character[] characters = FindObjectsByType<Character>(FindObjectsSortMode.None);
-        foreach (Character staff in characters)
+        IReadOnlyList<CharacterActor> actors = RequireSceneQuery().All<CharacterActor>();
+        foreach (CharacterActor staff in actors)
         {
             ProcessStaff(staff, out _);
         }
     }
 
-    public float GetWorkEfficiencyMultiplier(Character staff)
+    public float GetWorkEfficiencyMultiplier(CharacterActor staff)
     {
         if (!StaffDiscontentService.IsTrackableStaff(staff))
         {
@@ -532,7 +550,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
         return StaffDiscontentService.GetWorkEfficiencyMultiplier(stage, rules);
     }
 
-    public bool ShouldBlockWork(Character staff, out string reason)
+    public bool ShouldBlockWork(CharacterActor staff, out string reason)
     {
         reason = string.Empty;
         if (!StaffDiscontentService.IsTrackableStaff(staff))
@@ -552,7 +570,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
         return true;
     }
 
-    public bool IsRebellionTarget(Character target)
+    public bool IsRebellionTarget(CharacterActor target)
     {
         return state.TryGetRecord(target, out StaffDiscontentRecord record)
             && record.IsInLocalRebellion
@@ -560,20 +578,20 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
             && !record.IsSuppressed;
     }
 
-    public int DispatchAutoSuppress(Character rebel)
+    public int DispatchAutoSuppress(CharacterActor rebel)
     {
         if (!IsRebellionTarget(rebel))
         {
             return 0;
         }
 
-        Character[] characters = FindObjectsByType<Character>(FindObjectsSortMode.None);
+        IReadOnlyList<CharacterActor> characters = RequireSceneQuery().All<CharacterActor>();
         int assignedCount = 0;
-        foreach (Character candidate in characters)
+        foreach (CharacterActor candidate in characters)
         {
             if (candidate == null
                 || candidate == rebel
-                || candidate.IsDead
+                || (candidate.Stats != null && candidate.Stats.IsDead)
                 || !candidate.TryGetAbility(out AbilityWork work)
                 || work.HasPrioritySuppressTarget
                 || !work.WorkPriorities.IsEnabled(FacilityWorkType.Guard))
@@ -581,13 +599,13 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
                 continue;
             }
 
-            if (!WorkCommandResolver.TryResolveSuppressCommand(candidate, rebel, out _))
+            if (!WorkCommandResolver.TryResolveSuppressCommand(candidate, rebel, IsRebellionTarget, out _))
             {
                 continue;
             }
 
-            GridPathSearchResult searchResult = candidate.ai != null
-                ? candidate.ai.GetPathSearch(candidate)
+            GridPathSearchResult searchResult = candidate.Brain != null
+                ? candidate.Brain.GetPathSearch(candidate)
                 : null;
             if (!work.TrySetPrioritySuppressTarget(rebel, searchResult, out _))
             {
@@ -614,7 +632,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
         return assignedCount;
     }
 
-    public bool TryIsolateRebel(Character rebel, Character actor, out StaffRebellionResponseResult result)
+    public bool TryIsolateRebel(CharacterActor rebel, CharacterActor actor, out StaffRebellionResponseResult result)
     {
         if (!state.TryGetRecord(rebel, out StaffDiscontentRecord record)
             || !record.IsInLocalRebellion)
@@ -636,7 +654,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
         return true;
     }
 
-    public bool TryCalmStaff(Character staff, Character actor, out StaffRebellionResponseResult result)
+    public bool TryCalmStaff(CharacterActor staff, CharacterActor actor, out StaffRebellionResponseResult result)
     {
         if (!state.TryGetRecord(staff, out StaffDiscontentRecord record))
         {
@@ -657,7 +675,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
         return true;
     }
 
-    public bool ResolveSuppressedRebel(Character rebel, Character defender)
+    public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender)
     {
         if (!state.TryGetRecord(rebel, out StaffDiscontentRecord record))
         {
@@ -680,7 +698,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
         return true;
     }
 
-    private void ApplyOutcome(Character staff, StaffDiscontentRecord record, StaffDiscontentOutcome outcome)
+    private void ApplyOutcome(CharacterActor staff, StaffDiscontentRecord record, StaffDiscontentOutcome outcome)
     {
         if (outcome == StaffDiscontentOutcome.None)
         {
@@ -706,7 +724,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
                 break;
             case StaffDiscontentOutcome.PermanentDeparture:
                 staff?.AddLog("직원 이탈: 영구 손실");
-                staff?.SetLifecycleState(Character.LifecycleState.Despawned);
+                staff?.Lifecycle?.SetLifecycleState(CharacterLifecycleState.Despawned);
                 StaffPermanentLossEvent.Trigger(snapshot);
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 이탈", EventAlertImportance.High);
                 break;
@@ -721,6 +739,16 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 반란 확산", EventAlertImportance.High);
                 break;
         }
+    }
+
+    private IDungeonSceneComponentQuery RequireSceneQuery()
+    {
+        if (sceneQuery == null)
+        {
+            throw new InvalidOperationException($"{nameof(StaffDiscontentRuntime)} requires {nameof(IDungeonSceneComponentQuery)} injection.");
+        }
+
+        return sceneQuery;
     }
 
     private void OnEnable()

@@ -69,7 +69,7 @@ public static class FacilitySynthesisDebugScenarios
 
     private static bool VerifySynthesisAssets()
     {
-        IReadOnlyList<FacilitySynthesisRecipeSO> recipes = FacilitySynthesisService.LoadAllRecipes();
+        IReadOnlyList<FacilitySynthesisRecipeSO> recipes = CreateRecipeQuery().GetAllRecipes();
         BuildingSO battleDining = LoadBuilding("P1_BattleDining");
         BuildingSO premium = LoadBuilding("P1_PremiumMeatRestaurant");
         BuildingSO venom = LoadBuilding("P1_VenomSpikeTrap");
@@ -94,7 +94,7 @@ public static class FacilitySynthesisDebugScenarios
         BuildingSO corrosionFreezer = LoadBuilding("P1_CorrosionFreezer");
         BuildingSO stormFireTrap = LoadBuilding("P1_StormFireTrap");
         BuildingSO warBarracks = LoadBuilding("P1_WarBarracks");
-        IReadOnlyList<FacilitySynthesisRecipeSO> recipes = FacilitySynthesisService.LoadAllRecipes();
+        IReadOnlyList<FacilitySynthesisRecipeSO> recipes = CreateRecipeQuery().GetAllRecipes();
 
         return battlefieldDining != null
             && battlefieldDining.Facility.SupportsRole(FacilityRole.Meal)
@@ -121,13 +121,14 @@ public static class FacilitySynthesisDebugScenarios
 
     private static bool VerifyRecipeVisibility()
     {
-        IReadOnlyList<FacilitySynthesisRecipeSO> publicRecipes = FacilitySynthesisService.GetVisibleRecipes(null);
+        IFacilitySynthesisRecipeQuery recipeQuery = CreateRecipeQuery();
+        IReadOnlyList<FacilitySynthesisRecipeSO> publicRecipes = recipeQuery.GetVisibleRecipes(null);
         FacilitySynthesisRecipeSO alarm = LoadRecipe("RS_AlarmCoil");
         BlueprintResearchState researchState = new BlueprintResearchState();
 
-        bool hiddenBeforeResearch = !FacilitySynthesisService.IsRecipeVisible(alarm, researchState);
+        bool hiddenBeforeResearch = !recipeQuery.IsVisible(alarm, researchState);
         researchState.UnlockRecipe("recipe_trap_chain_2");
-        bool visibleAfterResearch = FacilitySynthesisService.IsRecipeVisible(alarm, researchState);
+        bool visibleAfterResearch = recipeQuery.IsVisible(alarm, researchState);
 
         return publicRecipes.Any((recipe) => recipe.recipeId == "recipe_battle_dining_1")
             && publicRecipes.Any((recipe) => recipe.recipeId == "recipe_premium_meat_1")
@@ -327,7 +328,8 @@ public static class FacilitySynthesisDebugScenarios
         runtime.ToggleMaterialSelection(meat);
         runtime.ToggleMaterialSelection(training);
 
-        FacilitySynthesisPanel panel = FacilitySynthesisPanel.CreateDefaultPanel(runtime);
+        FacilitySynthesisPanel panel = new FacilitySynthesisPanelFactory(TMPKoreanFontEditorResolver.CreateService())
+            .CreateDefaultPanel(runtime);
         world.TrackObject(panel.transform.root.gameObject);
 
         return panel.LastRenderedText.Contains("시설 합성")
@@ -343,6 +345,43 @@ public static class FacilitySynthesisDebugScenarios
     private static FacilitySynthesisRecipeSO LoadRecipe(string assetName)
     {
         return AssetDatabase.LoadAssetAtPath<FacilitySynthesisRecipeSO>($"Assets/Resources/SO/Synthesis/P1/{assetName}.asset");
+    }
+
+    private static IFacilitySynthesisRecipeQuery CreateRecipeQuery()
+    {
+        return new EditorFacilitySynthesisRecipeQuery();
+    }
+
+    private sealed class EditorFacilitySynthesisRecipeQuery : IFacilitySynthesisRecipeQuery
+    {
+        public IReadOnlyList<FacilitySynthesisRecipeSO> GetAllRecipes()
+        {
+            return AssetDatabase.FindAssets("t:FacilitySynthesisRecipeSO")
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(AssetDatabase.LoadAssetAtPath<FacilitySynthesisRecipeSO>)
+                .Where((recipe) => recipe != null && recipe.HasValidData)
+                .OrderBy((recipe) => recipe.id)
+                .ToArray();
+        }
+
+        public bool IsVisible(FacilitySynthesisRecipeSO recipe, BlueprintResearchState researchState)
+        {
+            return FacilitySynthesisService.IsRecipeVisible(recipe, researchState, null);
+        }
+
+        public IReadOnlyList<FacilitySynthesisRecipeSO> GetVisibleRecipes(BlueprintResearchState researchState)
+        {
+            return GetAllRecipes()
+                .Where((recipe) => IsVisible(recipe, researchState))
+                .ToArray();
+        }
+
+        public FacilitySynthesisRecipeSnapshot ToSnapshot(
+            FacilitySynthesisRecipeSO recipe,
+            BlueprintResearchState researchState)
+        {
+            return FacilitySynthesisService.ToSnapshot(recipe, researchState, null);
+        }
     }
 
     private sealed class SynthesisScenarioWorld : IDisposable
@@ -370,6 +409,7 @@ public static class FacilitySynthesisDebugScenarios
 
             GameObject gridObject = new GameObject("Synthesis Scenario GridSystemManager");
             objects.Add(gridObject);
+            GridSystemInstanceField?.SetValue(null, null);
             GridSystemManager manager = gridObject.AddComponent<GridSystemManager>();
             GridField?.SetValue(manager, Grid);
             GridSystemInstanceField?.SetValue(null, manager);

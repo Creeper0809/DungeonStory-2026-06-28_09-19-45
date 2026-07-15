@@ -1,10 +1,12 @@
 using Sirenix.OdinInspector;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using VContainer;
 
-public class UIManager : UtilSingleton<UIManager>
+public class UIManager : SerializedMonoBehaviour
 {
     public TMP_Text timeText;
     public TMP_Text holdingMoneyText;
@@ -14,10 +16,17 @@ public class UIManager : UtilSingleton<UIManager>
     [ReadOnly]
     [ShowInInspector]
     private Stack<UIPopUp> popups = new Stack<UIPopUp>();
+    private IPlayerInputReader inputReader;
+
+    [Inject]
+    public void Construct(IPlayerInputReader inputReader)
+    {
+        this.inputReader = inputReader ?? throw new ArgumentNullException(nameof(inputReader));
+    }
 
     public void Update()
     {
-        if(Input.GetKeyDown(KeyCode.Escape))
+        if (RequireInputReader().GetKeyDown(KeyCode.Escape))
         {
             ClosePopupPeek();
         }
@@ -72,14 +81,30 @@ public class UIManager : UtilSingleton<UIManager>
     {
         gameData.gameSpeed.OnValueChange += UpdateGameSpeedText;
         gameData.holdingMoney.OnValueChange += UpdateHoldingMoneyText;
-        gameData.hour.OnValueChange +=  (_) => UpdateTime();
-        gameData.day.OnValueChange += (_) => UpdateTime();
+        gameData.hour.OnValueChange += OnHourChanged;
+        gameData.day.OnValueChange += OnDayChanged;
     }
     private void OnDisable()
     {
         gameData.gameSpeed.OnValueChange -= UpdateGameSpeedText;
         gameData.holdingMoney.OnValueChange -= UpdateHoldingMoneyText;
-        gameData.hour.OnValueChange -= (_) => UpdateTime();
-        gameData.day.OnValueChange -= (_) => UpdateTime();
+        gameData.hour.OnValueChange -= OnHourChanged;
+        gameData.day.OnValueChange -= OnDayChanged;
+    }
+
+    private void OnHourChanged(int _)
+    {
+        UpdateTime();
+    }
+
+    private void OnDayChanged(int _)
+    {
+        UpdateTime();
+    }
+
+    private IPlayerInputReader RequireInputReader()
+    {
+        return inputReader
+            ?? throw new InvalidOperationException($"{nameof(UIManager)} requires {nameof(IPlayerInputReader)} injection.");
     }
 }

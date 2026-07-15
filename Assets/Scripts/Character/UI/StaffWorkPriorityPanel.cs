@@ -1,10 +1,11 @@
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using VContainer;
 
-public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedEvent>
+public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedEvent>
 {
     private const float CharacterColumnWidth = 180f;
     private const float WorkColumnWidth = 98f;
@@ -12,6 +13,10 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
     private const float RowHeight = 78f;
     private const float HeaderHeight = 56f;
     private const float PanelPadding = 16f;
+    private static readonly IDungeonSceneComponentQuery FallbackSceneQuery =
+        new DungeonSceneComponentQuery();
+    private static readonly IStaffWorkPriorityPanelUiFactory FallbackUiFactory =
+        new StaffWorkPriorityPanelUiFactory(new StaffWorkPriorityPanelNoopFontService());
 
     [SerializeField] private GameObject panelRoot;
     [SerializeField] private Transform rowRoot;
@@ -20,25 +25,41 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
     [SerializeField] private bool hideWhenSelectedCharacterCannotWork;
 
     private readonly List<GameObject> spawnedObjects = new List<GameObject>();
-    private Character selectedCharacter;
+    private CharacterActor selectedCharacter;
     private RectTransform contentRoot;
     private RectTransform tableRoot;
     private TMP_Text titleText;
     private int lastWorkerHash;
     private float nextAutoRefreshAt;
-    private static Font cachedCellFont;
-
+    private IStaffWorkPriorityPanelModelBuilder modelBuilder;
+    private IStaffWorkPriorityPanelUiFactory uiFactory;
+    private IDungeonSceneComponentQuery sceneQuery;
     public int VisibleWorkerCount { get; private set; }
     public int VisibleCellCount { get; private set; }
+
+    [Inject]
+    public void ConstructStaffWorkPriorityPanel(
+        IStaffWorkPriorityPanelModelBuilder modelBuilder,
+        IStaffWorkPriorityPanelUiFactory uiFactory,
+        IDungeonSceneComponentQuery sceneQuery)
+    {
+        this.modelBuilder = modelBuilder
+            ?? throw new ArgumentNullException(nameof(modelBuilder));
+        this.uiFactory = uiFactory
+            ?? throw new ArgumentNullException(nameof(uiFactory));
+        this.sceneQuery = sceneQuery
+            ?? throw new ArgumentNullException(nameof(sceneQuery));
+    }
 
     private void Awake()
     {
         panelRoot ??= gameObject;
+        EnsureFallbackServices();
     }
 
     private void Start()
     {
-        TMPKoreanFont.ApplyToChildren(transform);
+        RequireUiFactory().ApplyFonts(transform);
         Refresh();
     }
 
@@ -59,10 +80,10 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
 
     public void OnTriggerEvent(InfoFeedEvent eventType)
     {
-        if (eventType.infoable is Character character
-            && character.TryGetAbility(out AbilityWork _))
+        CharacterActor actor = eventType.infoable as CharacterActor;
+        if (actor != null && actor.TryGetAbility(out AbilityWork _))
         {
-            selectedCharacter = character;
+            selectedCharacter = actor;
             Refresh();
             return;
         }
@@ -90,7 +111,7 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         RectTransform host = ResolveHost();
         ClearHost(host);
 
-        GameObject titleObject = CreateUIObject("Title", host);
+        GameObject titleObject = RequireUiFactory().CreateUiObject("Title", host);
         RectTransform titleRect = titleObject.GetComponent<RectTransform>();
         titleRect.anchorMin = new Vector2(0f, 1f);
         titleRect.anchorMax = new Vector2(1f, 1f);
@@ -98,59 +119,45 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         titleRect.anchoredPosition = Vector2.zero;
         titleRect.sizeDelta = new Vector2(0f, 44f);
 
-        titleText = titleObject.AddComponent<TextMeshProUGUI>();
-        TMPKoreanFont.Apply(titleText);
+        titleText = RequireUiFactory().AddText(titleObject);
         titleText.text = "직원 작업 우선순위";
-        titleText.color = new Color(0.95f, 0.96f, 0.92f, 1f);
+        titleText.color = DungeonUiTheme.TextPrimary;
         titleText.fontSize = 28f;
         titleText.fontStyle = FontStyles.Bold;
         titleText.alignment = TextAlignmentOptions.Left;
 
-        GameObject scrollObject = CreateUIObject("PriorityScrollView", host);
+        BuildModeBar(host);
+
+        GameObject scrollObject = RequireUiFactory().CreateUiObject("PriorityScrollView", host);
         RectTransform scrollRectTransform = scrollObject.GetComponent<RectTransform>();
         scrollRectTransform.anchorMin = Vector2.zero;
         scrollRectTransform.anchorMax = Vector2.one;
         scrollRectTransform.offsetMin = Vector2.zero;
-        scrollRectTransform.offsetMax = new Vector2(0f, -54f);
+        scrollRectTransform.offsetMax = new Vector2(0f, -106f);
 
-        Image scrollBackground = scrollObject.AddComponent<Image>();
-        scrollBackground.color = new Color(0.045f, 0.05f, 0.055f, 0.78f);
+        RequireUiFactory().AddImage(scrollObject, DungeonUiTheme.SurfaceMuted);
 
-        ScrollRect scrollRect = scrollObject.AddComponent<ScrollRect>();
-        scrollRect.horizontal = true;
-        scrollRect.vertical = true;
-        scrollRect.movementType = ScrollRect.MovementType.Clamped;
-        scrollRect.scrollSensitivity = 18f;
+        ScrollRect scrollRect = RequireUiFactory().AddScrollRect(scrollObject);
 
-        GameObject viewportObject = CreateUIObject("Viewport", scrollRectTransform);
+        GameObject viewportObject = RequireUiFactory().CreateUiObject("Viewport", scrollRectTransform);
         RectTransform viewportRect = viewportObject.GetComponent<RectTransform>();
         viewportRect.anchorMin = Vector2.zero;
         viewportRect.anchorMax = Vector2.one;
         viewportRect.offsetMin = new Vector2(PanelPadding, PanelPadding);
         viewportRect.offsetMax = new Vector2(-PanelPadding, -PanelPadding);
 
-        Image viewportImage = viewportObject.AddComponent<Image>();
-        viewportImage.color = new Color(1f, 1f, 1f, 0.01f);
-        Mask mask = viewportObject.AddComponent<Mask>();
-        mask.showMaskGraphic = false;
+        RequireUiFactory().AddImage(viewportObject, new Color(1f, 1f, 1f, 0.01f));
+        RequireUiFactory().AddMask(viewportObject, false);
 
-        GameObject contentObject = CreateUIObject("Content", viewportRect);
+        GameObject contentObject = RequireUiFactory().CreateUiObject("Content", viewportRect);
         contentRoot = contentObject.GetComponent<RectTransform>();
         contentRoot.anchorMin = new Vector2(0f, 1f);
         contentRoot.anchorMax = new Vector2(0f, 1f);
         contentRoot.pivot = new Vector2(0f, 1f);
         contentRoot.anchoredPosition = Vector2.zero;
 
-        VerticalLayoutGroup vertical = contentObject.AddComponent<VerticalLayoutGroup>();
-        vertical.spacing = 1f;
-        vertical.childControlWidth = false;
-        vertical.childControlHeight = false;
-        vertical.childForceExpandWidth = false;
-        vertical.childForceExpandHeight = false;
-
-        ContentSizeFitter fitter = contentObject.AddComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        RequireUiFactory().AddVerticalLayoutGroup(contentObject);
+        RequireUiFactory().AddContentSizeFitter(contentObject);
 
         scrollRect.viewport = viewportRect;
         scrollRect.content = contentRoot;
@@ -183,7 +190,7 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
             return rect;
         }
 
-        return gameObject.AddComponent<RectTransform>();
+        return RequireUiFactory().EnsureRectTransform(gameObject);
     }
 
     private void ClearHost(RectTransform host)
@@ -203,7 +210,7 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
                 continue;
             }
 
-            DestroyUiObject(child.gameObject);
+            RequireUiFactory().Release(child.gameObject);
         }
     }
 
@@ -217,15 +224,21 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         ClearSpawnedObjects();
 
         FacilityWorkType[] workTypes = WorkTaskCatalog.TaskTypes;
-        List<WorkerRow> workers = FindWorkers();
+        IReadOnlyList<StaffWorkPriorityRowModel> workers = RequireModelBuilder().BuildRows();
         VisibleWorkerCount = workers.Count;
         VisibleCellCount = workers.Count * workTypes.Length;
-        lastWorkerHash = CalculateWorkerHash(workers);
+        lastWorkerHash = RequireModelBuilder().CalculateWorkerHash(workers);
+
+        if (panelMode == StaffPanelMode.Management)
+        {
+            BuildStaffManagement(workers);
+            return;
+        }
 
         if (titleText != null)
         {
             string selectedName = selectedCharacter != null
-                ? GetCharacterDisplayName(selectedCharacter)
+                ? RequireModelBuilder().GetDisplayName(selectedCharacter)
                 : string.Empty;
             titleText.text = string.IsNullOrEmpty(selectedName)
                 ? $"직원 작업 우선순위 ({workers.Count})"
@@ -244,7 +257,7 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         }
 
         BuildHeader(workTypes, tableWidth);
-        foreach (WorkerRow worker in workers)
+        foreach (StaffWorkPriorityRowModel worker in workers)
         {
             BuildWorkerRow(worker, workTypes, tableWidth);
         }
@@ -268,13 +281,13 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
             label.fontSizeMin = 14f;
             label.fontSizeMax = 20f;
             label.textWrappingMode = TextWrappingModes.Normal;
-            label.color = new Color(0.96f, 0.95f, 0.86f, 1f);
+            label.color = DungeonUiTheme.TextPrimary;
         }
 
         CreateLabelCell(row.transform, "상태", StatusColumnWidth, HeaderHeight, TextAlignmentOptions.Center, true);
     }
 
-    private void BuildWorkerRow(WorkerRow worker, IReadOnlyList<FacilityWorkType> workTypes, float tableWidth)
+    private void BuildWorkerRow(StaffWorkPriorityRowModel worker, IReadOnlyList<FacilityWorkType> workTypes, float tableWidth)
     {
         GameObject row = CreateRow(worker.Character.name, tableWidth, RowHeight);
         TMP_Text nameLabel = CreateLabelCell(
@@ -289,8 +302,8 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         nameLabel.fontSizeMax = 19f;
         nameLabel.fontStyle = worker.Character == selectedCharacter ? FontStyles.Bold : FontStyles.Normal;
         nameLabel.color = worker.Character == selectedCharacter
-            ? new Color(1f, 0.92f, 0.55f, 1f)
-            : new Color(0.92f, 0.93f, 0.9f, 1f);
+            ? DungeonUiTheme.Warning
+            : DungeonUiTheme.TextPrimary;
 
         foreach (FacilityWorkType workType in workTypes)
         {
@@ -312,22 +325,14 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
 
     private GameObject CreateRow(string name, float width, float height)
     {
-        GameObject row = CreateUIObject(name, tableRoot);
+        GameObject row = RequireUiFactory().CreateUiObject(name, tableRoot);
         spawnedObjects.Add(row);
 
         RectTransform rect = row.GetComponent<RectTransform>();
         rect.sizeDelta = new Vector2(width, height);
 
-        HorizontalLayoutGroup horizontal = row.AddComponent<HorizontalLayoutGroup>();
-        horizontal.spacing = 1f;
-        horizontal.childControlWidth = false;
-        horizontal.childControlHeight = false;
-        horizontal.childForceExpandWidth = false;
-        horizontal.childForceExpandHeight = false;
-
-        LayoutElement layout = row.AddComponent<LayoutElement>();
-        layout.preferredWidth = width;
-        layout.preferredHeight = height;
+        RequireUiFactory().AddHorizontalLayoutGroup(row);
+        RequireUiFactory().AddLayoutElement(row, width, height);
         return row;
     }
 
@@ -340,40 +345,27 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         bool header)
     {
         GameObject cell = CreateCellObject("Label", parent, width, height);
-        Image image = cell.AddComponent<Image>();
-        image.color = header
-            ? new Color(0.12f, 0.13f, 0.13f, 1f)
-            : new Color(0.075f, 0.08f, 0.083f, 0.96f);
+        RequireUiFactory().AddImage(
+            cell,
+            header ? DungeonUiTheme.SurfaceRaised : DungeonUiTheme.Surface);
 
         TMP_Text label = AddCellText(cell.transform, text, alignment, header);
         label.fontSize = header ? 16f : 18f;
-        label.color = new Color(0.92f, 0.93f, 0.9f, 1f);
+        label.color = DungeonUiTheme.TextPrimary;
         label.margin = alignment == TextAlignmentOptions.Left
             ? new Vector4(8f, 0f, 4f, 0f)
             : Vector4.zero;
 
-        bool multiline = !string.IsNullOrEmpty(text) && text.Contains("\n");
-        AddVisibleCellText(
-            cell.transform,
-            text,
-            alignment,
-            multiline ? 11 : header ? 16 : 18,
-            label.color,
-            header ? UnityEngine.FontStyle.Bold : UnityEngine.FontStyle.Normal,
-            true,
-            alignment == TextAlignmentOptions.Left ? 8f : 0f);
         return label;
     }
 
-    private void CreatePriorityCell(Transform parent, WorkerRow worker, FacilityWorkType workType)
+    private void CreatePriorityCell(Transform parent, StaffWorkPriorityRowModel worker, FacilityWorkType workType)
     {
         WorkPriorityLevel priority = worker.Work.WorkPriorities.GetPriority(workType);
         GameObject cell = CreateCellObject($"Cell_{worker.Character.GetInstanceID()}_{workType}", parent, WorkColumnWidth, RowHeight);
-        Image image = cell.AddComponent<Image>();
-        image.color = GetPriorityColor(priority, worker.Character == selectedCharacter);
+        Image image = RequireUiFactory().AddImage(cell, GetPriorityColor(priority, worker.Character == selectedCharacter));
 
-        Button button = cell.AddComponent<Button>();
-        button.targetGraphic = image;
+        Button button = RequireUiFactory().AddButton(cell, image);
         FacilityWorkType capturedType = workType;
         AbilityWork capturedWork = worker.Work;
         button.onClick.AddListener(() =>
@@ -388,52 +380,33 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         label.fontSize = 30f;
         label.fontStyle = FontStyles.Bold;
         label.color = priority == WorkPriorityLevel.Off
-            ? new Color(0.95f, 0.9f, 0.84f, 1f)
+            ? DungeonUiTheme.TextSecondary
             : Color.white;
 
-        Shadow shadow = label.gameObject.AddComponent<Shadow>();
-        shadow.effectColor = new Color(0f, 0f, 0f, 0.9f);
-        shadow.effectDistance = new Vector2(1.2f, -1.2f);
+        RequireUiFactory().AddShadow(label.gameObject, new Color(0f, 0f, 0f, 0.9f), new Vector2(1.2f, -1.2f));
 
-        Text visibleText = AddVisibleCellText(
-            cell.transform,
-            GetPriorityLabel(priority),
-            TextAlignmentOptions.Center,
-            30,
-            label.color,
-            UnityEngine.FontStyle.Bold,
-            false,
-            0f);
-        Shadow visibleShadow = visibleText.gameObject.AddComponent<Shadow>();
-        visibleShadow.effectColor = new Color(0f, 0f, 0f, 0.92f);
-        visibleShadow.effectDistance = new Vector2(1.2f, -1.2f);
     }
 
-    private static GameObject CreateCellObject(string name, Transform parent, float width, float height)
+    private GameObject CreateCellObject(string name, Transform parent, float width, float height)
     {
-        GameObject cell = CreateUIObject(name, parent);
+        GameObject cell = RequireUiFactory().CreateUiObject(name, parent);
         RectTransform rect = cell.GetComponent<RectTransform>();
         rect.sizeDelta = new Vector2(width, height);
 
-        LayoutElement layout = cell.AddComponent<LayoutElement>();
-        layout.preferredWidth = width;
-        layout.preferredHeight = height;
-        layout.minWidth = width;
-        layout.minHeight = height;
+        RequireUiFactory().AddLayoutElement(cell, width, height);
         return cell;
     }
 
-    private static TMP_Text AddCellText(Transform parent, string text, TextAlignmentOptions alignment, bool allowAutoSize)
+    private TMP_Text AddCellText(Transform parent, string text, TextAlignmentOptions alignment, bool allowAutoSize)
     {
-        GameObject textObject = CreateUIObject("Text", parent);
+        GameObject textObject = RequireUiFactory().CreateUiObject("Text", parent);
         RectTransform rect = textObject.GetComponent<RectTransform>();
         rect.anchorMin = Vector2.zero;
         rect.anchorMax = Vector2.one;
         rect.offsetMin = new Vector2(3f, 2f);
         rect.offsetMax = new Vector2(-3f, -2f);
 
-        TMP_Text label = textObject.AddComponent<TextMeshProUGUI>();
-        TMPKoreanFont.Apply(label);
+        TMP_Text label = RequireUiFactory().AddText(textObject);
         label.text = text;
         label.alignment = alignment;
         label.textWrappingMode = allowAutoSize ? TextWrappingModes.Normal : TextWrappingModes.NoWrap;
@@ -445,130 +418,9 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         return label;
     }
 
-    private static Text AddVisibleCellText(
-        Transform parent,
-        string text,
-        TextAlignmentOptions alignment,
-        int fontSize,
-        Color color,
-        UnityEngine.FontStyle fontStyle,
-        bool bestFit,
-        float leftPadding)
-    {
-        GameObject textObject = CreateUIObject("VisibleText", parent);
-        RectTransform rect = textObject.GetComponent<RectTransform>();
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.offsetMin = new Vector2(6f + leftPadding, 4f);
-        rect.offsetMax = new Vector2(-6f, -4f);
-
-        Text label = textObject.AddComponent<Text>();
-        label.font = ResolveCellFont();
-        label.text = text;
-        label.color = color;
-        label.alignment = ToTextAnchor(alignment);
-        label.fontSize = fontSize;
-        label.fontStyle = fontStyle;
-        label.raycastTarget = false;
-        label.horizontalOverflow = HorizontalWrapMode.Overflow;
-        label.verticalOverflow = VerticalWrapMode.Overflow;
-        label.resizeTextForBestFit = bestFit;
-        label.resizeTextMinSize = Mathf.Min(10, fontSize);
-        label.resizeTextMaxSize = fontSize;
-        return label;
-    }
-
-    private static Font ResolveCellFont()
-    {
-        if (cachedCellFont != null)
-        {
-            return cachedCellFont;
-        }
-
-        cachedCellFont = Font.CreateDynamicFontFromOSFont(
-            new[] { "Malgun Gothic", "맑은 고딕", "Arial", "Segoe UI" },
-            18);
-        if (cachedCellFont == null)
-        {
-            cachedCellFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        }
-
-        return cachedCellFont;
-    }
-
-    private static TextAnchor ToTextAnchor(TextAlignmentOptions alignment)
-    {
-        if ((alignment & TextAlignmentOptions.Left) != 0)
-        {
-            return TextAnchor.MiddleLeft;
-        }
-
-        if ((alignment & TextAlignmentOptions.Right) != 0)
-        {
-            return TextAnchor.MiddleRight;
-        }
-
-        return TextAnchor.MiddleCenter;
-    }
-
-    private static GameObject CreateUIObject(string name, Transform parent)
-    {
-        GameObject obj = new GameObject(name, typeof(RectTransform));
-        obj.transform.SetParent(parent, false);
-        return obj;
-    }
-
-    private List<WorkerRow> FindWorkers()
-    {
-        return Object.FindObjectsByType<Character>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
-            .Where((character) => character != null
-                && !character.IsDead
-                && character.TryGetAbility(out AbilityWork _))
-            .OrderByDescending((character) => character.IsOwner)
-            .ThenBy((character) => GetCharacterDisplayName(character))
-            .Select((character) => new WorkerRow(character, character.GetAbility<AbilityWork>()))
-            .Where((worker) => worker.Work != null)
-            .ToList();
-    }
-
     private int CalculateWorkerHash()
     {
-        return CalculateWorkerHash(FindWorkers());
-    }
-
-    private static int CalculateWorkerHash(IReadOnlyList<WorkerRow> workers)
-    {
-        unchecked
-        {
-            int hash = 17;
-            foreach (WorkerRow worker in workers)
-            {
-                hash = (hash * 31) + worker.Character.GetInstanceID();
-                hash = (hash * 31) + (int)worker.Work.CurrentDutyState;
-                hash = (hash * 31) + (worker.Work.isWorking ? 1 : 0);
-                hash = (hash * 31) + (worker.Character.IsOnExpedition ? 1 : 0);
-                hash = (hash * 31) + (worker.Character.ai != null ? worker.Character.ai.GetDebugHash() : 0);
-
-                foreach (FacilityWorkType type in WorkTaskCatalog.TaskTypes)
-                {
-                    hash = (hash * 31) + (int)worker.Work.WorkPriorities.GetPriority(type);
-                }
-            }
-
-            return hash;
-        }
-    }
-
-    private static string GetCharacterDisplayName(Character character)
-    {
-        if (character == null) return string.Empty;
-
-        if (character.data != null && !string.IsNullOrWhiteSpace(character.data.characterName))
-        {
-            return character.data.characterName;
-        }
-
-        return character.name;
+        return RequireModelBuilder().CalculateWorkerHash();
     }
 
     private static string GetWorkTypeLabel(FacilityWorkType workType)
@@ -602,21 +454,22 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
     {
         Color baseColor = priority switch
         {
-            WorkPriorityLevel.Priority1 => new Color(0.18f, 0.5f, 0.28f, 1f),
-            WorkPriorityLevel.Priority2 => new Color(0.58f, 0.43f, 0.14f, 1f),
-            WorkPriorityLevel.Priority3 => new Color(0.24f, 0.34f, 0.45f, 1f),
-            _ => new Color(0.13f, 0.14f, 0.15f, 1f)
+            WorkPriorityLevel.Priority1 => DungeonUiTheme.Good,
+            WorkPriorityLevel.Priority2 => DungeonUiTheme.Warning,
+            WorkPriorityLevel.Priority3 => DungeonUiTheme.SurfaceRaised,
+            _ => DungeonUiTheme.SurfaceMuted
         };
 
         return selected
-            ? Color.Lerp(baseColor, new Color(1f, 0.88f, 0.38f, 1f), 0.28f)
+            ? Color.Lerp(baseColor, DungeonUiTheme.TextPrimary, 0.2f)
             : baseColor;
     }
 
-    private static string GetWorkerStatus(WorkerRow worker)
+    private static string GetWorkerStatus(StaffWorkPriorityRowModel worker)
     {
         string status;
-        if (worker.Character.IsOnExpedition)
+        if (worker.Character.Lifecycle != null
+            && worker.Character.Lifecycle.CurrentState == CharacterLifecycleState.OnExpedition)
         {
             status = "원정";
         }
@@ -629,8 +482,8 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
             status = worker.Work.isWorking ? "작업중" : "대기";
         }
 
-        string aiSummary = worker.Character.ai != null
-            ? worker.Character.ai.GetDebugSummary(2)
+        string aiSummary = worker.Character.Brain != null
+            ? worker.Character.Brain.GetDebugSummary(2)
             : string.Empty;
         if (string.IsNullOrWhiteSpace(aiSummary))
         {
@@ -646,7 +499,7 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         {
             for (int i = tableRoot.childCount - 1; i >= 0; i--)
             {
-                DestroyUiObject(tableRoot.GetChild(i).gameObject);
+                RequireUiFactory().Release(tableRoot.GetChild(i).gameObject);
             }
 
             spawnedObjects.Clear();
@@ -657,30 +510,11 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         {
             if (obj != null)
             {
-                DestroyUiObject(obj);
+                RequireUiFactory().Release(obj);
             }
         }
 
         spawnedObjects.Clear();
-    }
-
-    private static void DestroyUiObject(GameObject obj)
-    {
-        if (obj == null)
-        {
-            return;
-        }
-
-        obj.SetActive(false);
-
-        if (Application.isPlaying)
-        {
-            Destroy(obj);
-        }
-        else
-        {
-            DestroyImmediate(obj);
-        }
     }
 
     private void OnEnable()
@@ -694,17 +528,30 @@ public class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<InfoFeedE
         this.EventStopListening<InfoFeedEvent>();
     }
 
-    private readonly struct WorkerRow
+    private IStaffWorkPriorityPanelModelBuilder RequireModelBuilder()
     {
-        public WorkerRow(Character character, AbilityWork work)
-        {
-            Character = character;
-            Work = work;
-            Name = GetCharacterDisplayName(character);
-        }
+        EnsureFallbackServices();
+        return modelBuilder;
+    }
 
-        public Character Character { get; }
-        public AbilityWork Work { get; }
-        public string Name { get; }
+    private IStaffWorkPriorityPanelUiFactory RequireUiFactory()
+    {
+        EnsureFallbackServices();
+        return uiFactory;
+    }
+
+    private void EnsureFallbackServices()
+    {
+        sceneQuery ??= FallbackSceneQuery;
+        modelBuilder ??= new StaffWorkPriorityPanelModelBuilder(
+            new StaffWorkforceRuntimeQueryService(sceneQuery));
+        uiFactory ??= FallbackUiFactory;
+    }
+
+    private sealed class StaffWorkPriorityPanelNoopFontService : ITmpKoreanFontService
+    {
+        public TMP_FontAsset Resolve() => null;
+        public void Apply(TMP_Text text) { }
+        public void ApplyToChildren(Transform root, bool includeInactive = true) { }
     }
 }

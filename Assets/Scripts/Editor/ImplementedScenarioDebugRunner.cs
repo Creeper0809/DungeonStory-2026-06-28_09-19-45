@@ -80,6 +80,7 @@ public static class ImplementedScenarioDebugRunner
 
         Run("P0 Grid foundation", GridFoundationDebugScenarios.RunAll, results);
         Run("P1 Facilities and logistics", FacilityDebugScenarios.RunAll, results);
+        Run("P1 Plan character AI", RunPlanCharacterAiScenarios, results);
         Run("P1 Customer AI", CustomerAiDebugScenarios.RunAll, results);
         Run("P1 Character model", CharacterModelDebugScenarios.RunAll, results);
         Run("P1 Owner character", OwnerDebugScenarios.RunAll, results);
@@ -96,6 +97,7 @@ public static class ImplementedScenarioDebugRunner
         Run("P1 Facility shop", FacilityShopDebugScenarios.RunAll, results);
         Run("P1 Blueprint research", BlueprintResearchDebugScenarios.RunAll, results);
         Run("P1 Facility synthesis", FacilitySynthesisDebugScenarios.RunAll, results);
+        Run("P1 Facility evolution", FacilityEvolutionDebugScenarios.RunAll, results);
         Run("P1 Codex", CodexDebugScenarios.RunAll, results);
         Run("P2 Regular customer", RegularCustomerDebugScenarios.RunAll, results);
         Run("P2 Staff discontent", StaffDiscontentDebugScenarios.RunAll, results);
@@ -120,6 +122,7 @@ public static class ImplementedScenarioDebugRunner
         P1DefenseFacilityAssetBuilder.EnsureP1DefenseAssets();
         P1FacilityShopAssetBuilder.EnsureP1FacilityShopAssets();
         P1FacilitySynthesisAssetBuilder.EnsureP1SynthesisAssets();
+        P1FacilityEvolutionAssetBuilder.EnsureP1EvolutionAssets();
     }
 
     private static void Run(
@@ -142,6 +145,12 @@ public static class ImplementedScenarioDebugRunner
             string detail = $"{ex.GetType().Name}: {ex.Message}";
             results.Add(new ScenarioSuiteResult(name, false, detail, stopwatch.ElapsedMilliseconds));
         }
+    }
+
+    private static bool RunPlanCharacterAiScenarios(bool log)
+    {
+        CharacterAiPlanDebugScenarios.RunAll();
+        return true;
     }
 
     private static void LogSummary(IReadOnlyList<ScenarioSuiteResult> results, bool success)

@@ -26,7 +26,11 @@ public enum FacilityRole
     Training = 1 << 3,
     Research = 1 << 4,
     Mana = 1 << 5,
-    Logistics = 1 << 6
+    Logistics = 1 << 6,
+    Toilet = 1 << 7,
+    Hygiene = 1 << 8,
+    Administration = 1 << 9,
+    Security = 1 << 10
 }
 
 [Flags]
@@ -43,6 +47,49 @@ public enum FacilityWorkType
     Rest = 1 << 7
 }
 
+public enum FacilityAnchorKind
+{
+    Use,
+    Work,
+    Checkout,
+    Exit
+}
+
+[Serializable]
+public sealed class FacilityAnchorData
+{
+    public bool overrideUseOffset;
+    public Vector2 useOffset;
+    public bool overrideWorkOffset;
+    public Vector2 workOffset;
+    public bool overrideCheckoutOffset;
+    public Vector2 checkoutOffset;
+    public bool overrideExitOffset;
+    public Vector2 exitOffset;
+
+    public bool TryGetOffset(FacilityAnchorKind kind, out Vector2 offset)
+    {
+        switch (kind)
+        {
+            case FacilityAnchorKind.Use when overrideUseOffset:
+                offset = useOffset;
+                return true;
+            case FacilityAnchorKind.Work when overrideWorkOffset:
+                offset = workOffset;
+                return true;
+            case FacilityAnchorKind.Checkout when overrideCheckoutOffset:
+                offset = checkoutOffset;
+                return true;
+            case FacilityAnchorKind.Exit when overrideExitOffset:
+                offset = exitOffset;
+                return true;
+            default:
+                offset = Vector2.zero;
+                return false;
+        }
+    }
+}
+
 [Serializable]
 public class FacilityData
 {
@@ -57,6 +104,17 @@ public class FacilityData
     public string[] dislikedSpeciesTags = Array.Empty<string>();
     public bool disabledWhenDamaged = true;
     public bool requiresStock;
+    public bool requiresRoomRole;
+    public bool requiresStaffedService;
+    public bool selfContainedRoom;
+    [Range(0f, 1f)] public float baseCrimePressure = 0.01f;
+    [Range(0f, 1f)] public float unstaffedSupervisionRisk = 0.07f;
+    [Range(0f, 1f)] public float staffedSupervisionReduction = 0.03f;
+    [Range(0f, 1f)] public float lowMoodCrimeRiskWeight = 0.08f;
+    [Range(0f, 1f)] public float unmetNeedCrimeRiskWeight = 0.05f;
+    [Range(0f, 1f)] public float crowdCrimeRiskWeight = 0.04f;
+    [Range(0f, 1f)] public float highValueCrimeRiskWeight = 0.05f;
+    [Range(0f, 1f)] public float damagedFacilityCrimeRiskWeight = 0.05f;
 
     public bool IsVisitorFacility => roles != FacilityRole.None && capacity > 0;
 
@@ -82,6 +140,7 @@ public readonly struct GridBuildingPlacement
 
     public bool IsMovement => Category == BuildingCategory.Movement;
     public bool IsWall => Category == BuildingCategory.Wall;
+    public bool IsStructuralWall => Category == BuildingCategory.Wall && Layer != GridLayer.Hallway;
     public bool IsDraggable => HorizontalDraggable || VerticalDraggable;
     public bool HasEvenWidth => Width % 2 == 0;
 
@@ -139,11 +198,14 @@ public class BuildingSO : DataScriptableObject
     public Vector2 movementAnchorOffset;
     [Min(0f)]
     public float movementTravelTime = 2f;
+    public FacilityAnchorData facilityAnchors = new FacilityAnchorData();
 
     [Header("Game Data")]
     public int maintenance;
     public FacilityData facility = new FacilityData();
     public DefenseFacilityData defense = new DefenseFacilityData();
+    public FacilityEvolutionContributionData evolution = new FacilityEvolutionContributionData();
+    public FacilityOperationalData operational = new FacilityOperationalData();
     [SerializeField] private List<IBuildingCondition> OnBuildCondition;
     public bool unlocked;
 
@@ -157,9 +219,18 @@ public class BuildingSO : DataScriptableObject
 
     public bool IsGridMovement => Placement.IsMovement;
     public bool IsWall => Placement.IsWall;
+    public bool IsStructuralWall => Placement.IsStructuralWall;
+    public bool IsDoor => type != null && typeof(Door).IsAssignableFrom(type);
+    public bool IsInteriorDoor => type != null && typeof(InteriorDoor).IsAssignableFrom(type);
     public bool IsEvenWidth => Placement.HasEvenWidth;
+    public bool UsesIndependentRenderer => layer == GridLayer.WallFixture
+        || layer == GridLayer.CeilingFixture
+        || layer == GridLayer.FloorOverlay;
+    public FacilityAnchorData FacilityAnchors => facilityAnchors ??= new FacilityAnchorData();
     public FacilityData Facility => facility ??= new FacilityData();
     public DefenseFacilityData Defense => defense ??= new DefenseFacilityData();
+    public FacilityEvolutionContributionData Evolution => evolution ??= new FacilityEvolutionContributionData();
+    public FacilityOperationalData Operational => operational ??= new FacilityOperationalData();
 
     public IReadOnlyList<IBuildingCondition> BuildConditions => OnBuildCondition != null
         ? (IReadOnlyList<IBuildingCondition>)OnBuildCondition

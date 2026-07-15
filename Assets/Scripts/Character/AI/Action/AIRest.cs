@@ -5,65 +5,57 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Rest", order = 0)]
 public class AIRest : AIActionSet
 {
-    public override bool CanStart(Character character)
+    public override bool CanStart(CharacterActor actor)
     {
-        if (character == null) return false;
-
-        if (!character.TryGetAbility(out AbilityShopping _))
-        {
-            return false;
-        }
-
-        if (CharacterWorkRoleUtility.TryGetWork(character, out AbilityWork work))
-        {
-            return work.IsOffDuty;
-        }
-
-        return true;
+        return CanUseVisitorAction(actor);
     }
 
-    public override void Execute(Character character)
+    public override void Execute(CharacterActor actor)
     {
-        character.GetAbility<AbilityShopping>().StartSopping();
+        actor?.GetAbility<AbilityShopping>()?.StartSopping();
     }
 
     public override IReadOnlyList<BuildableObject> GetDestinationCandidates(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult)
     {
-        if (character == null)
+        if (actor == null)
         {
             return Array.Empty<BuildableObject>();
         }
 
         return FacilityCandidateScorer.GetCandidates(
-            character,
+            actor,
             searchResult,
             FacilityRole.Rest);
     }
 
     public override BuildableObject SelectDestination(
-        Character character,
+        CharacterActor actor,
         IReadOnlyList<BuildableObject> candidates)
     {
-        GridPathSearchResult searchResult = character.ai != null ? character.ai.GetPathSearch(character) : null;
+        GridPathSearchResult searchResult = actor != null && actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
+            : null;
         return FacilityCandidateScorer.SelectBest(
-            character,
+            actor,
             candidates,
             FacilityRole.Rest,
-            searchResult);
+            searchResult,
+            FacilityScoringContext.RequireFromActor(actor));
     }
 
     public override bool TryResolveDestination(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
         out string failureReason)
     {
         if (FacilityCandidateScorer.TrySelectBest(
-            character,
+            actor,
             searchResult,
             FacilityRole.Rest,
+            FacilityScoringContext.RequireFromActor(actor),
             out destination))
         {
             failureReason = string.Empty;
@@ -75,7 +67,7 @@ public class AIRest : AIActionSet
     }
 
     public override bool TryReserveDestination(
-        Character character,
+        CharacterActor actor,
         BuildableObject destination,
         out AIActionFailure failure)
     {
@@ -85,7 +77,7 @@ public class AIRest : AIActionSet
             return true;
         }
 
-        if (destination.TryReserveVisit(character, out string failureReason))
+        if (destination.TryReserveVisit(actor, out string failureReason))
         {
             return true;
         }
@@ -97,13 +89,30 @@ public class AIRest : AIActionSet
         return false;
     }
 
-    public override void RefreshDestinationReservation(Character character, BuildableObject destination)
+    public override void RefreshDestinationReservation(CharacterActor actor, BuildableObject destination)
     {
-        destination?.RefreshVisitReservation(character);
+        destination?.RefreshVisitReservation(actor);
     }
 
-    public override void ReleaseDestinationReservation(Character character, BuildableObject destination)
+    public override void ReleaseDestinationReservation(CharacterActor actor, BuildableObject destination)
     {
-        destination?.ReleaseVisitReservation(character);
+        destination?.ReleaseVisitReservation(actor);
+    }
+
+    private static bool CanUseVisitorAction(CharacterActor actor)
+    {
+        if (actor == null) return false;
+
+        if (!actor.TryGetAbility(out AbilityShopping _))
+        {
+            return false;
+        }
+
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work))
+        {
+            return work.IsOffDuty;
+        }
+
+        return true;
     }
 }

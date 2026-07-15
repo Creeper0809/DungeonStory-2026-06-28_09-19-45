@@ -51,15 +51,16 @@ public static class OperatingDaySettlementDebugScenarios
         GameObject runtimeObject = new GameObject("OperatingDaySettlementRuntime_Test");
         OperatingDaySettlementRuntime runtime = runtimeObject.AddComponent<OperatingDaySettlementRuntime>();
 
-        Character customer = CreateCharacter("Customer_Test", CharacterType.Customer, "slime", 64f, 80f, false);
-        Character staff = CreateCharacter("Staff_Test", CharacterType.NPC, "orc", 35f, 20f, true);
+        CharacterActor customer = CreateCharacter("Customer_Test", CharacterType.Customer, "slime", 64f, 80f, false);
+        CharacterActor staff = CreateCharacter("Staff_Test", CharacterType.NPC, "orc", 20f, 20f, true);
         BuildableObject shop = CreateBuilding("Food Shop", false, 10);
         Facility warehouse = CreateWarehouse("Warehouse", 24);
 
         runtime.OnTriggerEvent(new OperatingDayStartedEvent(1));
-        runtime.OnTriggerEvent(new FacilityVisitEvent(customer, shop));
-        runtime.OnTriggerEvent(new FacilityRevenueEvent(customer, shop, 120));
-        runtime.OnTriggerEvent(new FacilityStockConsumedEvent(customer, shop, StockCategory.Food, 2));
+        runtime.OnTriggerEvent(new FacilityVisitEvent(CharacterActor.From(customer), shop));
+        runtime.OnTriggerEvent(new FacilityRevenueEvent(CharacterActor.From(customer), shop, 120));
+        runtime.OnTriggerEvent(new FacilityStockConsumedEvent(CharacterActor.From(customer), shop, StockCategory.Food, 2));
+        runtime.OnTriggerEvent(new FacilityCrimeEvent(CharacterActor.From(customer), shop, FacilityCrimeKind.Shoplifting, "Shoplifting test", 30));
         runtime.OnTriggerEvent(new FacilityRestockEvent(shop, 5, 0, "창고 재고 부족"));
         runtime.OnTriggerEvent(new StockSupplyEvent(new StockSupplyResult(true, StockCategory.Food, 5, 5, 20, "테스트 납품", string.Empty)));
         runtime.OnTriggerEvent(new OperatingDayEndedEvent(1));
@@ -76,6 +77,8 @@ public static class OperatingDaySettlementDebugScenarios
             && report.speciesVisits.Count == 1
             && report.stockConsumed.Count == 1
             && report.stockConsumed[0].amount == 2
+            && report.incidents.Count == 1
+            && report.incidents[0] == "Shoplifting test"
             && report.stockSupplyResults.Count == 1
             && report.warehouseStocks.Count >= 1
             && report.staffSummary.staffCount >= 1
@@ -112,7 +115,7 @@ public static class OperatingDaySettlementDebugScenarios
             && detail.Contains("설계도 획득");
     }
 
-    private static Character CreateCharacter(
+    private static CharacterActor CreateCharacter(
         string name,
         CharacterType type,
         string speciesTag,
@@ -121,7 +124,7 @@ public static class OperatingDaySettlementDebugScenarios
         bool withWork)
     {
         GameObject obj = new GameObject(name);
-        Character character = obj.AddComponent<Character>();
+        CharacterActor character = obj.AddComponent<CharacterActor>();
         if (withWork)
         {
             obj.AddComponent<AbilityWork>();
@@ -133,15 +136,15 @@ public static class OperatingDaySettlementDebugScenarios
         data.speciesTag = speciesTag;
         character.data = data;
         character.characterType = type;
-        character.stats ??= new Dictionary<Character.Condition, float>();
-        EnsureStat(character, Character.Condition.HUNGER, 100f);
-        EnsureStat(character, Character.Condition.FUN, 50f);
-        character.stats[Character.Condition.MOOD] = mood;
-        character.stats[Character.Condition.SLEEP] = sleep;
+        character.stats ??= new Dictionary<CharacterCondition, float>();
+        EnsureStat(character, CharacterCondition.HUNGER, 100f);
+        EnsureStat(character, CharacterCondition.FUN, 50f);
+        character.stats[CharacterCondition.MOOD] = mood;
+        character.stats[CharacterCondition.SLEEP] = sleep;
         return character;
     }
 
-    private static void EnsureStat(Character character, Character.Condition condition, float value)
+    private static void EnsureStat(CharacterActor character, CharacterCondition condition, float value)
     {
         if (!character.stats.ContainsKey(condition))
         {

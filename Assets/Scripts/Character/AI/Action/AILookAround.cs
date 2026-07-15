@@ -6,27 +6,35 @@ using Random = UnityEngine.Random;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/LookAround", order = 0)]
 public class AILookAround : AIActionSet
 {
+    private const float FallbackScore = 0.05f;
+
     [SerializeField] private float minWaitDuration = 0.5f;
     [SerializeField] private float maxWaitDuration = 1.2f;
 
     public override bool RequiresDestination => false;
 
-    public override bool CanStart(Character character)
+    public override bool CanStart(CharacterActor actor)
     {
-        return CanUseVisitLookAround(character);
+        return CanUseVisitLookAround(actor);
     }
 
-    public override void Execute(Character character)
+    public override float AdjustScore(CharacterActor actor, float baseScore)
     {
-        if (character == null) return;
+        return Mathf.Clamp01(Mathf.Min(baseScore, FallbackScore));
+    }
 
-        if (CanUseVisitLookAround(character)
-            && character.TryGetAbility(out AbilityShopping shopping))
+    public override void Execute(CharacterActor actor)
+    {
+        if (actor == null) return;
+
+        if (CanUseVisitLookAround(actor)
+            && actor.TryGetAbility(out AbilityShopping shopping))
         {
             shopping.RegisterLookAround();
         }
+
         float waitDuration = Random.Range(minWaitDuration, maxWaitDuration);
-        character.TryGetAbility(out AbilityMove move);
+        actor.TryGetAbility(out AbilityMove move);
         if (move != null)
         {
             if (move.StartIdleWander(waitDuration, 1, 6))
@@ -38,31 +46,26 @@ public class AILookAround : AIActionSet
             return;
         }
 
-        if (character.ai != null)
+        if (actor.Brain != null)
         {
-            character.ai.isBestActionEnd = true;
+            actor.Brain.isBestActionEnd = true;
         }
     }
 
     public override IReadOnlyList<BuildableObject> GetDestinationCandidates(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult)
     {
-        if (character == null)
-        {
-            return new List<BuildableObject>();
-        }
-
-        if (!CanUseVisitLookAround(character))
+        if (actor == null || !CanUseVisitLookAround(actor))
         {
             return new List<BuildableObject>();
         }
 
         List<BuildableObject> reachableBuildings = searchResult != null
             ? searchResult.GetAllReachableBuilding()
-            : character.GetReachableBuilding();
+            : actor.GetReachableBuilding();
 
-        Vector2Int currentPos = character.GetNowXY();
+        Vector2Int currentPos = actor.GetNowXY();
         return reachableBuildings
             .Where((building) => building != null
                 && !building.isDestroy
@@ -73,7 +76,7 @@ public class AILookAround : AIActionSet
     }
 
     public override BuildableObject SelectDestination(
-        Character character,
+        CharacterActor actor,
         IReadOnlyList<BuildableObject> candidates)
     {
         if (candidates == null || candidates.Count == 0)
@@ -84,16 +87,16 @@ public class AILookAround : AIActionSet
         return candidates.FirstOrDefault();
     }
 
-    public static bool CanUseVisitLookAround(Character character)
+    public static bool CanUseVisitLookAround(CharacterActor actor)
     {
-        if (character == null
-            || !character.TryGetAbility(out AbilityShopping shopping)
+        if (actor == null
+            || !actor.TryGetAbility(out AbilityShopping shopping)
             || !shopping.CanLookAround())
         {
             return false;
         }
 
-        return !CharacterWorkRoleUtility.TryGetWork(character, out AbilityWork work)
+        return !CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work)
             || work.IsOffDuty;
     }
 }

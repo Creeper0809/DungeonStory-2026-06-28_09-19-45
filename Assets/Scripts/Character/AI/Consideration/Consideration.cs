@@ -7,5 +7,5 @@ using Sirenix.OdinInspector;
 public abstract class Consideration : SerializedScriptableObject
 {
     public string considerationName;
-    public abstract float ScoreConsideration(Character character);
+    public abstract float ScoreConsideration(CharacterActor actor);
 }

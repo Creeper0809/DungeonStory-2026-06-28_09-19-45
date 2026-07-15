@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using VContainer;
 
 public enum CodexEntryCategory
 {
@@ -15,7 +16,8 @@ public enum CodexInfoSource
     System,
     Observation,
     Research,
-    Synthesis
+    Synthesis,
+    Evolution
 }
 
 public readonly struct CodexInfoLine
@@ -195,581 +197,98 @@ public struct CodexUpdatedEvent
 
 public static class CodexService
 {
-    public const string BreakthroughIntruderId = "intruder_breakthrough";
+    public const string BreakthroughIntruderId = CodexInvasionRecorder.BreakthroughIntruderId;
 
-    public static void ImportReferenceData(CodexState state, BlueprintResearchState researchState)
+    public static void ImportReferenceData(
+        CodexState state,
+        BlueprintResearchState researchState,
+        ICodexReferenceImporter referenceImporter)
     {
-        if (state == null)
+        if (referenceImporter == null)
         {
-            return;
+            throw new ArgumentNullException(nameof(referenceImporter));
         }
 
-        foreach (CharacterSpeciesSO species in Resources.LoadAll<CharacterSpeciesSO>("SO/Character/Species"))
-        {
-            ObserveSpecies(state, species, CodexInfoSource.System);
-        }
-
-        foreach (BuildingSO building in Resources.LoadAll<BuildingSO>("SO/Building/P1"))
-        {
-            ObserveFacility(state, building, CodexInfoSource.System);
-        }
-
-        ImportSynthesisRecipes(state, researchState);
-        SeedBreakthroughIntruder(state);
+        referenceImporter.Import(state, researchState);
     }
 
-    public static void ObserveCharacter(CodexState state, Character character)
+    public static void ObserveCharacter(CodexState state, CharacterActor actor)
     {
-        if (state == null || character == null)
-        {
-            return;
-        }
-
-        ObserveSpecies(state, character.data != null ? character.data.species : null, CodexInfoSource.Observation);
-        if (!string.IsNullOrWhiteSpace(character.SpeciesTag))
-        {
-            CodexEntryRecord entry = state.GetOrCreate(
-                CodexEntryCategory.Monster,
-                GetMonsterEntryId(character.SpeciesTag),
-                character.SpeciesTag);
-            entry.AddInfo($"관찰: {character.name} 방문", CodexInfoSource.Observation);
-        }
+        CodexObservationRecorder.ObserveCharacter(state, actor);
     }
 
     public static void ObserveSpecies(CodexState state, CharacterSpeciesSO species, CodexInfoSource source)
     {
-        if (state == null || species == null)
-        {
-            return;
-        }
-
-        string entryId = GetMonsterEntryId(species.speciesTag);
-        string title = !string.IsNullOrWhiteSpace(species.displayName)
-            ? species.displayName
-            : species.speciesTag;
-        CodexEntryRecord entry = state.GetOrCreate(CodexEntryCategory.Monster, entryId, title);
-
-        AddIfNotBlank(entry, species.shortDescription, source);
-        foreach (string preferred in species.preferredFacilityLabels ?? Array.Empty<string>())
-        {
-            AddIfNotBlank(entry, $"선호: {preferred}", source);
-        }
-
-        foreach (string disliked in species.dislikedEnvironmentLabels ?? Array.Empty<string>())
-        {
-            AddIfNotBlank(entry, $"기피: {disliked}", source);
-        }
-
-        AddIfNotBlank(entry, $"사고 위험: {species.incidentName}", source);
-        AddIfNotBlank(entry, species.incidentDescription, source);
-        if (species.incidentMitigatingRoles != FacilityRole.None)
-        {
-            entry.AddInfo($"완화 역할: {FormatFacilityRoles(species.incidentMitigatingRoles)}", source);
-        }
+        CodexObservationRecorder.ObserveSpecies(state, species, source);
     }
 
     public static void ObserveFacility(CodexState state, BuildableObject facility, CodexInfoSource source)
     {
-        if (facility == null)
-        {
-            return;
-        }
-
-        ObserveFacility(state, facility.BuildingData, source);
+        CodexObservationRecorder.ObserveFacility(state, facility, source);
     }
 
     public static void ObserveFacility(CodexState state, BuildingSO building, CodexInfoSource source)
     {
-        if (state == null || building == null)
-        {
-            return;
-        }
-
-        CodexEntryRecord entry = state.GetOrCreate(
-            CodexEntryCategory.Facility,
-            GetFacilityEntryId(building),
-            FacilityShopService.GetBuildingName(building));
-        FacilityData facility = building.Facility;
-        if (facility != null && facility.roles != FacilityRole.None)
-        {
-            entry.AddInfo($"역할: {FormatFacilityRoles(facility.roles)}", source);
-        }
-
-        if (facility != null && facility.supportedWorkTypes != FacilityWorkType.None)
-        {
-            entry.AddInfo($"작업: {FormatWorkTypes(facility.supportedWorkTypes)}", source);
-        }
-
-        if (facility != null && facility.capacity > 0)
-        {
-            entry.AddInfo($"수용: {facility.capacity}", source);
-        }
-
-        if (facility != null && facility.requiresStock)
-        {
-            entry.AddInfo($"재고 필요: 내부 재고 {facility.internalStockMax}", source);
-        }
-
-        if (facility != null && facility.preferredSpeciesTags != null && facility.preferredSpeciesTags.Length > 0)
-        {
-            entry.AddInfo($"시너지 대상: {string.Join(", ", facility.preferredSpeciesTags)}", source);
-        }
-
-        DefenseFacilityData defense = building.Defense;
-        if (defense != null && defense.IsDefenseFacility)
-        {
-            entry.AddInfo($"별 등급: {defense.star}성", source);
-            entry.AddInfo($"공격 컨셉: {FormatDefenseConcept(defense.concept)}", source);
-            entry.AddInfo($"발동 조건: {FormatTriggerTimings(defense.triggerTimings)}", source);
-            entry.AddInfo($"대상: {FormatTargetRule(defense.targetRule)}", source);
-            if (defense.SupportsTrigger(DefenseTriggerTiming.GuardResponse)
-                || defense.concept == DefenseAttackConcept.Guard)
-            {
-                entry.AddInfo("시너지 대상: 경비 직원", source);
-            }
-
-            foreach (string effect in FormatDefenseEffects(defense))
-            {
-                entry.AddInfo($"효과: {effect}", source);
-            }
-        }
+        CodexObservationRecorder.ObserveFacility(state, building, source);
     }
 
     public static void RecordDefenseObservation(CodexState state, DefenseActivationReport report)
     {
-        if (state == null || report == null)
-        {
-            return;
-        }
-
-        ObserveFacility(state, report.Facility, CodexInfoSource.Observation);
-        SeedBreakthroughIntruder(state);
-        foreach (string tag in report.EffectTags)
-        {
-            AddIntruderInfoFromEffectTag(state, tag);
-        }
-
-        if (report.MovementDelaySeconds > 0f)
-        {
-            AddInvasionInfo(state, "약점: 감속", CodexInfoSource.Observation);
-        }
-
-        if (report.TotalDamage > 0f)
-        {
-            AddInvasionInfo(state, "약점: 피해 누적", CodexInfoSource.Observation);
-        }
+        CodexInvasionRecorder.RecordDefenseObservation(state, report);
     }
 
     public static void RecordCombatReport(CodexState state, InvasionCombatReport report)
     {
-        if (state == null || report == null)
-        {
-            return;
-        }
-
-        SeedBreakthroughIntruder(state);
-        foreach (string observation in report.Observations ?? Array.Empty<string>())
-        {
-            AddInvasionInfo(state, NormalizeObservation(observation), CodexInfoSource.Observation);
-        }
-
-        foreach (BuildableObject facility in report.DamagedFacilities ?? Array.Empty<BuildableObject>())
-        {
-            ObserveFacility(state, facility, CodexInfoSource.Observation);
-            AddInvasionInfo(state, "성향: 시설 파괴 우선", CodexInfoSource.Observation);
-        }
+        CodexInvasionRecorder.RecordCombatReport(state, report);
     }
 
     public static void RecordFacilityDamage(CodexState state, BuildableObject facility)
     {
-        ObserveFacility(state, facility, CodexInfoSource.Observation);
-        AddInvasionInfo(state, "성향: 시설 파괴 우선", CodexInfoSource.Observation);
+        CodexInvasionRecorder.RecordFacilityDamage(state, facility);
     }
 
-    public static void RecordResearch(CodexState state, BlueprintResearchUnlockResult unlockResult, BlueprintResearchState researchState)
+    public static void RecordResearch(
+        CodexState state,
+        BlueprintResearchUnlockResult unlockResult,
+        BlueprintResearchState researchState,
+        IFacilitySynthesisRecipeQuery synthesisRecipeQuery,
+        IFacilityShopCatalog facilityShopCatalog)
     {
-        if (state == null)
-        {
-            return;
-        }
-
-        FacilityBlueprintSO blueprint = unlockResult.Blueprint;
-        if (blueprint != null)
-        {
-            foreach (int buildingId in blueprint.unlockBuildingIds ?? Array.Empty<int>())
-            {
-                ObserveFacility(state, FacilityShopService.FindBuildingById(buildingId), CodexInfoSource.Research);
-            }
-
-            foreach (int buildingId in blueprint.unlockBasicPurchaseBuildingIds ?? Array.Empty<int>())
-            {
-                BuildingSO building = FacilityShopService.FindBuildingById(buildingId);
-                ObserveFacility(state, building, CodexInfoSource.Research);
-                AddFacilityInfo(state, building, "기본 구매: 연구 완료 후 구매 가능", CodexInfoSource.Research);
-            }
-        }
-
-        ImportSynthesisRecipes(state, researchState);
+        CodexRecipeRecorder.RecordResearch(
+            state,
+            unlockResult,
+            researchState,
+            synthesisRecipeQuery,
+            facilityShopCatalog);
     }
 
-    public static void RecordSynthesis(CodexState state, FacilitySynthesisResult result, BlueprintResearchState researchState)
+    public static void RecordSynthesis(
+        CodexState state,
+        FacilitySynthesisResult result,
+        BlueprintResearchState researchState,
+        IFacilitySynthesisRecipeQuery synthesisRecipeQuery)
     {
-        if (state == null || result.Recipe == null)
-        {
-            return;
-        }
-
-        ObserveFacility(state, result.ResultBuilding, CodexInfoSource.Synthesis);
-        AddRecipeInfo(state, result.Recipe, true, CodexInfoSource.Synthesis);
-        ImportSynthesisRecipes(state, researchState);
+        CodexRecipeRecorder.RecordSynthesis(state, result, researchState, synthesisRecipeQuery);
     }
 
-    public static void ImportSynthesisRecipes(CodexState state, BlueprintResearchState researchState)
+    public static void RecordEvolution(CodexState state, FacilityEvolutionResult result)
     {
-        if (state == null)
-        {
-            return;
-        }
+        CodexEvolutionRecorder.Record(state, result);
+    }
 
-        foreach (FacilitySynthesisRecipeSO recipe in FacilitySynthesisService.LoadAllRecipes())
-        {
-            bool visible = FacilitySynthesisService.IsRecipeVisible(recipe, researchState);
-            if (visible)
-            {
-                AddRecipeInfo(state, recipe, true, CodexInfoSource.System);
-            }
-            else if (recipe.IsSpecial)
-            {
-                AddSpecialRecipeHint(state, recipe);
-            }
-        }
+    public static void ImportSynthesisRecipes(
+        CodexState state,
+        BlueprintResearchState researchState,
+        IFacilitySynthesisRecipeQuery synthesisRecipeQuery)
+    {
+        CodexRecipeRecorder.ImportSynthesisRecipes(state, researchState, synthesisRecipeQuery);
     }
 
     public static void SeedBreakthroughIntruder(CodexState state)
     {
-        if (state == null)
-        {
-            return;
-        }
-
-        CodexEntryRecord entry = state.GetOrCreate(
-            CodexEntryCategory.Invasion,
-            BreakthroughIntruderId,
-            "돌파형 침입자");
-        entry.AddInfo("주의: 사장 캐릭터 처치", CodexInfoSource.System);
-        entry.AddInfo("주의: 사장방 돌파", CodexInfoSource.System);
-        entry.AddInfo("성향: 시간이 지날수록 사장 위치 추적", CodexInfoSource.System);
-        entry.AddInfo("저항: 공포 효과", CodexInfoSource.System);
+        CodexInvasionRecorder.SeedBreakthroughIntruder(state);
     }
 
-    private static void AddRecipeInfo(
-        CodexState state,
-        FacilitySynthesisRecipeSO recipe,
-        bool reveal,
-        CodexInfoSource source)
-    {
-        if (state == null || recipe == null || !recipe.HasValidData)
-        {
-            return;
-        }
-
-        string materials = string.Join(" + ", recipe.materialBuildings.Select(FacilityShopService.GetBuildingName));
-        string resultName = FacilityShopService.GetBuildingName(recipe.resultBuilding);
-        string line = reveal
-            ? $"조합식: {materials} -> {resultName}"
-            : BuildSpecialRecipeHint(recipe);
-
-        AddFacilityInfo(state, recipe.resultBuilding, line, source);
-        foreach (BuildingSO material in recipe.materialBuildings)
-        {
-            AddFacilityInfo(state, material, line, source);
-        }
-    }
-
-    private static void AddSpecialRecipeHint(CodexState state, FacilitySynthesisRecipeSO recipe)
-    {
-        if (state == null || recipe == null || !recipe.HasValidData)
-        {
-            return;
-        }
-
-        string hintId = $"special_recipe_hint:{recipe.recipeId}";
-        CodexEntryRecord entry = state.GetOrCreate(
-            CodexEntryCategory.Facility,
-            hintId,
-            "미확인 특수 조합식");
-        entry.AddInfo(BuildSpecialRecipeHint(recipe), CodexInfoSource.System);
-    }
-
-    private static string BuildSpecialRecipeHint(FacilitySynthesisRecipeSO recipe)
-    {
-        string concept = recipe.resultBuilding != null && recipe.resultBuilding.Defense != null
-            ? FormatDefenseConcept(recipe.resultBuilding.Defense.concept)
-            : "특수";
-        return $"특수 조합식 힌트: {concept} 계열 연구 필요";
-    }
-
-    private static void AddFacilityInfo(CodexState state, BuildingSO building, string info, CodexInfoSource source)
-    {
-        if (building == null)
-        {
-            return;
-        }
-
-        state.AddInfo(
-            CodexEntryCategory.Facility,
-            GetFacilityEntryId(building),
-            FacilityShopService.GetBuildingName(building),
-            info,
-            source);
-    }
-
-    private static void AddInvasionInfo(CodexState state, string info, CodexInfoSource source)
-    {
-        if (state == null || string.IsNullOrWhiteSpace(info))
-        {
-            return;
-        }
-
-        SeedBreakthroughIntruder(state);
-        state.AddInfo(
-            CodexEntryCategory.Invasion,
-            BreakthroughIntruderId,
-            "돌파형 침입자",
-            info,
-            source);
-    }
-
-    private static void AddIntruderInfoFromEffectTag(CodexState state, string tag)
-    {
-        if (string.IsNullOrWhiteSpace(tag))
-        {
-            return;
-        }
-
-        string normalized = tag.Trim();
-        if (normalized.Contains("감속") || normalized.Contains("속박"))
-        {
-            AddInvasionInfo(state, "약점: 감속", CodexInfoSource.Observation);
-        }
-
-        if (normalized.Contains("경비"))
-        {
-            AddInvasionInfo(state, "약점: 근접 교전", CodexInfoSource.Observation);
-        }
-
-        if (normalized.Contains("부식"))
-        {
-            AddInvasionInfo(state, "약점: 방어력 감소", CodexInfoSource.Observation);
-        }
-
-        if (normalized.Contains("축전"))
-        {
-            AddInvasionInfo(state, "약점: 축전 연계", CodexInfoSource.Observation);
-        }
-
-        if (normalized.Contains("연소"))
-        {
-            AddInvasionInfo(state, "약점: 지속 피해", CodexInfoSource.Observation);
-        }
-    }
-
-    private static string NormalizeObservation(string observation)
-    {
-        if (string.IsNullOrWhiteSpace(observation))
-        {
-            return string.Empty;
-        }
-
-        string normalized = observation.Trim();
-        if (normalized.Contains("감속"))
-        {
-            return "약점: 감속";
-        }
-
-        if (normalized.Contains("경비"))
-        {
-            return "약점: 근접 교전";
-        }
-
-        if (normalized.Contains("부식"))
-        {
-            return "약점: 방어력 감소";
-        }
-
-        if (normalized.Contains("축전"))
-        {
-            return "약점: 축전 연계";
-        }
-
-        if (normalized.Contains("연소"))
-        {
-            return "약점: 지속 피해";
-        }
-
-        if (normalized.Contains("직접 피해"))
-        {
-            return "약점: 직접 피해";
-        }
-
-        return normalized.Replace("관찰:", "관찰:");
-    }
-
-    private static void AddIfNotBlank(CodexEntryRecord entry, string text, CodexInfoSource source)
-    {
-        if (!string.IsNullOrWhiteSpace(text))
-        {
-            entry.AddInfo(text, source);
-        }
-    }
-
-    private static string GetMonsterEntryId(string speciesTag)
-    {
-        return $"monster:{(string.IsNullOrWhiteSpace(speciesTag) ? "unknown" : speciesTag)}";
-    }
-
-    private static string GetFacilityEntryId(BuildingSO building)
-    {
-        return building != null ? $"facility:{building.id}" : "facility:unknown";
-    }
-
-    private static string FormatFacilityRoles(FacilityRole roles)
-    {
-        return string.Join(", ", Enum.GetValues(typeof(FacilityRole))
-            .Cast<FacilityRole>()
-            .Where((role) => role != FacilityRole.None && (roles & role) != 0)
-            .Select(FormatFacilityRole));
-    }
-
-    private static string FormatWorkTypes(FacilityWorkType workTypes)
-    {
-        return string.Join(", ", Enum.GetValues(typeof(FacilityWorkType))
-            .Cast<FacilityWorkType>()
-            .Where((workType) => workType != FacilityWorkType.None && (workTypes & workType) != 0)
-            .Select(FormatWorkType));
-    }
-
-    private static string FormatFacilityRole(FacilityRole role)
-    {
-        return role switch
-        {
-            FacilityRole.Meal => "식사",
-            FacilityRole.Purchase => "구매",
-            FacilityRole.Rest => "휴식",
-            FacilityRole.Training => "훈련",
-            FacilityRole.Research => "연구",
-            FacilityRole.Mana => "마력",
-            FacilityRole.Logistics => "물류",
-            _ => role.ToString()
-        };
-    }
-
-    private static string FormatWorkType(FacilityWorkType workType)
-    {
-        return workType switch
-        {
-            FacilityWorkType.Operate => "근무",
-            FacilityWorkType.Restock => "보충",
-            FacilityWorkType.Repair => "수리",
-            FacilityWorkType.Clean => "청소",
-            FacilityWorkType.Research => "연구",
-            FacilityWorkType.Guard => "경비",
-            FacilityWorkType.Rescue => "구조",
-            FacilityWorkType.Rest => "휴식",
-            _ => workType.ToString()
-        };
-    }
-
-    private static string FormatDefenseConcept(DefenseAttackConcept concept)
-    {
-        return concept switch
-        {
-            DefenseAttackConcept.Physical => "물리",
-            DefenseAttackConcept.Poison => "독",
-            DefenseAttackConcept.Fire => "화염",
-            DefenseAttackConcept.Lightning => "번개",
-            DefenseAttackConcept.Ice => "냉기",
-            DefenseAttackConcept.Guard => "경비",
-            _ => "없음"
-        };
-    }
-
-    private static string FormatTriggerTimings(DefenseTriggerTiming timings)
-    {
-        if (timings == DefenseTriggerTiming.None)
-        {
-            return "없음";
-        }
-
-        return string.Join(", ", Enum.GetValues(typeof(DefenseTriggerTiming))
-            .Cast<DefenseTriggerTiming>()
-            .Where((timing) => timing != DefenseTriggerTiming.None && (timings & timing) != 0)
-            .Select((timing) => timing switch
-            {
-                DefenseTriggerTiming.OnEnter => "입장 시",
-                DefenseTriggerTiming.Periodic => "머무는 동안",
-                DefenseTriggerTiming.Cooldown => "쿨타임",
-                DefenseTriggerTiming.GuardResponse => "경비 반응",
-                _ => timing.ToString()
-            }));
-    }
-
-    private static string FormatTargetRule(DefenseTargetRule targetRule)
-    {
-        return targetRule switch
-        {
-            DefenseTargetRule.EnteringIntruder => "입장한 침입자",
-            DefenseTargetRule.IntrudersInRoom => "방 안 침입자",
-            DefenseTargetRule.AllIntrudersInRoom => "방 안 모든 침입자",
-            DefenseTargetRule.GuardTarget => "경비 대상",
-            _ => targetRule.ToString()
-        };
-    }
-
-    private static IEnumerable<string> FormatDefenseEffects(DefenseFacilityData defense)
-    {
-        IEnumerable<DefenseEffectData> effectData = defense.effects ?? Array.Empty<DefenseEffectData>();
-        if (defense.effectAssets != null && defense.effectAssets.Length > 0)
-        {
-            return defense.effectAssets
-                .Where((effect) => effect != null)
-                .Select((effect) => FormatEffect(effect.Kind, effect.Amount, effect.Duration, effect.Stacks, effect.LogTag));
-        }
-
-        return effectData.Select((effect) => FormatEffect(effect.kind, effect.amount, effect.duration, effect.stacks, effect.logTag));
-    }
-
-    private static string FormatEffect(DefenseEffectKind kind, float amount, float duration, int stacks, string tag)
-    {
-        string name = kind switch
-        {
-            DefenseEffectKind.Damage => "피해",
-            DefenseEffectKind.Corrosion => "방어력 감소",
-            DefenseEffectKind.Burn => "지속 피해",
-            DefenseEffectKind.Charge => "축전",
-            DefenseEffectKind.Slow => "감속",
-            DefenseEffectKind.GuardAttack => "근접 교전",
-            _ => kind.ToString()
-        };
-
-        List<string> parts = new List<string> { name };
-        if (amount > 0f)
-        {
-            parts.Add($"{amount:0.#}");
-        }
-
-        if (duration > 0f)
-        {
-            parts.Add($"{duration:0.#}초");
-        }
-
-        if (stacks > 1)
-        {
-            parts.Add($"{stacks}중첩");
-        }
-
-        return string.Join(" ", parts);
-    }
 }
 
 public class CodexRuntime :
@@ -780,25 +299,42 @@ public class CodexRuntime :
     UtilEventListener<InvasionFacilityDamagedEvent>,
     UtilEventListener<InvasionSpawnedEvent>,
     UtilEventListener<BlueprintResearchCompletedEvent>,
-    UtilEventListener<FacilitySynthesisCompletedEvent>
+    UtilEventListener<FacilitySynthesisCompletedEvent>,
+    UtilEventListener<FacilityEvolutionCompletedEvent>
 {
     [SerializeField] private bool importReferenceDataOnAwake = true;
 
     private readonly CodexState state = new CodexState();
+    private IBlueprintResearchStateService blueprintResearchStateService;
+    private ICodexReferenceImporter referenceImporter;
+    private IFacilitySynthesisRecipeQuery synthesisRecipeQuery;
+    private IFacilityShopCatalog facilityShopCatalog;
 
-    public static CodexRuntime Instance => FindFirstObjectByType<CodexRuntime>();
     public CodexState State => state;
+
+    [Inject]
+    public void ConstructCodexRuntime(
+        IBlueprintResearchStateService blueprintResearchStateService,
+        ICodexReferenceImporter referenceImporter,
+        IFacilitySynthesisRecipeQuery synthesisRecipeQuery,
+        IFacilityShopCatalog facilityShopCatalog)
+    {
+        this.blueprintResearchStateService = blueprintResearchStateService
+            ?? throw new ArgumentNullException(nameof(blueprintResearchStateService));
+        this.referenceImporter = referenceImporter
+            ?? throw new ArgumentNullException(nameof(referenceImporter));
+        this.synthesisRecipeQuery = synthesisRecipeQuery
+            ?? throw new ArgumentNullException(nameof(synthesisRecipeQuery));
+        this.facilityShopCatalog = facilityShopCatalog
+            ?? throw new ArgumentNullException(nameof(facilityShopCatalog));
+    }
 
     public BlueprintResearchState ResearchState
     {
-        get
-        {
-            BlueprintResearchRuntime researchRuntime = BlueprintResearchRuntime.Instance;
-            return researchRuntime != null ? researchRuntime.State : null;
-        }
+        get { return ResolveResearchStateService().GetState(); }
     }
 
-    private void Awake()
+    private void Start()
     {
         if (importReferenceDataOnAwake)
         {
@@ -808,10 +344,34 @@ public class CodexRuntime :
 
     public void ImportReferenceData()
     {
-        CodexService.ImportReferenceData(state, ResearchState);
+        CodexService.ImportReferenceData(state, ResearchState, ResolveReferenceImporter());
         CodexUpdatedEvent.Trigger(CodexEntryCategory.Facility, "reference");
         CodexUpdatedEvent.Trigger(CodexEntryCategory.Monster, "reference");
         CodexUpdatedEvent.Trigger(CodexEntryCategory.Invasion, CodexService.BreakthroughIntruderId);
+    }
+
+    private IBlueprintResearchStateService ResolveResearchStateService()
+    {
+        return blueprintResearchStateService
+            ?? throw new InvalidOperationException($"{nameof(CodexRuntime)} requires {nameof(IBlueprintResearchStateService)} injection.");
+    }
+
+    private ICodexReferenceImporter ResolveReferenceImporter()
+    {
+        return referenceImporter
+            ?? throw new InvalidOperationException($"{nameof(CodexRuntime)} requires {nameof(ICodexReferenceImporter)} injection.");
+    }
+
+    private IFacilitySynthesisRecipeQuery ResolveSynthesisRecipeQuery()
+    {
+        return synthesisRecipeQuery
+            ?? throw new InvalidOperationException($"{nameof(CodexRuntime)} requires {nameof(IFacilitySynthesisRecipeQuery)} injection.");
+    }
+
+    private IFacilityShopCatalog ResolveFacilityShopCatalog()
+    {
+        return facilityShopCatalog
+            ?? throw new InvalidOperationException($"{nameof(CodexRuntime)} requires {nameof(IFacilityShopCatalog)} injection.");
     }
 
     public IReadOnlyList<CodexEntrySnapshot> GetEntries(CodexEntryCategory category)
@@ -821,9 +381,9 @@ public class CodexRuntime :
 
     public void OnTriggerEvent(FacilityVisitEvent eventType)
     {
-        CodexService.ObserveCharacter(state, eventType.visitor);
+        CodexService.ObserveCharacter(state, eventType.visitorActor);
         CodexService.ObserveFacility(state, eventType.facility, CodexInfoSource.Observation);
-        CodexUpdatedEvent.Trigger(CodexEntryCategory.Monster, eventType.visitor != null ? eventType.visitor.SpeciesTag : string.Empty);
+        CodexUpdatedEvent.Trigger(CodexEntryCategory.Monster, eventType.visitorActor != null ? eventType.visitorActor.Identity.SpeciesTag : string.Empty);
         CodexUpdatedEvent.Trigger(CodexEntryCategory.Facility, eventType.facility != null ? eventType.facility.id.ToString() : string.Empty);
     }
 
@@ -849,20 +409,31 @@ public class CodexRuntime :
     public void OnTriggerEvent(InvasionSpawnedEvent eventType)
     {
         CodexService.SeedBreakthroughIntruder(state);
-        CodexService.ObserveCharacter(state, eventType.intruder);
+        CodexService.ObserveCharacter(state, eventType.intruderActor);
         CodexUpdatedEvent.Trigger(CodexEntryCategory.Invasion, CodexService.BreakthroughIntruderId);
     }
 
     public void OnTriggerEvent(BlueprintResearchCompletedEvent eventType)
     {
-        CodexService.RecordResearch(state, eventType.unlockResult, ResearchState);
+        CodexService.RecordResearch(
+            state,
+            eventType.unlockResult,
+            ResearchState,
+            ResolveSynthesisRecipeQuery(),
+            ResolveFacilityShopCatalog());
         CodexUpdatedEvent.Trigger(CodexEntryCategory.Facility, "research");
     }
 
     public void OnTriggerEvent(FacilitySynthesisCompletedEvent eventType)
     {
-        CodexService.RecordSynthesis(state, eventType.result, ResearchState);
+        CodexService.RecordSynthesis(state, eventType.result, ResearchState, ResolveSynthesisRecipeQuery());
         CodexUpdatedEvent.Trigger(CodexEntryCategory.Facility, "synthesis");
+    }
+
+    public void OnTriggerEvent(FacilityEvolutionCompletedEvent eventType)
+    {
+        CodexService.RecordEvolution(state, eventType.result);
+        CodexUpdatedEvent.Trigger(CodexEntryCategory.Facility, "evolution");
     }
 
     private void OnEnable()
@@ -874,6 +445,7 @@ public class CodexRuntime :
         this.EventStartListening<InvasionSpawnedEvent>();
         this.EventStartListening<BlueprintResearchCompletedEvent>();
         this.EventStartListening<FacilitySynthesisCompletedEvent>();
+        this.EventStartListening<FacilityEvolutionCompletedEvent>();
     }
 
     private void OnDisable()
@@ -885,5 +457,6 @@ public class CodexRuntime :
         this.EventStopListening<InvasionSpawnedEvent>();
         this.EventStopListening<BlueprintResearchCompletedEvent>();
         this.EventStopListening<FacilitySynthesisCompletedEvent>();
+        this.EventStopListening<FacilityEvolutionCompletedEvent>();
     }
 }

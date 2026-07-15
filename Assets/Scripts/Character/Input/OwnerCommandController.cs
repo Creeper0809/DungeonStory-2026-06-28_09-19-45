@@ -1,22 +1,52 @@
+using System;
 using UnityEngine;
+using VContainer;
 
 public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedEvent>
 {
     [SerializeField] private Camera targetCamera;
     [SerializeField] private LayerMask commandTargetMask = ~0;
 
-    private Character selectedCharacter;
+    private IStaffDiscontentRuntimeService staffDiscontentRuntimeService;
+    private IMainCameraProvider mainCameraProvider;
+    private IPlayerInputReader inputReader;
+    private IWorldPointerRaycaster pointerRaycaster;
+    private IUiPointerBlocker uiPointerBlocker;
+    private CharacterActor selectedActor;
 
-    public Character SelectedCharacter => selectedCharacter;
+    public CharacterActor SelectedActor => selectedActor;
+
+    private IStaffDiscontentRuntimeService StaffDiscontentRuntimeService => staffDiscontentRuntimeService
+        ?? throw new InvalidOperationException($"{nameof(OwnerCommandController)} requires {nameof(IStaffDiscontentRuntimeService)} injection.");
+
+    [Inject]
+    public void ConstructOwnerCommandController(
+        IStaffDiscontentRuntimeService staffDiscontentRuntimeService,
+        IMainCameraProvider mainCameraProvider,
+        IPlayerInputReader inputReader,
+        IWorldPointerRaycaster pointerRaycaster,
+        IUiPointerBlocker uiPointerBlocker)
+    {
+        this.staffDiscontentRuntimeService = staffDiscontentRuntimeService
+            ?? throw new ArgumentNullException(nameof(staffDiscontentRuntimeService));
+        this.mainCameraProvider = mainCameraProvider
+            ?? throw new ArgumentNullException(nameof(mainCameraProvider));
+        this.inputReader = inputReader
+            ?? throw new ArgumentNullException(nameof(inputReader));
+        this.pointerRaycaster = pointerRaycaster
+            ?? throw new ArgumentNullException(nameof(pointerRaycaster));
+        this.uiPointerBlocker = uiPointerBlocker
+            ?? throw new ArgumentNullException(nameof(uiPointerBlocker));
+    }
 
     private void Update()
     {
-        if (selectedCharacter == null || selectedCharacter.IsDead)
+        if (selectedActor == null || (selectedActor.Stats != null && selectedActor.Stats.IsDead))
         {
             return;
         }
 
-        if (Input.GetMouseButtonDown(1))
+        if (RequireInputReader().GetMouseButtonDown(1) && !RequireUiPointerBlocker().IsPointerOverUi())
         {
             TryIssuePriorityWorkCommand();
         }
@@ -24,90 +54,140 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
 
     private void TryIssuePriorityWorkCommand()
     {
-        Camera camera = targetCamera != null ? targetCamera : Camera.main;
+        Camera camera = targetCamera != null ? targetCamera : RequireMainCameraProvider().Camera;
         if (camera == null) return;
 
-        Vector3 mouseWorld = camera.ScreenToWorldPoint(Input.mousePosition);
-        RaycastHit2D hit = Physics2D.Raycast(mouseWorld, Vector2.zero, 0f, commandTargetMask);
-        if (!hit.collider) return;
-
-        Character targetCharacter = hit.collider.GetComponentInParent<Character>();
-        if (targetCharacter != null && targetCharacter != selectedCharacter)
+        if (!RequirePointerRaycaster().TryRaycast(camera, commandTargetMask, out RaycastHit2D hit))
         {
-            TryIssueSuppressCommand(targetCharacter);
+            return;
+        }
+
+        CharacterActor targetActor = hit.collider.GetComponentInParent<CharacterActor>();
+        if (targetActor != null && targetActor != selectedActor)
+        {
+            TryIssueSuppressCommand(targetActor, out _);
             return;
         }
 
         BuildableObject target = hit.collider.GetComponentInParent<BuildableObject>();
-        if (target == null) return;
-
-        if (!selectedCharacter.TryGetAbility(out AbilityWork work))
+        if (target != null)
         {
-            NoticeFeedEvent.Trigger("선택한 캐릭터가 작업 능력을 가지고 있지 않습니다.", NoticeFeedEvent.Grade.WARNING);
-            return;
+            TryIssuePriorityWorkCommand(target, out _);
+        }
+    }
+
+    public bool TrySelectActor(CharacterActor actor, out string message)
+    {
+        if (actor == null || (actor.Stats != null && actor.Stats.IsDead))
+        {
+            message = "명령할 직원을 선택할 수 없습니다.";
+            return false;
         }
 
-        if (!WorkCommandResolver.TryResolveFacilityCommand(selectedCharacter, target, out FacilityWorkType workType, out string errorMessage))
+        if (!actor.TryGetAbility(out AbilityWork _))
         {
-            selectedCharacter.AddLog($"우선 지정 실패: {errorMessage}");
+            message = "선택한 캐릭터는 작업 능력이 없습니다.";
+            return false;
+        }
+
+        selectedActor = actor;
+        message = $"명령 대상 선택: {actor.name}";
+        return true;
+    }
+
+    public bool TryIssuePriorityWorkCommand(BuildableObject target, out string message)
+    {
+        if (selectedActor == null || (selectedActor.Stats != null && selectedActor.Stats.IsDead))
+        {
+            message = "먼저 명령할 직원을 선택하세요.";
+            return false;
+        }
+
+        if (target == null || target.isDestroy)
+        {
+            message = "명령할 시설을 선택할 수 없습니다.";
+            return false;
+        }
+
+        if (!selectedActor.TryGetAbility(out AbilityWork work))
+        {
+            message = "선택한 캐릭터는 작업 능력이 없습니다.";
+            NoticeFeedEvent.Trigger(message, NoticeFeedEvent.Grade.WARNING);
+            return false;
+        }
+
+        if (!WorkCommandResolver.TryResolveFacilityCommand(selectedActor, target, out FacilityWorkType workType, out string errorMessage))
+        {
+            selectedActor.AddLog($"우선 지정 실패: {errorMessage}");
             NoticeFeedEvent.Trigger(errorMessage, NoticeFeedEvent.Grade.WARNING);
-            return;
+            message = errorMessage;
+            return false;
         }
 
-        GridPathSearchResult searchResult = selectedCharacter.ai != null
-            ? selectedCharacter.ai.GetPathSearch(selectedCharacter)
+        GridPathSearchResult searchResult = selectedActor.Brain != null
+            ? selectedActor.Brain.GetPathSearch(selectedActor)
             : null;
 
         if (!work.TrySetPriorityWorkTarget(target, workType, searchResult, out errorMessage))
         {
-            selectedCharacter.AddLog($"우선 지정 실패: {errorMessage}");
+            selectedActor.AddLog($"우선 지정 실패: {errorMessage}");
             NoticeFeedEvent.Trigger(errorMessage, NoticeFeedEvent.Grade.WARNING);
-            return;
+            message = errorMessage;
+            return false;
         }
 
-        NoticeFeedEvent.Trigger(
-            $"{selectedCharacter.name}: {target.name} {WorkTaskCatalog.GetDisplayName(workType)} 우선 지정",
-            NoticeFeedEvent.Grade.NONE);
-        selectedCharacter.ai?.ClearPathSearchCache();
+        message = $"{selectedActor.name}: {target.name} {WorkTaskCatalog.GetDisplayName(workType)} 우선 지정";
+        NoticeFeedEvent.Trigger(message, NoticeFeedEvent.Grade.NONE);
+        selectedActor.Brain?.ClearPathSearchCache();
+        return true;
     }
 
-    private void TryIssueSuppressCommand(Character target)
+    public bool TryIssueSuppressCommand(CharacterActor target, out string message)
     {
-        if (!WorkCommandResolver.IsSuppressTarget(target))
+        if (selectedActor == null || (selectedActor.Stats != null && selectedActor.Stats.IsDead))
         {
-            return;
+            message = "먼저 명령할 직원을 선택하세요.";
+            return false;
         }
 
-        if (!selectedCharacter.TryGetAbility(out AbilityWork work))
+        if (!WorkCommandResolver.IsSuppressTarget(target, StaffDiscontentRuntimeService.IsRebellionTarget))
         {
-            string message = "선택한 캐릭터가 작업 능력을 가지고 있지 않습니다.";
-            selectedCharacter.AddLog($"우선 지정 실패: {message}");
+            message = "제압할 수 있는 반란 대상이 아닙니다.";
+            return false;
+        }
+
+        if (!selectedActor.TryGetAbility(out AbilityWork work))
+        {
+            message = "선택한 캐릭터는 작업 능력이 없습니다.";
+            selectedActor.AddLog($"우선 지정 실패: {message}");
             NoticeFeedEvent.Trigger(message, NoticeFeedEvent.Grade.WARNING);
-            return;
+            return false;
         }
 
-        GridPathSearchResult searchResult = selectedCharacter.ai != null
-            ? selectedCharacter.ai.GetPathSearch(selectedCharacter)
+        GridPathSearchResult searchResult = selectedActor.Brain != null
+            ? selectedActor.Brain.GetPathSearch(selectedActor)
             : null;
 
         if (!work.TrySetPrioritySuppressTarget(target, searchResult, out string errorMessage))
         {
-            selectedCharacter.AddLog($"우선 지정 실패: {errorMessage}");
+            selectedActor.AddLog($"우선 지정 실패: {errorMessage}");
             NoticeFeedEvent.Trigger(errorMessage, NoticeFeedEvent.Grade.WARNING);
-            return;
+            message = errorMessage;
+            return false;
         }
 
-        NoticeFeedEvent.Trigger(
-            $"{selectedCharacter.name}: {target.name} 제압 우선 지정",
-            NoticeFeedEvent.Grade.NONE);
-        selectedCharacter.ai?.ClearPathSearchCache();
+        message = $"{selectedActor.name}: {target.name} 제압 우선 지정";
+        NoticeFeedEvent.Trigger(message, NoticeFeedEvent.Grade.NONE);
+        selectedActor.Brain?.ClearPathSearchCache();
+        return true;
     }
 
     public void OnTriggerEvent(InfoFeedEvent eventType)
     {
-        if (eventType.infoable is Character character && character.TryGetAbility(out AbilityWork _))
+        CharacterActor actor = eventType.infoable as CharacterActor;
+        if (actor != null)
         {
-            selectedCharacter = character;
+            TrySelectActor(actor, out _);
         }
     }
 
@@ -119,5 +199,29 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
     private void OnDisable()
     {
         this.EventStopListening<InfoFeedEvent>();
+    }
+
+    private IMainCameraProvider RequireMainCameraProvider()
+    {
+        return mainCameraProvider
+            ?? throw new InvalidOperationException($"{nameof(OwnerCommandController)} requires {nameof(IMainCameraProvider)} injection.");
+    }
+
+    private IPlayerInputReader RequireInputReader()
+    {
+        return inputReader
+            ?? throw new InvalidOperationException($"{nameof(OwnerCommandController)} requires {nameof(IPlayerInputReader)} injection.");
+    }
+
+    private IWorldPointerRaycaster RequirePointerRaycaster()
+    {
+        return pointerRaycaster
+            ?? throw new InvalidOperationException($"{nameof(OwnerCommandController)} requires {nameof(IWorldPointerRaycaster)} injection.");
+    }
+
+    private IUiPointerBlocker RequireUiPointerBlocker()
+    {
+        return uiPointerBlocker
+            ?? throw new InvalidOperationException($"{nameof(OwnerCommandController)} requires {nameof(IUiPointerBlocker)} injection.");
     }
 }

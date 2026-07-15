@@ -5,10 +5,10 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Consideration/ShoppingCount", order = 0)]
 public class ConsiderationShoppingCount : Consideration
 {
-    public override float ScoreConsideration(Character character)
+    public override float ScoreConsideration(CharacterActor actor)
     {
         AbilityShopping shopping = null;
-        character?.TryGetAbility(out shopping);
+        actor?.TryGetAbility(out shopping);
         if (shopping == null || shopping.visitCount <= 0)
         {
             return 0f;

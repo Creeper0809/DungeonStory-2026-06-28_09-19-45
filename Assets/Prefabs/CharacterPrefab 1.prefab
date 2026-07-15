@@ -104,10 +104,22 @@ GameObject:
   - component: {fileID: 1344862758937822444}
   - component: {fileID: 8424189592642634456}
   - component: {fileID: 7619449864653709574}
+  - component: {fileID: 741348672143001472}
   - component: {fileID: 1405664166490629076}
   - component: {fileID: 8697537959367931838}
   - component: {fileID: 7198535206734976458}
   - component: {fileID: 8079867970891759040}
+  - component: {fileID: 274907766505764320}
+  - component: {fileID: 391273409032137216}
+  - component: {fileID: 899043239118184320}
+  - component: {fileID: 426781603144695872}
+  - component: {fileID: 379084862358093888}
+  - component: {fileID: 2041462126563446826}
+  - component: {fileID: 4240505355425386822}
+  - component: {fileID: 2756390083600786588}
+  - component: {fileID: 7004039133299571103}
+  - component: {fileID: 7322711153434796532}
+  - component: {fileID: 1215785365045945190}
   m_Layer: 0
   m_Name: CharacterPrefab 1
   m_TagString: Character
@@ -246,26 +258,47 @@ MonoBehaviour:
     Prefab: {fileID: 0}
     PrefabModificationsReferencedUnityObjects: []
     PrefabModifications: []
-    SerializationNodes:
-    - Name: stats
-      Entry: 6
-      Data: 
-    - Name: OnStatChange
-      Entry: 6
-      Data: 
-  data: {fileID: 11400000, guid: 92781acb830918b4b909e14fba2fc478, type: 2}
-  visualRoot: {fileID: 3956873415411822848}
-  spriteRenderer: {fileID: 2439539581498229512}
-  autoAlignVisualToFeet: 1
-  log: []
+    SerializationNodes: []
   noExit: {fileID: 0}
-  ai: {fileID: 0}
-  maxHealth: 100
-  currentHealth: 100
-  injurySeverity: 0
-  lifecycleState: 0
-  state: 0
+  identity: {fileID: 0}
+  abilityCache: {fileID: 0}
+  characterStats: {fileID: 0}
+  visual: {fileID: 0}
+  lifecycle: {fileID: 0}
+  characterLog: {fileID: 0}
+  blackboard: {fileID: 0}
+  personaRuntime: {fileID: 0}
+  dialogueRuntime: {fileID: 0}
+  socialMemory: {fileID: 0}
+  behaviorTree: {fileID: 0}
+--- !u!114 &741348672143001472
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc6a8254fadf4c03954390ade8b3d8ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes:
+    - Name: profile
+      Entry: 6
+      Data: 
+  actor: {fileID: 0}
+  data: {fileID: 11400000, guid: 92781acb830918b4b909e14fba2fc478, type: 2}
   characterType: 0
+  role: 0
 --- !u!114 &1405664166490629076
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -297,7 +330,7 @@ MonoBehaviour:
     research: 3
     guard: 3
     rescue: 2
-  rest: 3
+    rest: 3
   restProtectionSleepThreshold: 1
   restProtectionResumeSleepThreshold: 35
   minimumRestProtectionSeconds: 6
@@ -410,3 +443,440 @@ MonoBehaviour:
   actionFailureCooldown: 1
   actionSwitchScoreMargin: 0.12
   debugCandidateLimit: 3
+--- !u!114 &274907766505764320
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e8558ac78fc94bffa1bc661255ddf0c1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+--- !u!114 &391273409032137216
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39c201ae6b75466f9b7c1012e3eedaca, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes:
+    - Name: stats
+      Entry: 6
+      Data: 
+  actor: {fileID: 0}
+  identity: {fileID: 0}
+  visual: {fileID: 0}
+  lifecycle: {fileID: 0}
+  log: {fileID: 0}
+  maxHealth: 100
+  currentHealth: 100
+  injurySeverity: 0
+--- !u!114 &899043239118184320
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0edcfbf181864d57a360af5cac92a165, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  identity: {fileID: 0}
+  lifecycle: {fileID: 0}
+  visualRoot: {fileID: 3956873415411822848}
+  spriteRenderer: {fileID: 2439539581498229512}
+  autoAlignVisualToFeet: 1
+--- !u!114 &426781603144695872
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e2bdc73416af4a03957afa7af3b16a93, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  actor: {fileID: 0}
+  identity: {fileID: 0}
+  abilityCache: {fileID: 0}
+  visual: {fileID: 0}
+  stats: {fileID: 0}
+  log: {fileID: 0}
+  lifecycleState: 0
+--- !u!114 &379084862358093888
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d0cca4ee66954a83883ab1960c9f38f3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  log: []
+--- !u!114 &2041462126563446826
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e39f730361f44bb874d5ceba8f31a70, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterActor
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  noExit: {fileID: 0}
+  identity: {fileID: 0}
+  abilityCache: {fileID: 0}
+  characterStats: {fileID: 0}
+  visual: {fileID: 0}
+  lifecycle: {fileID: 0}
+  characterLog: {fileID: 0}
+  blackboard: {fileID: 0}
+  personaRuntime: {fileID: 0}
+  dialogueRuntime: {fileID: 0}
+  socialMemory: {fileID: 0}
+  behaviorTree: {fileID: 0}
+--- !u!114 &4240505355425386822
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8c3f8682ee848f740803f3c183828bcb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterBlackboard
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes:
+    - Name: failedBuildingCooldowns
+      Entry: 7
+      Data: 0|System.Collections.Generic.Dictionary`2[[BuildableObject, Assembly-CSharp],[System.Single,
+        mscorlib]], mscorlib
+    - Name: comparer
+      Entry: 7
+      Data: 1|System.Collections.Generic.ObjectEqualityComparer`1[[BuildableObject,
+        Assembly-CSharp]], mscorlib
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: recentFailureCounts
+      Entry: 7
+      Data: 2|System.Collections.Generic.Dictionary`2[[System.String, mscorlib],[System.Int32,
+        mscorlib]], mscorlib
+    - Name: comparer
+      Entry: 7
+      Data: 3|System.Collections.Generic.GenericEqualityComparer`1[[System.String,
+        mscorlib]], mscorlib
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: jobGiverUtilityScores
+      Entry: 7
+      Data: 4|System.Collections.Generic.Dictionary`2[[CharacterAiBranch, Assembly-CSharp],[System.Single,
+        mscorlib]], mscorlib
+    - Name: comparer
+      Entry: 7
+      Data: 5|System.Collections.Generic.EnumEqualityComparer`1[[CharacterAiBranch,
+        Assembly-CSharp]], mscorlib
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: routineGroupPriorityScores
+      Entry: 7
+      Data: 6|System.Collections.Generic.Dictionary`2[[CharacterAiBranch, Assembly-CSharp],[System.Single,
+        mscorlib]], mscorlib
+    - Name: comparer
+      Entry: 7
+      Data: 7|System.Collections.Generic.EnumEqualityComparer`1[[CharacterAiBranch,
+        Assembly-CSharp]], mscorlib
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+  actor: {fileID: 0}
+  currentBranch: 0
+  currentIntent: 
+  currentTask: 
+  currentStatus: 
+  committedAction: {fileID: 0}
+  committedDestination: {fileID: 0}
+  minCommitUntil: 0
+  activeMacroGoal:
+    type: 0
+    reason: 
+    targetFacilityId: -1
+    targetFacilityTag: 
+    validUntil: 0
+    source: 
+  activeMoodImpulse:
+    type: 0
+    strength: 0
+    targetFacilityId: -1
+    targetFacilityTag: 
+    reason: 
+    validUntil: 0
+    source: 
+  lastJobGiverUtilitySummary: 
+  selectedJobGiverUtilitySummary: 
+  lastRoutineGroupPrioritySummary: 
+  recentDecisionTrace: []
+  lastCommitBreakReason: 
+  lastFailureReason: 
+  failureCooldownSeconds: 8
+  defaultCommitSeconds: 1.75
+  commitmentScoreBonus: 0.16
+--- !u!114 &2756390083600786588
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c4fca749f75945445969bf949a8c8ec8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CustomerPersonaRuntime
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  actor: {fileID: 0}
+  persona:
+    traitName: 
+    flavorText: 
+    selfCareMultiplier: 1
+    curiosityMultiplier: 1
+    shoppingMultiplier: 1
+    patienceMultiplier: 1
+    hungerCurveMultiplier: 1
+    funCurveMultiplier: 1
+    moodCurveMultiplier: 1
+    preferredFacilityTags: []
+  hasGeneratedPersona: 0
+  personaRequestInProgress: 0
+  lastPrompt: 
+  lastError: 
+--- !u!114 &7004039133299571103
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6a78d0990139cb4cae1c4ca96e3e064, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterDialogueRuntime
+  localOffset: {x: 0, y: 1.75, z: 0}
+  visibleDuration: 2.5
+  minSecondsBetweenRequests: 1.5
+  text: {fileID: 0}
+  lastBubbleLine: 
+  lastGeneratedBubbleLine: 
+  lastError: 
+--- !u!114 &7322711153434796532
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8d7b55c7ecdb49a4a89fa5e6f9022861, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BehaviorDesigner.Runtime.BehaviorTree
+  startWhenEnabled: 0
+  asynchronousLoad: 0
+  pauseWhenDisabled: 0
+  restartWhenComplete: 0
+  logTaskChanges: 0
+  group: 0
+  resetValuesOnRestart: 0
+  externalBehavior: {fileID: 11400000, guid: 5ca7280068555f246b5c33db28a1d1e3, type: 2}
+  mBehaviorSource:
+    behaviorName: Character AI
+    behaviorDescription: 
+    mTaskData:
+      types: []
+      parentIndex: 
+      startIndex: 
+      variableStartIndex: 
+      JSONSerialization: 
+      fieldSerializationData:
+        typeName: []
+        fieldNameHash: 
+        startIndex: 
+        dataPosition: 
+        unityObjects: []
+        byteData: 
+        byteDataArray: 
+      Version: 
+  gizmoViewMode: 0
+  showBehaviorDesignerGizmo: 1
+  useDungeonStoryManualRuntime: 1
+  alsoTickSerializedBehaviorGraph: 0
+  dungeonStoryBranch: 
+  dungeonStoryTask: 
+  dungeonStoryStatus: 
+  dungeonStoryTickCount: 0
+--- !u!114 &1215785365045945190
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e0bd118b6c6f78a48b2e74433b086279, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterSocialMemory
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  maxRumorMemory: 24
+  newRumorBlend: 0.35
+  actor: {fileID: 0}
+  recentRumors: []
+  facilitySentimentDebug: []
+  characterSentimentDebug: []
+  sourceTrustDebug: []

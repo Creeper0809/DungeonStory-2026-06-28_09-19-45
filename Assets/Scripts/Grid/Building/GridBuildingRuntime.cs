@@ -10,12 +10,33 @@ public class InitialBuildInfo
     public BuildingSO Building;
 }
 
+public static class GridDoorPlacementRules
+{
+    public static bool TryGetTargetWall(
+        Grid grid,
+        IReadOnlyList<Vector2Int> positions,
+        out BuildableObject wall)
+    {
+        wall = null;
+        if (grid == null || positions == null || positions.Count != 1)
+        {
+            return false;
+        }
+
+        GridCell cell = grid.GetGridCell(positions[0]);
+        wall = cell?.GetOccupant(GridLayer.Building) as BuildableObject;
+        return wall != null
+            && wall.BuildingData != null
+            && wall.BuildingData.IsStructuralWall;
+    }
+}
+
 public class GridBuildingPlacementService
 {
     private Grid grid;
     private readonly BuildingSO hallwayBuilding;
     private readonly Func<int, BuildingSO> findBuildingData;
-    private readonly GridBuildingFactory buildingFactory;
+    private readonly IGridBuildingFactory buildingFactory;
     private readonly BuildingPlacementValidator placementValidator;
 
     public GridBuildingPlacementService(Grid grid, BuildingSO hallwayBuilding)
@@ -24,7 +45,12 @@ public class GridBuildingPlacementService
     }
 
     public GridBuildingPlacementService(Grid grid, BuildingSO hallwayBuilding, Func<int, BuildingSO> findBuildingData)
-        : this(grid, hallwayBuilding, findBuildingData, new GridBuildingFactory(), new BuildingPlacementValidator())
+        : this(
+            grid,
+            hallwayBuilding,
+            findBuildingData,
+            new GridBuildingFactory(new GridBuildingObjectFactory()),
+            new BuildingPlacementValidator())
     {
     }
 
@@ -32,13 +58,14 @@ public class GridBuildingPlacementService
         Grid grid,
         BuildingSO hallwayBuilding,
         Func<int, BuildingSO> findBuildingData,
-        GridBuildingFactory buildingFactory,
+        IGridBuildingFactory buildingFactory,
         BuildingPlacementValidator placementValidator)
     {
         this.grid = grid;
         this.hallwayBuilding = hallwayBuilding;
         this.findBuildingData = findBuildingData;
-        this.buildingFactory = buildingFactory ?? new GridBuildingFactory();
+        this.buildingFactory = buildingFactory
+            ?? throw new ArgumentNullException(nameof(buildingFactory));
         this.placementValidator = placementValidator ?? new BuildingPlacementValidator();
     }
 
@@ -54,12 +81,35 @@ public class GridBuildingPlacementService
             return false;
         }
 
+        BuildableObject replacedWall = null;
+        if (buildingData.IsInteriorDoor)
+        {
+            List<Vector2Int> doorPositions = buildingData.GetGridPosList(position);
+            if (!GridDoorPlacementRules.TryGetTargetWall(grid, doorPositions, out replacedWall)
+                || !grid.RemoveOccupant(
+                    replacedWall.BuildingData.Placement.Layer,
+                    replacedWall.buildPoses,
+                    replacedWall.BuildingData.Placement.IsMovement))
+            {
+                errorMessage = "문은 설치된 내벽 한 칸에만 설치할 수 있습니다.";
+                return false;
+            }
+        }
+
+        EnsureHallwayUnderBuildingFootprint(buildingData, position);
+
         if (!PlaceBuildingWithoutValidation(buildingData, position, out errorMessage))
         {
+            RestoreReplacedWall(replacedWall, ref errorMessage);
             return false;
         }
 
-        EnsureHallwayUnderBuilding(buildingData, position);
+        if (replacedWall != null)
+        {
+            buildingFactory.DeleteVisual(replacedWall.BuildingData, replacedWall.centerPos);
+            replacedWall.DestroySelf();
+        }
+
         placementValidator.ApplyBuildSuccess(buildingData);
         return true;
     }
@@ -105,6 +155,7 @@ public class GridBuildingPlacementService
         grid.RemoveOccupant(buildingData.Placement.Layer, building.buildPoses, buildingData.Placement.IsMovement);
         buildingFactory.DeleteVisual(buildingData, building.centerPos);
         building.DestroySelf();
+        placementValidator.ApplyDestroySuccess(buildingData);
         return true;
     }
 
@@ -112,17 +163,152 @@ public class GridBuildingPlacementService
     {
         if (initialPlacement == null) return;
 
-        foreach (InitialBuildInfo item in initialPlacement)
+        List<InitialBuildInfo> placements = CollapseAdjacentRoomBoundaries(
+                ModularFacilityInitialPlacementMigrator.ExpandInitialRooms(initialPlacement, findBuildingData))
+            .Where((item) => item != null && item.Building != null)
+            .ToList();
+        foreach (InitialBuildInfo item in placements)
         {
-            if (item == null) continue;
+            if (IsDuplicateInitialHallway(item))
+            {
+                continue;
+            }
 
+            if (!CanRegisterBuilding(item.Building, item.Position))
+            {
+                continue;
+            }
+
+            EnsureHallwayUnderBuildingFootprint(item.Building, item.Position);
             PlaceBuildingWithoutValidation(item.Building, item.Position, out _);
         }
     }
 
-    private void EnsureHallwayUnderBuilding(BuildingSO buildingData, Vector2Int position)
+    private static IEnumerable<InitialBuildInfo> CollapseAdjacentRoomBoundaries(IEnumerable<InitialBuildInfo> placements)
     {
-        if (buildingData.Placement.Layer == GridLayer.Hallway || hallwayBuilding == null) return;
+        List<InitialBuildInfo> placementList = placements?
+            .Where((item) => item != null)
+            .ToList()
+            ?? new List<InitialBuildInfo>();
+        if (placementList.Count <= 1)
+        {
+            return placementList;
+        }
+
+        placementList = DeduplicateSameCellRoomBoundaries(placementList);
+
+        Dictionary<Vector2Int, int> boundaryByCell = new Dictionary<Vector2Int, int>();
+        for (int i = 0; i < placementList.Count; i++)
+        {
+            InitialBuildInfo item = placementList[i];
+            if (IsSingleCellRoomBoundary(item.Building))
+            {
+                boundaryByCell[item.Position] = i;
+            }
+        }
+
+        bool[] remove = new bool[placementList.Count];
+        foreach (KeyValuePair<Vector2Int, int> pair in boundaryByCell)
+        {
+            Vector2Int right = pair.Key + Vector2Int.right;
+            if (!boundaryByCell.TryGetValue(right, out int rightIndex))
+            {
+                continue;
+            }
+
+            int leftIndex = pair.Value;
+            if (remove[leftIndex] || remove[rightIndex])
+            {
+                continue;
+            }
+
+            remove[ShouldRemoveRightDuplicateBoundary(placementList[leftIndex], placementList[rightIndex])
+                ? rightIndex
+                : leftIndex] = true;
+        }
+
+        List<InitialBuildInfo> result = new List<InitialBuildInfo>(placementList.Count);
+        for (int i = 0; i < placementList.Count; i++)
+        {
+            if (!remove[i])
+            {
+                result.Add(placementList[i]);
+            }
+        }
+
+        return result;
+    }
+
+    private static List<InitialBuildInfo> DeduplicateSameCellRoomBoundaries(List<InitialBuildInfo> placements)
+    {
+        Dictionary<Vector2Int, int> boundaryByCell = new Dictionary<Vector2Int, int>();
+        bool[] remove = new bool[placements.Count];
+        for (int i = 0; i < placements.Count; i++)
+        {
+            InitialBuildInfo item = placements[i];
+            if (!IsSingleCellRoomBoundary(item?.Building))
+            {
+                continue;
+            }
+
+            if (!boundaryByCell.TryGetValue(item.Position, out int existingIndex))
+            {
+                boundaryByCell[item.Position] = i;
+                continue;
+            }
+
+            InitialBuildInfo existing = placements[existingIndex];
+            bool existingIsDoor = existing?.Building != null && existing.Building.IsInteriorDoor;
+            bool currentIsDoor = item.Building.IsInteriorDoor;
+            if (currentIsDoor && !existingIsDoor)
+            {
+                remove[existingIndex] = true;
+                boundaryByCell[item.Position] = i;
+            }
+            else
+            {
+                remove[i] = true;
+            }
+        }
+
+        List<InitialBuildInfo> result = new List<InitialBuildInfo>(placements.Count);
+        for (int i = 0; i < placements.Count; i++)
+        {
+            if (!remove[i])
+            {
+                result.Add(placements[i]);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool ShouldRemoveRightDuplicateBoundary(InitialBuildInfo left, InitialBuildInfo right)
+    {
+        bool leftIsDoor = left?.Building != null && left.Building.IsInteriorDoor;
+        bool rightIsDoor = right?.Building != null && right.Building.IsInteriorDoor;
+        if (leftIsDoor != rightIsDoor)
+        {
+            return leftIsDoor;
+        }
+
+        return true;
+    }
+
+    private static bool IsSingleCellRoomBoundary(BuildingSO building)
+    {
+        return building != null
+            && building.width == 1
+            && building.height == 1
+            && (building.IsStructuralWall || building.IsInteriorDoor);
+    }
+
+    private void EnsureHallwayUnderBuildingFootprint(BuildingSO buildingData, Vector2Int position)
+    {
+        if (!RequiresHallwayUnderFootprint(buildingData) || hallwayBuilding == null)
+        {
+            return;
+        }
 
         foreach (Vector2Int gridPos in buildingData.GetGridPosList(position))
         {
@@ -133,8 +319,42 @@ public class GridBuildingPlacementService
         }
     }
 
+    private bool IsDuplicateInitialHallway(InitialBuildInfo item)
+    {
+        if (item?.Building == null || item.Building.Placement.Layer != GridLayer.Hallway)
+        {
+            return false;
+        }
+
+        foreach (Vector2Int gridPos in item.Building.GetGridPosList(item.Position))
+        {
+            GridCell cell = grid?.GetGridCell(gridPos);
+            if (cell == null || !cell.HasBuildingInLayer(GridLayer.Hallway)) return false;
+        }
+
+        return true;
+    }
+
+    private static bool RequiresHallwayUnderFootprint(BuildingSO buildingData)
+    {
+        if (buildingData == null)
+        {
+            return false;
+        }
+
+        GridBuildingPlacement placement = buildingData.Placement;
+        return placement.Layer != GridLayer.Hallway
+            && !placement.IsStructuralWall;
+    }
+
     private bool PlaceBuildingWithoutValidation(BuildingSO buildingData, Vector2Int position, out string errorMessage)
     {
+        if (!CanRegisterBuilding(buildingData, position))
+        {
+            errorMessage = $"{buildingData?.objectName ?? "Building"} cannot occupy the requested grid layer.";
+            return false;
+        }
+
         BuildableObject buildableObject = buildingFactory.Create(grid, buildingData, position);
         if (buildableObject == null)
         {
@@ -162,6 +382,45 @@ public class GridBuildingPlacementService
         errorMessage = string.Empty;
         return true;
     }
+
+    private bool CanRegisterBuilding(BuildingSO buildingData, Vector2Int position)
+    {
+        if (grid == null || buildingData == null)
+        {
+            return false;
+        }
+
+        foreach (Vector2Int gridPos in buildingData.GetGridPosList(position))
+        {
+            GridCell cell = grid.GetGridCell(gridPos);
+            if (cell == null || !cell.CanOccupy(buildingData.Placement.Layer))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void RestoreReplacedWall(BuildableObject wall, ref string errorMessage)
+    {
+        if (wall == null)
+        {
+            return;
+        }
+
+        BuildingSO wallData = wall.BuildingData;
+        bool restored = wallData != null && grid.RegisterOccupant(
+            wall,
+            wallData.Placement.Layer,
+            wall.buildPoses,
+            wallData.Placement.IsMovement);
+        if (!restored)
+        {
+            errorMessage = "문 설치에 실패했고 기존 내벽을 복구하지 못했습니다.";
+            Debug.LogError(errorMessage);
+        }
+    }
 }
 
 public interface IGridBuildingVisual
@@ -170,57 +429,52 @@ public interface IGridBuildingVisual
     void DeleteBuilding(BuildingSO buildingData, Vector2Int position);
 }
 
-public class GridBuildingFactory
+public interface IGridBuildingFactory
+{
+    BuildableObject Create(Grid grid, BuildingSO buildingData, Vector2Int selectPos);
+    void DeleteVisual(BuildingSO buildingData, Vector2Int selectPos);
+}
+
+public class GridBuildingFactory : IGridBuildingFactory
 {
     private readonly Action<BuildableObject> onBuildingCreated;
     private readonly IGridBuildingVisual buildingVisual;
+    private readonly IGridBuildingObjectFactory objectFactory;
+
+    public GridBuildingFactory(IGridBuildingObjectFactory objectFactory)
+        : this(null, null, objectFactory)
+    {
+    }
 
     public GridBuildingFactory(Action<BuildableObject> onBuildingCreated = null)
-        : this(null, onBuildingCreated)
+        : this(null, onBuildingCreated, new GridBuildingObjectFactory())
     {
     }
 
     public GridBuildingFactory(IGridBuildingVisual buildingVisual, Action<BuildableObject> onBuildingCreated = null)
+        : this(buildingVisual, onBuildingCreated, new GridBuildingObjectFactory())
+    {
+    }
+
+    public GridBuildingFactory(
+        IGridBuildingVisual buildingVisual,
+        Action<BuildableObject> onBuildingCreated,
+        IGridBuildingObjectFactory objectFactory)
     {
         this.buildingVisual = buildingVisual;
         this.onBuildingCreated = onBuildingCreated;
+        this.objectFactory = objectFactory ?? throw new ArgumentNullException(nameof(objectFactory));
     }
 
     public BuildableObject Create(Grid grid, BuildingSO buildingData, Vector2Int selectPos)
     {
-        if (grid == null || buildingData == null) return null;
-
-        GridBuildingPlacement placement = buildingData.Placement;
-        Vector3 evenOffset = new Vector2(0.5f, 0);
-        Vector2 instantiatePos = placement.HasEvenWidth
-            ? grid.GetWorldPos(selectPos) + evenOffset
-            : grid.GetWorldPos(selectPos);
-
-        GameObject placedObject = new GameObject();
-        placedObject.name = buildingData.objectName;
-        placedObject.transform.position = instantiatePos;
-
-        if (!placement.IsWall)
-        {
-            BoxCollider2D collider2D = placedObject.AddComponent<BoxCollider2D>();
-            collider2D.size = new Vector2(placement.Width, placement.Height * 2.9f);
-            collider2D.offset = new Vector2(0, 1.5f);
-
-            placedObject.AddComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Static;
-        }
+        BuildableObject buildableObject = objectFactory.Create(grid, buildingData, selectPos);
+        if (buildableObject == null) return null;
 
         buildingVisual?.DrawBuilding(buildingData, selectPos);
         ValidateBuildingVisual(buildingData);
-
-        if (placedObject.AddComponent(buildingData.type) is BuildableObject buildableObject)
-        {
-            onBuildingCreated?.Invoke(buildableObject);
-            return buildableObject;
-        }
-
-        Debug.Log("Building data type must inherit from BuildableObject.");
-        UnityEngine.Object.Destroy(placedObject);
-        return null;
+        onBuildingCreated?.Invoke(buildableObject);
+        return buildableObject;
     }
 
     public void DeleteVisual(BuildingSO buildingData, Vector2Int selectPos)
@@ -232,7 +486,7 @@ public class GridBuildingFactory
 
     private static void ValidateBuildingVisual(BuildingSO buildingData)
     {
-        if (buildingData == null || HasTileVisual(buildingData) || buildingData.sprite != null)
+        if (buildingData == null || buildingData.IsWall || HasTileVisual(buildingData) || buildingData.sprite != null)
         {
             return;
         }
@@ -250,15 +504,24 @@ public class GridBuildingFactory
 public class BuildingPlacementValidator
 {
     private readonly GridPlacementValidator gridPlacementValidator;
+    private readonly Func<BuildingConditionContext> conditionContextFactory;
 
     public BuildingPlacementValidator()
-        : this(new GridPlacementValidator())
+        : this(new GridPlacementValidator(), null)
     {
     }
 
     public BuildingPlacementValidator(GridPlacementValidator gridPlacementValidator)
+        : this(gridPlacementValidator, null)
+    {
+    }
+
+    public BuildingPlacementValidator(
+        GridPlacementValidator gridPlacementValidator,
+        Func<BuildingConditionContext> conditionContextFactory)
     {
         this.gridPlacementValidator = gridPlacementValidator ?? new GridPlacementValidator();
+        this.conditionContextFactory = conditionContextFactory;
     }
 
     public bool CanBuild(Grid grid, BuildingSO buildingData, Vector2Int buildPos, out string errorMessage)
@@ -275,6 +538,23 @@ public class BuildingPlacementValidator
             return false;
         }
 
+        BuildingConditionContext context = CreateConditionContext();
+        if (!FacilityProgression.IsUnlocked(buildingData, context.GameData))
+        {
+            int phase = Mathf.Clamp(buildingData.Operational.unlockPhase, 1, 3);
+            errorMessage = $"{phase}단계 시설입니다. 운영일을 더 진행해야 합니다.";
+            return false;
+        }
+
+        int constructionCost = Mathf.Max(0, buildingData.Operational.constructionCost);
+        if (context.GameData != null
+            && context.GameData.holdingMoney != null
+            && constructionCost > context.GameData.holdingMoney.Value)
+        {
+            errorMessage = $"건설 비용이 부족합니다. 필요 {constructionCost} / 보유 {context.GameData.holdingMoney.Value}";
+            return false;
+        }
+
         List<Vector2Int> totalBuildPos = buildingData.GetGridPosList(buildPos);
         if (!gridPlacementValidator.AreInsideHorizontalBounds(grid, totalBuildPos, 1))
         {
@@ -282,7 +562,15 @@ public class BuildingPlacementValidator
             return false;
         }
 
-        if (!gridPlacementValidator.CanOccupy(grid, buildingData.Placement.Layer, totalBuildPos))
+        if (buildingData.IsInteriorDoor
+            && !GridDoorPlacementRules.TryGetTargetWall(grid, totalBuildPos, out _))
+        {
+            errorMessage = "문은 설치된 내벽 한 칸에만 설치할 수 있습니다.";
+            return false;
+        }
+
+        if (!buildingData.IsInteriorDoor
+            && !gridPlacementValidator.CanOccupy(grid, buildingData.Placement.Layer, totalBuildPos))
         {
             errorMessage = "이미 설치 된 건물이 존재합니다";
             return false;
@@ -296,7 +584,8 @@ public class BuildingPlacementValidator
 
         foreach (IBuildingCondition condition in buildingData.BuildConditions)
         {
-            if (condition != null && !condition.IsSatisfy(grid, totalBuildPos, out errorMessage))
+            if (ShouldApplyBuildCondition(buildingData, condition)
+                && !condition.IsSatisfy(grid, totalBuildPos, context, out errorMessage))
             {
                 return false;
             }
@@ -335,10 +624,45 @@ public class BuildingPlacementValidator
     {
         if (buildingData == null) return;
 
+        BuildingConditionContext context = CreateConditionContext();
+        int constructionCost = Mathf.Max(0, buildingData.Operational.constructionCost);
+        if (context.GameData != null && context.GameData.holdingMoney != null && constructionCost > 0)
+        {
+            context.GameData.holdingMoney.Value -= constructionCost;
+        }
+
         foreach (IBuildingCondition condition in buildingData.BuildConditions)
         {
-            condition?.OnBuild();
+            if (ShouldApplyBuildCondition(buildingData, condition))
+            {
+                condition.OnBuild(context);
+            }
         }
+    }
+
+    public void ApplyDestroySuccess(BuildingSO buildingData)
+    {
+        if (buildingData == null) return;
+
+        BuildingConditionContext context = CreateConditionContext();
+        int refund = FacilityProgression.GetRefund(buildingData);
+        if (context.GameData != null && context.GameData.holdingMoney != null && refund > 0)
+        {
+            context.GameData.holdingMoney.Value += refund;
+        }
+    }
+
+    private BuildingConditionContext CreateConditionContext()
+    {
+        return conditionContextFactory != null
+            ? conditionContextFactory()
+            : BuildingConditionContext.Empty;
+    }
+
+    private static bool ShouldApplyBuildCondition(BuildingSO buildingData, IBuildingCondition condition)
+    {
+        return condition != null
+            && !(buildingData?.Operational.IsModular == true && condition is ConditionNeedMoney);
     }
 }
 

@@ -1,8 +1,10 @@
 using System;
 using System.Linq;
+using Sirenix.OdinInspector;
 using UnityEngine;
+using VContainer;
 
-public class OwnerRunManager : UtilSingleton<OwnerRunManager>, UtilEventListener<CharacterDeathEvent>
+public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<CharacterDeathEvent>
 {
     [SerializeField] private CharacterSO[] ownerCandidates = Array.Empty<CharacterSO>();
     [SerializeField] private CharacterSO defaultOwner;
@@ -13,23 +15,38 @@ public class OwnerRunManager : UtilSingleton<OwnerRunManager>, UtilEventListener
 
     public Data<CharacterSO> selectedOwnerData = new Data<CharacterSO>();
 
-    public Character CurrentOwner { get; private set; }
+    private CharacterActor currentOwnerActor;
+    private IOwnerCandidateCatalog ownerCandidateCatalog;
+    private IOwnerCharacterFactory ownerCharacterFactory;
+
+    public CharacterActor CurrentOwnerActor => currentOwnerActor;
     public bool IsRunEnded { get; private set; }
     public CharacterSO[] OwnerCandidates => ownerCandidates;
 
     public event Action<CharacterSO> OnOwnerSelected;
-    public event Action<Character, string> OnRunEnded;
+    public event Action<CharacterActor, string> OnRunEnded;
 
-    protected override void Awake()
+    private void Awake()
     {
-        base.Awake();
-        EnsureOwnerCandidates();
+        NormalizeOwnerCandidates();
         selectedOwnerData ??= new Data<CharacterSO>();
+    }
+
+    [Inject]
+    public void ConstructOwnerRunManager(
+        IOwnerCandidateCatalog ownerCandidateCatalog,
+        IOwnerCharacterFactory ownerCharacterFactory)
+    {
+        this.ownerCandidateCatalog = ownerCandidateCatalog
+            ?? throw new ArgumentNullException(nameof(ownerCandidateCatalog));
+        this.ownerCharacterFactory = ownerCharacterFactory
+            ?? throw new ArgumentNullException(nameof(ownerCharacterFactory));
+        EnsureOwnerCandidates();
     }
 
     private void Start()
     {
-        if (autoSpawnDefaultOwner && CurrentOwner == null)
+        if (autoSpawnDefaultOwner && currentOwnerActor == null)
         {
             CharacterSO owner = defaultOwner != null ? defaultOwner : ownerCandidates.FirstOrDefault();
             if (owner != null)
@@ -65,20 +82,20 @@ public class OwnerRunManager : UtilSingleton<OwnerRunManager>, UtilEventListener
             return;
         }
 
-        if (CurrentOwner != null && !CurrentOwner.IsDead)
+        if (currentOwnerActor != null && !currentOwnerActor.IsDead)
         {
-            Destroy(CurrentOwner.gameObject);
+            Destroy(currentOwnerActor.gameObject);
         }
 
         selectedOwnerData.Value = ownerData;
-        CurrentOwner = SpawnOwner(ownerData);
+        currentOwnerActor = SpawnOwner(ownerData);
         OnOwnerSelected?.Invoke(ownerData);
         NoticeFeedEvent.Trigger($"{ownerData.characterName} 사장으로 시작", NoticeFeedEvent.Grade.NONE);
     }
 
-    public void HandleOwnerDeath(Character owner, string reason)
+    public void HandleOwnerDeath(CharacterActor owner, string reason)
     {
-        if (owner == null || owner != CurrentOwner || IsRunEnded)
+        if (owner == null || owner != currentOwnerActor || IsRunEnded)
         {
             return;
         }
@@ -98,116 +115,49 @@ public class OwnerRunManager : UtilSingleton<OwnerRunManager>, UtilEventListener
         return defaultOwner != null ? defaultOwner : ownerCandidates.FirstOrDefault();
     }
 
-    private Character SpawnOwner(CharacterSO ownerData)
+    private CharacterActor SpawnOwner(CharacterSO ownerData)
     {
-        GameObject ownerObject = ownerPrefab != null
-            ? Instantiate(ownerPrefab)
-            : new GameObject("OwnerCharacter");
-
-        ownerObject.name = ownerData.characterName;
-        ownerObject.transform.position = ResolveOwnerSpawnPosition();
-
-        Character owner = EnsureOwnerComponents(ownerObject);
-        owner.SetLifecycleState(Character.LifecycleState.Active);
-        owner.Initialization(ownerData);
-        if (owner.ai != null)
-        {
-            owner.ai.UseOwnerWorkActions();
-        }
-
-        return owner;
-    }
-
-    private Character EnsureOwnerComponents(GameObject ownerObject)
-    {
-        EnsureCharacterVisual(ownerObject);
-
-        if (!ownerObject.TryGetComponent(out AIBrain _))
-        {
-            ownerObject.AddComponent<AIBrain>();
-        }
-
-        if (!ownerObject.TryGetComponent(out Character owner))
-        {
-            owner = ownerObject.AddComponent<Character>();
-        }
-
-        if (!ownerObject.TryGetComponent(out AbilityMove _))
-        {
-            ownerObject.AddComponent<AbilityMove>();
-        }
-
-        if (!ownerObject.TryGetComponent(out AbilityWork _))
-        {
-            ownerObject.AddComponent<AbilityWork>();
-        }
-
-        owner.RefreshAbilityCache();
-        return owner;
-    }
-
-    private static SpriteRenderer EnsureCharacterVisual(GameObject characterObject)
-    {
-        Transform visual = characterObject.transform.Find("Visual");
-        if (visual == null)
-        {
-            GameObject visualObject = new GameObject("Visual");
-            visual = visualObject.transform;
-            visual.SetParent(characterObject.transform, false);
-        }
-
-        if (!visual.TryGetComponent(out SpriteRenderer renderer))
-        {
-            renderer = visual.gameObject.AddComponent<SpriteRenderer>();
-        }
-
-        return renderer;
-    }
-
-    private Vector3 ResolveOwnerSpawnPosition()
-    {
-        if (ownerSpawnPoint != null)
-        {
-            return ownerSpawnPoint.position;
-        }
-
-        Grid grid = GridSystemManager.Instance != null ? GridSystemManager.Instance.grid : null;
-        if (grid == null)
-        {
-            return Vector3.zero;
-        }
-
-        if (grid.IsValidGridPos(ownerSpawnGridPosition) && grid.IsWalkable(ownerSpawnGridPosition))
-        {
-            return grid.GetWorldPos(ownerSpawnGridPosition);
-        }
-
-        return grid.TryFindNearestWalkablePosition(ownerSpawnGridPosition, out Vector2Int walkablePosition)
-            ? grid.GetWorldPos(walkablePosition)
-            : Vector3.zero;
+        return ResolveOwnerCharacterFactory().CreateOwner(
+            ownerData,
+            ownerPrefab,
+            ownerSpawnPoint,
+            ownerSpawnGridPosition);
     }
 
     private void EnsureOwnerCandidates()
+    {
+        NormalizeOwnerCandidates();
+
+        if (ownerCandidates.Length == 0)
+        {
+            IOwnerCandidateCatalog catalog = ownerCandidateCatalog
+                ?? throw new InvalidOperationException($"{nameof(OwnerRunManager)} requires {nameof(IOwnerCandidateCatalog)} injection before loading owner candidates.");
+            ownerCandidates = catalog.OwnerCandidates
+                .Where((candidate) => candidate != null)
+                .Distinct()
+                .ToArray();
+        }
+    }
+
+    private void NormalizeOwnerCandidates()
     {
         ownerCandidates = ownerCandidates?
             .Where((candidate) => candidate != null)
             .Distinct()
             .ToArray() ?? Array.Empty<CharacterSO>();
+    }
 
-        if (ownerCandidates.Length == 0)
-        {
-            ownerCandidates = Resources.LoadAll<CharacterSO>("SO/Character/Owners")
-                .Where((candidate) => candidate != null && candidate.IsOwnerCandidate)
-                .OrderBy((candidate) => candidate.id)
-                .ToArray();
-        }
+    private IOwnerCharacterFactory ResolveOwnerCharacterFactory()
+    {
+        return ownerCharacterFactory
+            ?? throw new InvalidOperationException($"{nameof(OwnerRunManager)} requires {nameof(IOwnerCharacterFactory)} injection.");
     }
 
     public void OnTriggerEvent(CharacterDeathEvent eventType)
     {
-        if (eventType.Character != null && eventType.Character.IsOwner)
+        if (eventType.Actor != null && eventType.Actor.IsOwner)
         {
-            HandleOwnerDeath(eventType.Character, eventType.Reason);
+            HandleOwnerDeath(eventType.Actor, eventType.Reason);
         }
     }
 
@@ -224,20 +174,20 @@ public class OwnerRunManager : UtilSingleton<OwnerRunManager>, UtilEventListener
 
 public struct OwnerRunEndedEvent
 {
-    public Character Owner;
+    public CharacterActor OwnerActor;
     public string Reason;
 
-    public OwnerRunEndedEvent(Character owner, string reason)
+    public OwnerRunEndedEvent(CharacterActor owner, string reason)
     {
-        Owner = owner;
+        OwnerActor = owner;
         Reason = reason;
     }
 
     private static OwnerRunEndedEvent e;
 
-    public static void Trigger(Character owner, string reason)
+    public static void Trigger(CharacterActor owner, string reason)
     {
-        e.Owner = owner;
+        e.OwnerActor = owner;
         e.Reason = reason;
         EventObserver.TriggerEvent(e);
     }

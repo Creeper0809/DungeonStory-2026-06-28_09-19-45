@@ -12,9 +12,9 @@ public class ConsiderationFacilityNeed : Consideration
         set => role = value;
     }
 
-    public override float ScoreConsideration(Character character)
+    public override float ScoreConsideration(CharacterActor actor)
     {
-        if (character == null || !character.TryGetAbility(out AbilityShopping shopping))
+        if (actor == null || !actor.TryGetAbility(out AbilityShopping shopping))
         {
             return 0f;
         }
@@ -24,15 +24,15 @@ public class ConsiderationFacilityNeed : Consideration
             return 0f;
         }
 
-        GridPathSearchResult searchResult = character.ai != null
-            ? character.ai.GetPathSearch(character)
+        GridPathSearchResult searchResult = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
             : null;
-        if (!FacilityCandidateScorer.HasCandidate(character, searchResult, role))
+        if (!FacilityCandidateScorer.HasCandidate(actor, searchResult, role))
         {
             return 0f;
         }
 
-        float needScore = FacilityCandidateScorer.GetNeedScore(character, role);
+        float needScore = FacilityCandidateScorer.GetNeedScore(actor, role);
         return Mathf.Clamp01(Mathf.Max(minimumScoreWhenAvailable, needScore));
     }
 }

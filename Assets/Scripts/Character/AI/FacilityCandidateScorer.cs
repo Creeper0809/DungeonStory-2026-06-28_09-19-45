@@ -11,28 +11,19 @@ public static class FacilityCandidateScorer
         FacilityRole.Training,
         FacilityRole.Research,
         FacilityRole.Mana,
-        FacilityRole.Logistics
+        FacilityRole.Logistics,
+        FacilityRole.Toilet,
+        FacilityRole.Hygiene
     };
 
     public static List<BuildableObject> GetCandidates(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         FacilityRole role)
     {
         List<BuildableObject> result = new List<BuildableObject>();
-        IEnumerable<BuildableObject> source;
-        if (searchResult != null)
-        {
-            source = FacilityCandidateCache.GetCandidates(searchResult.sourceGrid, role);
-        }
-        else if (character != null)
-        {
-            source = character.GetReachableBuilding();
-        }
-        else
-        {
-            source = System.Array.Empty<BuildableObject>();
-        }
+        IEnumerable<BuildableObject> source = GetCandidateSource(actor, searchResult, role);
+        FacilityScoringContext scoringContext = FacilityScoringContext.RequireFromActor(actor);
 
         foreach (BuildableObject building in source)
         {
@@ -41,7 +32,7 @@ public static class FacilityCandidateScorer
                 continue;
             }
 
-            if (IsCandidate(character, building, role, out _))
+            if (IsCandidate(actor, building, role, scoringContext, out _))
             {
                 result.Add(building);
             }
@@ -51,10 +42,11 @@ public static class FacilityCandidateScorer
     }
 
     public static BuildableObject SelectBest(
-        Character character,
+        CharacterActor actor,
         IReadOnlyList<BuildableObject> candidates,
         FacilityRole role,
-        GridPathSearchResult searchResult)
+        GridPathSearchResult searchResult,
+        FacilityScoringContext scoringContext)
     {
         if (candidates == null || candidates.Count == 0)
         {
@@ -71,7 +63,7 @@ public static class FacilityCandidateScorer
                 continue;
             }
 
-            float score = ScoreCandidate(character, building, role, searchResult);
+            float score = ScoreCandidate(actor, building, role, searchResult, scoringContext);
             if (bestBuilding == null
                 || score > bestScore
                 || (Mathf.Approximately(score, bestScore) && building.id < bestId))
@@ -86,7 +78,7 @@ public static class FacilityCandidateScorer
     }
 
     public static bool HasCandidate(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         FacilityRole role)
     {
@@ -95,9 +87,10 @@ public static class FacilityCandidateScorer
             return false;
         }
 
-        foreach (BuildableObject building in GetCandidateSource(character, searchResult, role))
+        FacilityScoringContext scoringContext = FacilityScoringContext.RequireFromActor(actor);
+        foreach (BuildableObject building in GetCandidateSource(actor, searchResult, role))
         {
-            if (IsReachableCandidate(character, searchResult, building, role))
+            if (IsReachableCandidate(actor, searchResult, building, role, scoringContext))
             {
                 return true;
             }
@@ -107,9 +100,10 @@ public static class FacilityCandidateScorer
     }
 
     public static bool TrySelectBest(
-        Character character,
+        CharacterActor actor,
         GridPathSearchResult searchResult,
         FacilityRole role,
+        FacilityScoringContext scoringContext,
         out BuildableObject bestBuilding)
     {
         bestBuilding = null;
@@ -120,14 +114,14 @@ public static class FacilityCandidateScorer
 
         float bestScore = float.MinValue;
         int bestId = int.MaxValue;
-        foreach (BuildableObject building in GetCandidateSource(character, searchResult, role))
+        foreach (BuildableObject building in GetCandidateSource(actor, searchResult, role))
         {
-            if (!IsReachableCandidate(character, searchResult, building, role))
+            if (!IsReachableCandidate(actor, searchResult, building, role, scoringContext))
             {
                 continue;
             }
 
-            float score = ScoreCandidate(character, building, role, searchResult);
+            float score = ScoreCandidate(actor, building, role, searchResult, scoringContext);
             if (bestBuilding == null
                 || score > bestScore
                 || (Mathf.Approximately(score, bestScore) && building.id < bestId))
@@ -142,9 +136,24 @@ public static class FacilityCandidateScorer
     }
 
     public static bool IsCandidate(
-        Character character,
+        CharacterActor actor,
         BuildableObject building,
         FacilityRole role,
+        out string rejectReason)
+    {
+        return IsCandidate(
+            actor,
+            building,
+            role,
+            FacilityScoringContext.RequireFromActor(actor),
+            out rejectReason);
+    }
+
+    public static bool IsCandidate(
+        CharacterActor actor,
+        BuildableObject building,
+        FacilityRole role,
+        FacilityScoringContext scoringContext,
         out string rejectReason)
     {
         rejectReason = string.Empty;
@@ -156,18 +165,31 @@ public static class FacilityCandidateScorer
 
         if (!building.SupportsFacilityRole(role))
         {
-            rejectReason = "역할 불일치";
+            rejectReason = "role mismatch";
             return false;
         }
 
-        if (!building.CanVisit(character, out rejectReason))
+        if (!scoringContext.IsFacilityRoleAvailable(building, role, out rejectReason))
+        {
+            return false;
+        }
+
+        if (actor != null
+            && actor.Blackboard != null
+            && actor.Blackboard.IsFacilityCoolingDown(building, out float remainingSeconds))
+        {
+            rejectReason = $"AI facility cooldown {remainingSeconds:0.0}s";
+            return false;
+        }
+
+        if (!building.CanVisit(actor, out rejectReason))
         {
             return false;
         }
 
         if (building is Shop shop
-            && character != null
-            && character.TryGetAbility(out AbilityShopping shopping)
+            && actor != null
+            && actor.TryGetAbility(out AbilityShopping shopping)
             && !shopping.CanBuyFrom(shop, out rejectReason))
         {
             return false;
@@ -176,71 +198,46 @@ public static class FacilityCandidateScorer
         return true;
     }
 
-    private static IEnumerable<BuildableObject> GetCandidateSource(
-        Character character,
-        GridPathSearchResult searchResult,
-        FacilityRole role)
-    {
-        if (searchResult != null)
-        {
-            return FacilityCandidateCache.GetCandidates(searchResult.sourceGrid, role);
-        }
-
-        if (character != null)
-        {
-            return character.GetReachableBuilding();
-        }
-
-        return System.Array.Empty<BuildableObject>();
-    }
-
-    private static bool IsReachableCandidate(
-        Character character,
-        GridPathSearchResult searchResult,
-        BuildableObject building,
-        FacilityRole role)
-    {
-        if (searchResult != null && !searchResult.ContainsVisitableOccupant(building))
-        {
-            return false;
-        }
-
-        return IsCandidate(character, building, role, out _);
-    }
-
     public static float ScoreCandidate(
-        Character character,
+        CharacterActor actor,
         BuildableObject building,
         FacilityRole role,
-        GridPathSearchResult searchResult)
+        GridPathSearchResult searchResult,
+        FacilityScoringContext scoringContext)
     {
-        if (!IsCandidate(character, building, role, out _))
+        if (!IsCandidate(actor, building, role, scoringContext, out _))
         {
             return 0f;
         }
 
-        FacilityRole matchedRole = GetBestMatchedRole(character, building, role);
-        float desireScore = GetNeedScore(character, matchedRole);
-        float preferenceScore = GetPreferenceScore(character, building, matchedRole);
+        FacilityRole matchedRole = GetBestMatchedRole(actor, building, role);
+        float desireScore = GetNeedScore(actor, matchedRole);
+        float preferenceScore = GetPreferenceScore(actor, building, matchedRole);
         float stockScore = GetStockScore(building);
-        float affordabilityScore = GetAffordabilityScore(character, building);
-        float crowdScore = GetCrowdScore(character, building);
+        float affordabilityScore = GetAffordabilityScore(actor, building);
+        float crowdScore = GetCrowdScore(actor, building);
         float distanceScore = GetDistanceScore(building, searchResult);
-        float noveltyScore = GetNoveltyScore(character, building);
+        float noveltyScore = GetNoveltyScore(actor, building);
+        float reputationBias = GetReputationBias(actor, building, scoringContext);
+        float roomScore = scoringContext.GetRoomUtilityScore(building, matchedRole);
+        float facilityStateScore = GetFacilityStateScore(building);
 
         float score =
-            desireScore * 0.35f
-            + preferenceScore * 0.2f
-            + stockScore * 0.15f
-            + affordabilityScore * 0.1f
-            + crowdScore * 0.1f
-            + distanceScore * 0.07f
-            + noveltyScore * 0.03f;
+            desireScore * 0.3f
+            + preferenceScore * 0.17f
+            + stockScore * 0.12f
+            + affordabilityScore * 0.08f
+            + crowdScore * 0.08f
+            + distanceScore * 0.06f
+            + noveltyScore * 0.03f
+            + roomScore * 0.11f
+            + facilityStateScore * 0.05f
+            + reputationBias;
 
         return Mathf.Clamp01(score);
     }
 
-    public static float GetNeedScore(Character character, FacilityRole role)
+    public static float GetNeedScore(CharacterActor actor, FacilityRole role)
     {
         if (HasMultipleRoles(role))
         {
@@ -249,35 +246,82 @@ public static class FacilityCandidateScorer
             {
                 if ((role & scoredRole) == 0) continue;
 
-                highestNeed = Mathf.Max(highestNeed, GetNeedScore(character, scoredRole));
+                highestNeed = Mathf.Max(highestNeed, GetNeedScore(actor, scoredRole));
             }
 
             return highestNeed;
         }
 
-        if (character == null || character.stats == null)
+        CharacterStats stats = actor != null ? actor.Stats : null;
+        if (stats == null)
         {
             return 0.5f;
         }
 
         return role switch
         {
-            FacilityRole.Meal => GetLowStatNeed(character, Character.Condition.HUNGER),
+            FacilityRole.Meal => GetLowStatNeed(actor, CharacterCondition.HUNGER),
             FacilityRole.Purchase => Mathf.Max(
-                GetLowStatNeed(character, Character.Condition.FUN),
-                GetLowStatNeed(character, Character.Condition.MOOD) * 0.6f),
+                GetLowStatNeed(actor, CharacterCondition.FUN),
+                GetLowStatNeed(actor, CharacterCondition.MOOD) * 0.6f),
             FacilityRole.Rest => Mathf.Max(
-                GetLowStatNeed(character, Character.Condition.SLEEP),
-                GetLowStatNeed(character, Character.Condition.MOOD) * 0.4f),
-            FacilityRole.Training => GetLowStatNeed(character, Character.Condition.FUN),
-            FacilityRole.Research => GetLowStatNeed(character, Character.Condition.FUN),
-            FacilityRole.Mana => GetLowStatNeed(character, Character.Condition.MOOD),
+                GetLowStatNeed(actor, CharacterCondition.SLEEP),
+                GetLowStatNeed(actor, CharacterCondition.MOOD) * 0.4f),
+            FacilityRole.Training => GetLowStatNeed(actor, CharacterCondition.FUN),
+            FacilityRole.Research => GetLowStatNeed(actor, CharacterCondition.FUN),
+            FacilityRole.Mana => GetLowStatNeed(actor, CharacterCondition.MOOD),
+            FacilityRole.Toilet => GetLowStatNeed(actor, CharacterCondition.EXCRETION),
+            FacilityRole.Hygiene => GetLowStatNeed(actor, CharacterCondition.HYGIENE),
             _ => 0.5f
         };
     }
 
+    private static IEnumerable<BuildableObject> GetCandidateSource(
+        CharacterActor actor,
+        GridPathSearchResult searchResult,
+        FacilityRole role)
+    {
+        if (searchResult != null)
+        {
+            return RequireFacilityCandidateCache(actor).GetCandidates(searchResult.sourceGrid, role);
+        }
+
+        if (actor != null)
+        {
+            return actor.GetReachableBuilding();
+        }
+
+        return System.Array.Empty<BuildableObject>();
+    }
+
+    private static IFacilityCandidateCache RequireFacilityCandidateCache(CharacterActor actor)
+    {
+        if (actor == null || actor.Brain == null)
+        {
+            throw new System.InvalidOperationException(
+                $"{nameof(FacilityCandidateScorer)} requires an actor with {nameof(AIBrain)} for cached facility candidate lookup.");
+        }
+
+        return actor.Brain.RequireFacilityCandidateCache();
+    }
+
+    private static bool IsReachableCandidate(
+        CharacterActor actor,
+        GridPathSearchResult searchResult,
+        BuildableObject building,
+        FacilityRole role,
+        FacilityScoringContext scoringContext)
+    {
+        if (searchResult != null && !searchResult.ContainsVisitableOccupant(building))
+        {
+            return false;
+        }
+
+        return IsCandidate(actor, building, role, scoringContext, out _);
+    }
+
     private static FacilityRole GetBestMatchedRole(
-        Character character,
+        CharacterActor actor,
         BuildableObject building,
         FacilityRole requestedRoles)
     {
@@ -295,7 +339,7 @@ public static class FacilityCandidateScorer
                 continue;
             }
 
-            float need = GetNeedScore(character, role);
+            float need = GetNeedScore(actor, role);
             if (need > highestNeed)
             {
                 highestNeed = need;
@@ -312,9 +356,12 @@ public static class FacilityCandidateScorer
         return value != 0 && (value & (value - 1)) != 0;
     }
 
-    private static float GetLowStatNeed(Character character, Character.Condition condition)
+    private static float GetLowStatNeed(CharacterActor actor, CharacterCondition condition)
     {
-        if (character.stats == null || !character.stats.TryGetValue(condition, out float value))
+        CharacterStats stats = actor != null ? actor.Stats : null;
+        if (stats == null
+            || stats.Stats == null
+            || !stats.Stats.TryGetValue(condition, out float value))
         {
             return 0.5f;
         }
@@ -323,18 +370,22 @@ public static class FacilityCandidateScorer
     }
 
     private static float GetPreferenceScore(
-        Character character,
+        CharacterActor actor,
         BuildableObject building,
         FacilityRole matchedRole)
     {
-        float speciesTagPreferenceScore = GetSpeciesTagPreferenceScore(character, building);
-        float modelPreferenceScore = GetCharacterModelPreferenceScore(character, building, matchedRole);
-        return Mathf.Clamp01((speciesTagPreferenceScore + modelPreferenceScore) * 0.5f);
+        float speciesTagPreferenceScore = GetSpeciesTagPreferenceScore(actor, building);
+        float modelPreferenceScore = GetCharacterModelPreferenceScore(actor, building, matchedRole);
+        float personaPreferenceScore = actor != null && actor.PersonaRuntime != null
+            ? actor.PersonaRuntime.GetFacilityTagPreference(building)
+            : 0.5f;
+        return Mathf.Clamp01((speciesTagPreferenceScore + modelPreferenceScore + personaPreferenceScore) / 3f);
     }
 
-    private static float GetSpeciesTagPreferenceScore(Character character, BuildableObject building)
+    private static float GetSpeciesTagPreferenceScore(CharacterActor actor, BuildableObject building)
     {
-        string speciesTag = character != null ? character.SpeciesTag : string.Empty;
+        CharacterIdentity identity = actor != null ? actor.Identity : null;
+        string speciesTag = identity != null ? identity.SpeciesTag : string.Empty;
         if (string.IsNullOrWhiteSpace(speciesTag) || building.Facility == null)
         {
             return 0.5f;
@@ -356,11 +407,11 @@ public static class FacilityCandidateScorer
     }
 
     private static float GetCharacterModelPreferenceScore(
-        Character character,
+        CharacterActor actor,
         BuildableObject building,
         FacilityRole matchedRole)
     {
-        if (character == null || building == null || building.Facility == null)
+        if (actor == null || building == null || building.Facility == null)
         {
             return 0.5f;
         }
@@ -368,7 +419,7 @@ public static class FacilityCandidateScorer
         FacilityRole roles = matchedRole != FacilityRole.None
             ? matchedRole
             : building.Facility.roles;
-        return character.GetFacilityPreferenceScore(roles);
+        return actor.Stats != null ? actor.Stats.GetFacilityPreferenceScore(roles) : 0.5f;
     }
 
     private static float GetStockScore(BuildableObject building)
@@ -387,14 +438,14 @@ public static class FacilityCandidateScorer
         return Mathf.Clamp01((float)stockedFacility.CurrentStock / max);
     }
 
-    private static float GetAffordabilityScore(Character character, BuildableObject building)
+    private static float GetAffordabilityScore(CharacterActor actor, BuildableObject building)
     {
         if (building is not Shop shop)
         {
             return 1f;
         }
 
-        if (character == null || !character.TryGetAbility(out AbilityShopping shopping))
+        if (actor == null || !actor.TryGetAbility(out AbilityShopping shopping))
         {
             return 1f;
         }
@@ -402,14 +453,15 @@ public static class FacilityCandidateScorer
         return shopping.GetAffordabilityScore(shop);
     }
 
-    private static float GetCrowdScore(Character character, BuildableObject building)
+    private static float GetCrowdScore(CharacterActor actor, BuildableObject building)
     {
         if (building.Facility == null || building.Facility.capacity <= 0)
         {
             return 1f;
         }
 
-        float sensitivity = character != null ? character.GetCrowdSensitivityMultiplier() : 1f;
+        CharacterStats stats = actor != null ? actor.Stats : null;
+        float sensitivity = stats != null ? stats.GetCrowdSensitivityMultiplier() : 1f;
         return Mathf.Clamp01(1f - (((float)building.CurrentUserCount / building.Facility.capacity) * sensitivity));
     }
 
@@ -429,13 +481,43 @@ public static class FacilityCandidateScorer
         return 1f / (1f + distance);
     }
 
-    private static float GetNoveltyScore(Character character, BuildableObject building)
+    private static float GetNoveltyScore(CharacterActor actor, BuildableObject building)
     {
-        if (character == null || !character.TryGetAbility(out AbilityShopping shopping))
+        if (actor == null || !actor.TryGetAbility(out AbilityShopping shopping))
         {
             return 1f;
         }
 
         return shopping.visitedBuilding.Contains(building) ? 0.2f : 1f;
+    }
+
+    private static float GetFacilityStateScore(BuildableObject building)
+    {
+        if (building == null)
+        {
+            return 0f;
+        }
+
+        float score = Mathf.Clamp01(building.OperationalState.cleanliness / 100f);
+        if (building.IsDamaged)
+        {
+            score *= 0.45f;
+        }
+
+        if (building.Facility != null && building.Facility.capacity > 0)
+        {
+            float pressure = Mathf.Clamp01((float)building.CurrentUserCount / building.Facility.capacity);
+            score *= Mathf.Lerp(1f, 0.6f, pressure);
+        }
+
+        return Mathf.Clamp01(score);
+    }
+
+    private static float GetReputationBias(
+        CharacterActor actor,
+        BuildableObject building,
+        FacilityScoringContext scoringContext)
+    {
+        return scoringContext.GetReputationBias(actor, building);
     }
 }

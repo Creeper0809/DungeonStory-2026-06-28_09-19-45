@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -76,13 +76,26 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyWorkerInitialCondition()
     {
-        Character staff = CreateStaff("Staff Initial Condition", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Initial Condition", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
+        bool canStartWork = work.CanStartWorkAction();
 
-        bool valid = staff.stats[Character.Condition.SLEEP] >= 80f
-            && staff.stats[Character.Condition.MOOD] >= 70f
+        bool valid = staff.stats[CharacterCondition.SLEEP] >= 80f
+            && staff.stats[CharacterCondition.MOOD] >= 70f
             && !work.IsOffDuty
-            && work.CanStartWorkAction();
+            && canStartWork;
+
+        if (!valid)
+        {
+            Debug.LogError(
+                $"Worker initial condition detail: " +
+                $"sleep={staff.stats[CharacterCondition.SLEEP]}, " +
+                $"mood={staff.stats[CharacterCondition.MOOD]}, " +
+                $"offDuty={work.IsOffDuty}, " +
+                $"restProtection={work.ShouldUseRestProtection()}, " +
+                $"canStartWork={canStartWork}, " +
+                $"actions={(staff.ai != null && staff.ai.availableActions != null ? staff.ai.availableActions.Length : -1)}");
+        }
 
         Object.DestroyImmediate(staff.gameObject);
         return valid;
@@ -90,17 +103,17 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyWorkFatigueTriggersOffDuty()
     {
-        Character staff = CreateStaff("Staff Fatigue", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Fatigue", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
-        staff.stats[Character.Condition.SLEEP] = 26f;
-        staff.stats[Character.Condition.MOOD] = 26f;
+        staff.stats[CharacterCondition.SLEEP] = 26f;
+        staff.stats[CharacterCondition.MOOD] = 26f;
 
         work.ApplyWorkFatigueTick();
         bool canWork = work.CanStartWorkAction();
         bool valid = !canWork
             && work.IsOffDuty
-            && staff.stats[Character.Condition.SLEEP] < 26f
-            && staff.stats[Character.Condition.MOOD] < 26f;
+            && staff.stats[CharacterCondition.SLEEP] < 26f
+            && staff.stats[CharacterCondition.MOOD] < 26f;
 
         Object.DestroyImmediate(staff.gameObject);
         return valid;
@@ -108,10 +121,10 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyCriticalFatigueEntersOffDuty()
     {
-        Character staff = CreateStaff("Staff Critical Fatigue", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Critical Fatigue", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
-        staff.stats[Character.Condition.SLEEP] = 0.5f;
-        staff.stats[Character.Condition.MOOD] = 100f;
+        staff.stats[CharacterCondition.SLEEP] = 0.5f;
+        staff.stats[CharacterCondition.MOOD] = 100f;
 
         bool canWork = work.CanStartWorkAction();
         bool valid = !canWork
@@ -124,7 +137,7 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyOffDutyVisitCycle()
     {
-        Character staff = CreateStaff("Staff Off Duty Visit", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Off Duty Visit", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
         AbilityShopping shopping = staff.GetAbility<AbilityShopping>();
         BuildableObject visited = CreateDummyBuilding();
@@ -143,7 +156,7 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyStaffBrainAddsOffDutyActions()
     {
-        Character staff = CreateStaff("Staff Brain Actions", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Brain Actions", withShopping: true, withWorkAction: true);
         Type[] actionTypes = staff.ai.availableActions
             .Where((action) => action != null && action.actionset != null)
             .Select((action) => action.actionset.GetType())
@@ -162,14 +175,16 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyOnDutyStaffDoesNotUseLookAround()
     {
-        Character staff = CreateStaff("Staff LookAround Guard", withShopping: true, withWorkAction: true);
-        Character customer = CreateCustomer();
+        CharacterActor staff = CreateStaff("Staff LookAround Guard", withShopping: true, withWorkAction: true);
+        CharacterActor customer = CreateCustomer();
+        CharacterActor staffActor = CharacterActor.From(staff);
+        CharacterActor customerActor = CharacterActor.From(customer);
         ConsiderationCanLookAround consideration = ScriptableObject.CreateInstance<ConsiderationCanLookAround>();
 
-        bool valid = !AILookAround.CanUseVisitLookAround(staff)
-            && Mathf.Approximately(consideration.ScoreConsideration(staff), 0f)
-            && AILookAround.CanUseVisitLookAround(customer)
-            && Mathf.Approximately(consideration.ScoreConsideration(customer), 1f);
+        bool valid = !AILookAround.CanUseVisitLookAround(staffActor)
+            && Mathf.Approximately(consideration.ScoreConsideration(staffActor), 0f)
+            && AILookAround.CanUseVisitLookAround(customerActor)
+            && Mathf.Approximately(consideration.ScoreConsideration(customerActor), 1f);
 
         Object.DestroyImmediate(consideration);
         Object.DestroyImmediate(staff.gameObject);
@@ -179,7 +194,7 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyOwnerBrainDoesNotAddVisitorActions()
     {
-        Character owner = CreateOwner("Owner_Orc");
+        CharacterActor owner = CreateOwner("Owner_Orc");
         Type[] actionTypes = owner.ai.availableActions
             .Where((action) => action != null && action.actionset != null)
             .Select((action) => action.actionset.GetType())
@@ -198,15 +213,15 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyOffDutyStaffDoesNotCreateRevenue()
     {
-        Character staff = CreateStaff("Staff No Revenue", withShopping: true, withWorkAction: true);
-        Character customer = CreateCustomer();
-        Character npcVisitor = CreateCustomer();
+        CharacterActor staff = CreateStaff("Staff No Revenue", withShopping: true, withWorkAction: true);
+        CharacterActor customer = CreateCustomer();
+        CharacterActor npcVisitor = CreateCustomer();
         npcVisitor.characterType = CharacterType.NPC;
 
-        bool valid = !Shop.CreatesRevenueFor(staff)
-            && Shop.CreatesRevenueFor(customer)
-            && Shop.CreatesRevenueFor(npcVisitor)
-            && Shop.CreatesRevenueFor(null);
+        bool valid = !Shop.CreatesRevenueFor(CharacterActor.From(staff))
+            && Shop.CreatesRevenueFor(CharacterActor.From(customer))
+            && Shop.CreatesRevenueFor(CharacterActor.From(npcVisitor))
+            && Shop.CreatesRevenueFor((CharacterActor)null);
 
         Object.DestroyImmediate(staff.gameObject);
         Object.DestroyImmediate(customer.gameObject);
@@ -220,10 +235,10 @@ public static class StaffDutyDebugScenarios
         BuildableObject damaged = world.Place("P1_RestRoom", new Vector2Int(2, 0));
         damaged.SetDamaged(true);
 
-        Character staff = CreateStaff("Staff Emergency", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Emergency", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
-        staff.stats[Character.Condition.SLEEP] = 10f;
-        staff.stats[Character.Condition.MOOD] = 10f;
+        staff.stats[CharacterCondition.SLEEP] = 10f;
+        staff.stats[CharacterCondition.MOOD] = 10f;
         work.BeginOffDuty("test");
 
         GridPathSearchResult search = world.Grid.SearchPath(Vector2Int.zero);
@@ -241,12 +256,12 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyHungerDoesNotForceOffDuty()
     {
-        Character staff = CreateStaff("Staff Hungry Still Works", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Hungry Still Works", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
 
-        staff.stats[Character.Condition.SLEEP] = 100f;
-        staff.stats[Character.Condition.MOOD] = 100f;
-        staff.stats[Character.Condition.HUNGER] = 5f;
+        staff.stats[CharacterCondition.SLEEP] = 100f;
+        staff.stats[CharacterCondition.MOOD] = 100f;
+        staff.stats[CharacterCondition.HUNGER] = 5f;
 
         bool valid = work.CanStartWorkAction()
             && !work.IsOffDuty
@@ -258,22 +273,22 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyWaitDoesNotRecoverHunger()
     {
-        Character staff = CreateStaff("Staff Wait Hunger", withShopping: true, withWorkAction: true);
+        CharacterActor staff = CreateStaff("Staff Wait Hunger", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
         AIWait wait = ScriptableObject.CreateInstance<AIWait>();
 
-        staff.stats[Character.Condition.SLEEP] = 20f;
-        staff.stats[Character.Condition.MOOD] = 20f;
-        staff.stats[Character.Condition.FUN] = 20f;
-        staff.stats[Character.Condition.HUNGER] = 10f;
+        staff.stats[CharacterCondition.SLEEP] = 20f;
+        staff.stats[CharacterCondition.MOOD] = 20f;
+        staff.stats[CharacterCondition.FUN] = 20f;
+        staff.stats[CharacterCondition.HUNGER] = 10f;
         work.BeginOffDuty("test");
 
-        float beforeHunger = staff.stats[Character.Condition.HUNGER];
-        wait.Execute(staff);
-        float afterHunger = staff.stats[Character.Condition.HUNGER];
-        bool recoveredOtherStats = staff.stats[Character.Condition.SLEEP] > 20f
-            && staff.stats[Character.Condition.MOOD] > 20f
-            && staff.stats[Character.Condition.FUN] > 20f;
+        float beforeHunger = staff.stats[CharacterCondition.HUNGER];
+        wait.Execute(CharacterActor.From(staff));
+        float afterHunger = staff.stats[CharacterCondition.HUNGER];
+        bool recoveredOtherStats = staff.stats[CharacterCondition.SLEEP] > 20f
+            && staff.stats[CharacterCondition.MOOD] > 20f
+            && staff.stats[CharacterCondition.FUN] > 20f;
 
         Object.DestroyImmediate(wait);
         Object.DestroyImmediate(staff.gameObject);
@@ -319,11 +334,11 @@ public static class StaffDutyDebugScenarios
 
             staffObject = new GameObject("Staff Idle Wander");
             staffObject.AddComponent<SpriteRenderer>();
-            staffObject.AddComponent<Character>();
+            staffObject.AddComponent<CharacterActor>();
             staffObject.AddComponent<AbilityMove>();
             staffObject.transform.position = grid.GetWorldPos(Vector2Int.zero);
 
-            Character staff = InitializeCharacterObject(staffObject, data);
+            CharacterActor staff = InitializeCharacterObject(staffObject, data);
             AbilityMove move = staff.GetAbility<AbilityMove>();
             bool foundPath = move.TryFindIdleWanderPath(2, 8, out Queue<GridMoveStep> path);
             GridMoveStep lastStep = path != null && path.Count > 0 ? path.Last() : null;
@@ -394,15 +409,15 @@ public static class StaffDutyDebugScenarios
 
             staffObject = new GameObject("Staff On Duty Wait Selection");
             staffObject.AddComponent<SpriteRenderer>();
-            staffObject.AddComponent<Character>();
+            staffObject.AddComponent<CharacterActor>();
             staffObject.AddComponent<AbilityMove>();
             staffObject.AddComponent<AbilityWork>();
             AIBrain brain = staffObject.AddComponent<AIBrain>();
             brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
             staffObject.transform.position = grid.GetWorldPos(Vector2Int.zero);
 
-            Character staff = InitializeCharacterObject(staffObject, data);
-            string selected = IdleBehaviorRunner.GetSelectedBehaviorTypeNameForDebug(staff, true);
+            CharacterActor staff = InitializeCharacterObject(staffObject, data);
+            string selected = IdleBehaviorRunner.GetSelectedBehaviorTypeNameForDebug(CharacterActor.From(staff), true);
             AbilityMove move = staff.GetAbility<AbilityMove>();
             bool foundPath = move.TryFindIdleWanderPath(2, 8, out Queue<GridMoveStep> path);
 
@@ -471,11 +486,11 @@ public static class StaffDutyDebugScenarios
 
             staffObject = new GameObject("Staff Idle Wander Stair Link");
             staffObject.AddComponent<SpriteRenderer>();
-            staffObject.AddComponent<Character>();
+            staffObject.AddComponent<CharacterActor>();
             staffObject.AddComponent<AbilityMove>();
             staffObject.transform.position = grid.GetWorldPos(Vector2Int.zero);
 
-            Character staff = InitializeCharacterObject(staffObject, data);
+            CharacterActor staff = InitializeCharacterObject(staffObject, data);
             AbilityMove move = staff.GetAbility<AbilityMove>();
             bool foundPath = move.TryFindIdleWanderPath(2, 8, out Queue<GridMoveStep> path);
             GridMoveStep lastStep = path != null && path.Count > 0 ? path.Last() : null;
@@ -546,20 +561,20 @@ public static class StaffDutyDebugScenarios
 
             staffObject = new GameObject("Staff Off Duty Wait Wander");
             staffObject.AddComponent<SpriteRenderer>();
-            staffObject.AddComponent<Character>();
+            staffObject.AddComponent<CharacterActor>();
             staffObject.AddComponent<AbilityMove>();
             staffObject.AddComponent<AbilityWork>();
             AIBrain brain = staffObject.AddComponent<AIBrain>();
             brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
             staffObject.transform.position = grid.GetWorldPos(Vector2Int.zero);
 
-            Character staff = InitializeCharacterObject(staffObject, data);
+            CharacterActor staff = InitializeCharacterObject(staffObject, data);
             AbilityWork work = staff.GetAbility<AbilityWork>();
             AbilityMove move = staff.GetAbility<AbilityMove>();
             wait = ScriptableObject.CreateInstance<AIWait>();
             work.BeginOffDuty("test");
 
-            bool canStartWait = wait.CanStart(staff);
+            bool canStartWait = wait.CanStart(CharacterActor.From(staff));
             bool foundPath = move.TryFindIdleWanderPath(2, 8, out Queue<GridMoveStep> path);
             GridMoveStep lastStep = path != null && path.Count > 0 ? path.Last() : null;
             return work.IsOffDuty
@@ -633,14 +648,14 @@ public static class StaffDutyDebugScenarios
 
             staffObject = new GameObject("Staff Occupied Wait Wander");
             staffObject.AddComponent<SpriteRenderer>();
-            staffObject.AddComponent<Character>();
+            staffObject.AddComponent<CharacterActor>();
             staffObject.AddComponent<AbilityMove>();
             staffObject.AddComponent<AbilityWork>();
             AIBrain brain = staffObject.AddComponent<AIBrain>();
             brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
             staffObject.transform.position = grid.GetWorldPos(Vector2Int.zero);
 
-            Character staff = InitializeCharacterObject(staffObject, data);
+            CharacterActor staff = InitializeCharacterObject(staffObject, data);
             occupiedTarget = CreateDummyBuilding();
             lastFailureField?.SetValue(
                 staff.ai,
@@ -649,7 +664,7 @@ public static class StaffDutyDebugScenarios
                     "test occupied",
                     occupiedTarget));
 
-            string selected = IdleBehaviorRunner.GetSelectedBehaviorTypeNameForDebug(staff, true);
+            string selected = IdleBehaviorRunner.GetSelectedBehaviorTypeNameForDebug(CharacterActor.From(staff), true);
             return selected == nameof(StaffWanderIdleBehavior);
         }
         finally
@@ -676,7 +691,7 @@ public static class StaffDutyDebugScenarios
 
     private static bool VerifyCustomerTypedWorkerUsesStaffRules()
     {
-        Character staff = CreateStaff(
+        CharacterActor staff = CreateStaff(
             "Customer Typed Staff",
             withShopping: true,
             withWorkAction: true,
@@ -690,11 +705,11 @@ public static class StaffDutyDebugScenarios
             .Select((action) => action.actionset.GetType())
             .ToArray();
 
-        bool valid = CharacterWorkRoleUtility.IsOnDutyWorker(staff)
+        bool valid = CharacterWorkRoleUtility.IsOnDutyWorker(CharacterActor.From(staff))
             && work.CanStartWorkAction()
-            && wait.CanStart(staff)
-            && !AILookAround.CanUseVisitLookAround(staff)
-            && Mathf.Approximately(lookAround.ScoreConsideration(staff), 0f)
+            && wait.CanStart(CharacterActor.From(staff))
+            && !AILookAround.CanUseVisitLookAround(CharacterActor.From(staff))
+            && Mathf.Approximately(lookAround.ScoreConsideration(CharacterActor.From(staff)), 0f)
             && actionTypes.Contains(typeof(AIWork))
             && actionTypes.Contains(typeof(AIWait))
             && actionTypes.Contains(typeof(AIEat))
@@ -719,7 +734,7 @@ public static class StaffDutyDebugScenarios
         object previousScheduler = schedulerInstanceField?.GetValue(null);
 
         GameObject managerObject = null;
-        Character staff = null;
+        CharacterActor staff = null;
         try
         {
             using WorkScenarioWorld world = new WorkScenarioWorld();
@@ -779,7 +794,7 @@ public static class StaffDutyDebugScenarios
         }
     }
 
-    private static Character CreateStaff(
+    private static CharacterActor CreateStaff(
         string name,
         bool withShopping,
         bool withWorkAction,
@@ -794,7 +809,7 @@ public static class StaffDutyDebugScenarios
 
         GameObject obj = new GameObject(name);
         obj.AddComponent<SpriteRenderer>();
-        obj.AddComponent<Character>();
+        obj.AddComponent<CharacterActor>();
         obj.AddComponent<AbilityMove>();
         if (withShopping)
         {
@@ -807,19 +822,19 @@ public static class StaffDutyDebugScenarios
             brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
         }
 
-        Character character = InitializeCharacterObject(obj, data);
+        CharacterActor character = InitializeCharacterObject(obj, data);
 
         return character;
     }
 
-    private static Character CreateOwner(string ownerAssetName)
+    private static CharacterActor CreateOwner(string ownerAssetName)
     {
         CharacterSO data = AssetDatabase.LoadAssetAtPath<CharacterSO>(
             $"Assets/Resources/SO/Character/Owners/{ownerAssetName}.asset");
 
         GameObject obj = new GameObject(ownerAssetName);
         obj.AddComponent<SpriteRenderer>();
-        obj.AddComponent<Character>();
+        obj.AddComponent<CharacterActor>();
         obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityShopping>();
         obj.AddComponent<AbilityWork>();
@@ -828,7 +843,7 @@ public static class StaffDutyDebugScenarios
         return InitializeCharacterObject(obj, data);
     }
 
-    private static Character CreateCustomer()
+    private static CharacterActor CreateCustomer()
     {
         CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
         data.characterType = CharacterType.Customer;
@@ -838,20 +853,22 @@ public static class StaffDutyDebugScenarios
 
         GameObject obj = new GameObject("Customer");
         obj.AddComponent<SpriteRenderer>();
-        obj.AddComponent<Character>();
+        obj.AddComponent<CharacterActor>();
+        obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityShopping>();
         return InitializeCharacterObject(obj, data);
     }
 
-    private static Character InitializeCharacterObject(GameObject obj, CharacterSO data)
+    private static CharacterActor InitializeCharacterObject(GameObject obj, CharacterSO data)
     {
-        Character character = obj.GetComponent<Character>();
-        typeof(Character)
+        CharacterAiEditorTestDependencies.Inject(obj);
+        CharacterActor character = obj.GetComponent<CharacterActor>();
+        typeof(CharacterActor)
             .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.Invoke(character, null);
         character.RefreshAbilityCache();
         character.Initialization(data);
-        character.SetLifecycleState(Character.LifecycleState.Active);
+        character.SetLifecycleState(CharacterLifecycleState.Active);
         return character;
     }
 
@@ -921,6 +938,11 @@ public static class StaffDutyDebugScenarios
             GridBuildingFactory factory = new GridBuildingFactory();
             BuildableObject building = factory.Create(Grid, buildingData, position);
             objects.Add(building.gameObject);
+            CharacterAiEditorTestDependencies.Inject(building);
+            if (building is Shop shop)
+            {
+                CharacterAiEditorTestDependencies.InjectShop(shop);
+            }
             building.SetGrid(Grid);
             building.Initialization(buildingData, position);
             Grid.RegisterOccupant(
@@ -956,7 +978,7 @@ public static class StaffDutyDebugScenarios
         public bool IsGridMovement => true;
         public GridMoveType GridMoveType => GridMoveType.Stair;
 
-        public System.Collections.IEnumerator Traverse(Character character, GridMoveStep step)
+        public System.Collections.IEnumerator Traverse(CharacterActor actor, GridMoveStep step)
         {
             yield break;
         }

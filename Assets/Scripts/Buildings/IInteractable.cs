@@ -2,12 +2,12 @@ using System.Collections;
 
 public interface IInteractable
 {
-    public IEnumerator Interact(Character character);
+    public IEnumerator Interact(CharacterActor actor);
 }
 
 public interface IGridMovementHandler
 {
-    public IEnumerator Traverse(Character character, GridMoveStep step);
+    public IEnumerator Traverse(CharacterActor actor, GridMoveStep step);
 }
 
 public interface IStockedFacility
@@ -24,7 +24,7 @@ public interface IWarehouseFacility
 
 public interface IWorkableFacility
 {
-    public bool CanAssignWorker(Character character, out string failureReason);
-    public IEnumerator AllocateWorker(Character character);
-    public void DeallocateWorker(Character character);
+    public bool CanAssignWorker(CharacterActor actor, out string failureReason);
+    public IEnumerator AllocateWorker(CharacterActor actor);
+    public void DeallocateWorker(CharacterActor actor);
 }

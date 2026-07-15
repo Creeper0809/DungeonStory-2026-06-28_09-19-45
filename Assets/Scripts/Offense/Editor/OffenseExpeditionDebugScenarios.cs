@@ -63,24 +63,24 @@ public static class OffenseExpeditionDebugScenarios
     private static bool VerifyAvailableMemberFilter()
     {
         using ScenarioRuntime scenario = new ScenarioRuntime();
-        Character worker = scenario.CreateCharacter("Worker", CharacterType.NPC, CharacterRole.Regular, 8);
-        Character owner = scenario.CreateCharacter("Owner", CharacterType.NPC, CharacterRole.Owner, 10);
-        Character customer = scenario.CreateCharacter("Customer", CharacterType.Customer, CharacterRole.Regular, 8);
+        CharacterActor worker = scenario.CreateCharacter("Worker", CharacterType.NPC, CharacterRole.Regular, 8);
+        CharacterActor owner = scenario.CreateCharacter("Owner", CharacterType.NPC, CharacterRole.Owner, 10);
+        CharacterActor customer = scenario.CreateCharacter("Customer", CharacterType.Customer, CharacterRole.Regular, 8);
 
-        IReadOnlyList<Character> available = scenario.Expedition.Runtime.GetAvailableMembers();
-        return available.Contains(worker)
-            && !available.Contains(owner)
-            && !available.Contains(customer);
+        IReadOnlyList<CharacterActor> available = scenario.Expedition.Runtime.GetAvailableMemberActors();
+        return available.Contains(CharacterActor.From(worker))
+            && !available.Contains(CharacterActor.From(owner))
+            && !available.Contains(CharacterActor.From(customer));
     }
 
     private static bool VerifyStartExpeditionRemovesMembersFromDungeon()
     {
         using ScenarioRuntime scenario = new ScenarioRuntime();
-        Character worker = scenario.CreateCharacter("Worker", CharacterType.NPC, CharacterRole.Regular, 10);
+        CharacterActor worker = scenario.CreateCharacter("Worker", CharacterType.NPC, CharacterRole.Regular, 10);
 
         bool started = scenario.Expedition.Runtime.TryStartExpedition(
             "food_farm",
-            new[] { worker },
+            new[] { CharacterActor.From(worker) },
             out OffenseExpeditionRun expedition,
             out _);
 
@@ -88,19 +88,20 @@ public static class OffenseExpeditionDebugScenarios
             && expedition != null
             && worker.IsOnExpedition
             && !worker.CanRunAi
-            && !worker.GetComponent<SpriteRenderer>().enabled
-            && !scenario.Expedition.Runtime.GetAvailableMembers().Contains(worker);
+            && worker.VisualRenderer != null
+            && !worker.VisualRenderer.enabled
+            && !scenario.Expedition.Runtime.GetAvailableMemberActors().Contains(CharacterActor.From(worker));
     }
 
     private static bool VerifyRequiredMemberValidation()
     {
         using ScenarioRuntime scenario = new ScenarioRuntime();
         scenario.WorldMap.Runtime.TryUpgradeRecon(out _);
-        Character worker = scenario.CreateCharacter("Worker", CharacterType.NPC, CharacterRole.Regular, 10);
+        CharacterActor worker = scenario.CreateCharacter("Worker", CharacterType.NPC, CharacterRole.Regular, 10);
 
         bool started = scenario.Expedition.Runtime.TryStartExpedition(
             "old_armory",
-            new[] { worker },
+            new[] { CharacterActor.From(worker) },
             out _,
             out string message);
 
@@ -111,11 +112,11 @@ public static class OffenseExpeditionDebugScenarios
     {
         using ScenarioRuntime scenario = new ScenarioRuntime();
         using CountingCompletionListener completions = new CountingCompletionListener();
-        Character worker = scenario.CreateCharacter("StrongWorker", CharacterType.NPC, CharacterRole.Regular, 12);
+        CharacterActor worker = scenario.CreateCharacter("StrongWorker", CharacterType.NPC, CharacterRole.Regular, 12);
 
         bool started = scenario.Expedition.Runtime.TryStartExpedition(
             "food_farm",
-            new[] { worker },
+            new[] { CharacterActor.From(worker) },
             out OffenseExpeditionRun expedition,
             out _);
         bool completed = scenario.Expedition.Runtime.CompleteExpeditionForDebug(
@@ -130,10 +131,11 @@ public static class OffenseExpeditionDebugScenarios
             && result.rewardSummaries.Length > 0
             && completions.Count == 1
             && worker.gameObject.activeSelf
-            && worker.GetComponent<SpriteRenderer>().enabled
+            && worker.VisualRenderer != null
+            && worker.VisualRenderer.enabled
             && !worker.IsOnExpedition
             && worker.CanRunAi
-            && worker.stats[Character.Condition.SLEEP] < 100f;
+            && worker.stats[CharacterCondition.SLEEP] < 100f;
     }
 
     private static bool VerifyFailureCanKillMember()
@@ -143,11 +145,11 @@ public static class OffenseExpeditionDebugScenarios
         {
             CreateTarget("deadly_test", "위험한 테스트 원정", 1f, 240f, 999f, 1)
         });
-        Character worker = scenario.CreateCharacter("WeakWorker", CharacterType.NPC, CharacterRole.Regular, 1);
+        CharacterActor worker = scenario.CreateCharacter("WeakWorker", CharacterType.NPC, CharacterRole.Regular, 1);
 
         bool started = scenario.Expedition.Runtime.TryStartExpedition(
             "deadly_test",
-            new[] { worker },
+            new[] { CharacterActor.From(worker) },
             out OffenseExpeditionRun expedition,
             out _);
         bool completed = scenario.Expedition.Runtime.CompleteExpeditionForDebug(
@@ -226,7 +228,7 @@ public static class OffenseExpeditionDebugScenarios
             Expedition = new ExpeditionFixture();
         }
 
-        public Character CreateCharacter(
+        public CharacterActor CreateCharacter(
             string name,
             CharacterType type,
             CharacterRole role,
@@ -245,7 +247,7 @@ public static class OffenseExpeditionDebugScenarios
             objects.Add(obj);
             objects.Add(data);
             obj.AddComponent<SpriteRenderer>();
-            Character character = obj.AddComponent<Character>();
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             obj.AddComponent<AbilityMove>();
             obj.AddComponent<AbilityWork>();
             AIBrain brain = obj.AddComponent<AIBrain>();
@@ -254,9 +256,9 @@ public static class OffenseExpeditionDebugScenarios
                 : AiDebugScenarioActionFactory.CreateStaffActions();
             character.RefreshAbilityCache();
             character.Initialization(data);
-            character.SetLifecycleState(Character.LifecycleState.Active);
-            character.stats[Character.Condition.SLEEP] = 100f;
-            character.stats[Character.Condition.MOOD] = 100f;
+            character.SetLifecycleState(CharacterLifecycleState.Active);
+            character.stats[CharacterCondition.SLEEP] = 100f;
+            character.stats[CharacterCondition.MOOD] = 100f;
             return character;
         }
 

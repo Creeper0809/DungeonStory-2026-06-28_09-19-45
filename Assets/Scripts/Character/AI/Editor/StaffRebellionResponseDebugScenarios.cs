@@ -63,14 +63,14 @@ public static class StaffRebellionResponseDebugScenarios
     private static bool VerifyAutoSuppressAssignment()
     {
         using RebellionScenarioWorld world = new RebellionScenarioWorld();
-        Character guard = world.CreateStaff(301, "Auto Guard", new Vector2Int(0, 0), 80f);
-        Character rebel = world.CreateStaff(302, "Auto Rebel", new Vector2Int(3, 0), 5f);
+        CharacterActor guard = world.CreateStaff(301, "Auto Guard", new Vector2Int(0, 0), 80f);
+        CharacterActor rebel = world.CreateStaff(302, "Auto Rebel", new Vector2Int(3, 0), 5f);
 
-        world.Runtime.ProcessStaff(rebel, out StaffDiscontentOutcome outcome);
+        world.Runtime.ProcessStaff(CharacterActor.From(rebel), out StaffDiscontentOutcome outcome);
         AbilityWork guardWork = guard.GetAbility<AbilityWork>();
 
         return outcome == StaffDiscontentOutcome.LocalRebellion
-            && guardWork.PrioritySuppressTarget == rebel
+            && guardWork.PrioritySuppressActor == CharacterActor.From(rebel)
             && guardWork.HasPrioritySuppressTarget
             && guardWork.TryGetPrioritySuppressDestination(world.Grid.SearchPath(new Vector2Int(0, 0)), out BuildableObject destination)
             && destination != null;
@@ -79,23 +79,27 @@ public static class StaffRebellionResponseDebugScenarios
     private static bool VerifyRebelSuppressCommandTarget()
     {
         using RebellionScenarioWorld world = new RebellionScenarioWorld();
-        Character guard = world.CreateStaff(303, "Manual Guard", new Vector2Int(0, 0), 80f);
-        Character rebel = world.CreateStaff(304, "Manual Rebel", new Vector2Int(2, 0), 5f);
+        CharacterActor guard = world.CreateStaff(303, "Manual Guard", new Vector2Int(0, 0), 80f);
+        CharacterActor rebel = world.CreateStaff(304, "Manual Rebel", new Vector2Int(2, 0), 5f);
 
-        world.Runtime.ProcessStaff(rebel, out _);
-        return WorkCommandResolver.IsSuppressTarget(rebel)
-            && WorkCommandResolver.TryResolveSuppressCommand(guard, rebel, out _);
+        world.Runtime.ProcessStaff(CharacterActor.From(rebel), out _);
+        return WorkCommandResolver.IsSuppressTarget(CharacterActor.From(rebel), world.Runtime.IsRebellionTarget)
+            && WorkCommandResolver.TryResolveSuppressCommand(
+                CharacterActor.From(guard),
+                CharacterActor.From(rebel),
+                world.Runtime.IsRebellionTarget,
+                out _);
     }
 
     private static bool VerifyIsolationBlocksOwnerThreat()
     {
         using RebellionScenarioWorld world = new RebellionScenarioWorld();
-        Character rebel = world.CreateStaff(305, "Isolated Rebel", new Vector2Int(2, 0), 5f);
+        CharacterActor rebel = world.CreateStaff(305, "Isolated Rebel", new Vector2Int(2, 0), 5f);
 
-        StaffDiscontentRecord record = world.Runtime.ProcessStaff(rebel, out _);
-        bool isolated = world.Runtime.TryIsolateRebel(rebel, null, out StaffRebellionResponseResult isolationResult);
-        world.Runtime.ProcessStaff(rebel, out StaffDiscontentOutcome secondOutcome);
-        world.Runtime.ProcessStaff(rebel, out StaffDiscontentOutcome thirdOutcome);
+        StaffDiscontentRecord record = world.Runtime.ProcessStaff(CharacterActor.From(rebel), out _);
+        bool isolated = world.Runtime.TryIsolateRebel(CharacterActor.From(rebel), null, out StaffRebellionResponseResult isolationResult);
+        world.Runtime.ProcessStaff(CharacterActor.From(rebel), out StaffDiscontentOutcome secondOutcome);
+        world.Runtime.ProcessStaff(CharacterActor.From(rebel), out StaffDiscontentOutcome thirdOutcome);
 
         return record != null
             && isolated
@@ -109,11 +113,11 @@ public static class StaffRebellionResponseDebugScenarios
     private static bool VerifyCalmBeforeRebellion()
     {
         using RebellionScenarioWorld world = new RebellionScenarioWorld();
-        Character staff = world.CreateStaff(306, "Calm Target", new Vector2Int(1, 0), 20f);
-        Character actor = world.CreateStaff(307, "Negotiator", new Vector2Int(0, 0), 80f);
+        CharacterActor staff = world.CreateStaff(306, "Calm Target", new Vector2Int(1, 0), 20f);
+        CharacterActor actor = world.CreateStaff(307, "Negotiator", new Vector2Int(0, 0), 80f);
 
-        StaffDiscontentRecord record = world.Runtime.ProcessStaff(staff, out StaffDiscontentOutcome beforeOutcome);
-        bool calmed = world.Runtime.TryCalmStaff(staff, actor, out StaffRebellionResponseResult calmResult);
+        StaffDiscontentRecord record = world.Runtime.ProcessStaff(CharacterActor.From(staff), out StaffDiscontentOutcome beforeOutcome);
+        bool calmed = world.Runtime.TryCalmStaff(CharacterActor.From(staff), CharacterActor.From(actor), out StaffRebellionResponseResult calmResult);
 
         return record != null
             && beforeOutcome == StaffDiscontentOutcome.WorkDisruption
@@ -121,24 +125,24 @@ public static class StaffRebellionResponseDebugScenarios
             && calmResult.Success
             && record.Stage != StaffDiscontentStage.WorkDisruption
             && record.Stage != StaffDiscontentStage.LocalRebellion
-            && staff.stats[Character.Condition.MOOD] > 20f;
+            && staff.stats[CharacterCondition.MOOD] > 20f;
     }
 
     private static bool VerifySuppressedRebelClearsThreat()
     {
         using RebellionScenarioWorld world = new RebellionScenarioWorld();
-        Character guard = world.CreateStaff(308, "Suppressing Guard", new Vector2Int(0, 0), 80f);
-        Character rebel = world.CreateStaff(309, "Suppressed Rebel", new Vector2Int(2, 0), 5f);
+        CharacterActor guard = world.CreateStaff(308, "Suppressing Guard", new Vector2Int(0, 0), 80f);
+        CharacterActor rebel = world.CreateStaff(309, "Suppressed Rebel", new Vector2Int(2, 0), 5f);
 
-        StaffDiscontentRecord record = world.Runtime.ProcessStaff(rebel, out _);
-        bool resolved = world.Runtime.ResolveSuppressedRebel(rebel, guard);
+        StaffDiscontentRecord record = world.Runtime.ProcessStaff(CharacterActor.From(rebel), out _);
+        bool resolved = world.Runtime.ResolveSuppressedRebel(CharacterActor.From(rebel), CharacterActor.From(guard));
 
         return record != null
             && resolved
             && record.IsSuppressed
             && record.IsPermanentLoss
             && !record.IsInLocalRebellion
-            && !WorkCommandResolver.IsSuppressTarget(rebel);
+            && !WorkCommandResolver.IsSuppressTarget(CharacterActor.From(rebel), world.Runtime.IsRebellionTarget);
     }
 
     private sealed class RebellionScenarioWorld : IDisposable
@@ -148,7 +152,7 @@ public static class StaffRebellionResponseDebugScenarios
         private static readonly FieldInfo GridField =
             typeof(GridSystemManager).GetField("<grid>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo CharacterAwakeMethod =
-            typeof(Character).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(CharacterActor).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly GridSystemManager previousGridSystem;
         private readonly List<GameObject> objects = new List<GameObject>();
@@ -178,7 +182,7 @@ public static class StaffRebellionResponseDebugScenarios
         public Grid Grid { get; }
         public StaffDiscontentRuntime Runtime { get; }
 
-        public Character CreateStaff(int id, string name, Vector2Int position, float mood)
+        public CharacterActor CreateStaff(int id, string name, Vector2Int position, float mood)
         {
             GameObject obj = new GameObject(name);
             objects.Add(obj);
@@ -186,8 +190,9 @@ public static class StaffRebellionResponseDebugScenarios
             obj.AddComponent<AbilityMove>();
             obj.AddComponent<AbilityShopping>();
             obj.AddComponent<AbilityWork>();
-            obj.AddComponent<AIBrain>();
-            Character character = obj.AddComponent<Character>();
+            AIBrain brain = obj.AddComponent<AIBrain>();
+            brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             CharacterAwakeMethod?.Invoke(character, null);
 
             CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
@@ -202,11 +207,11 @@ public static class StaffRebellionResponseDebugScenarios
             obj.transform.position = Grid.GetWorldPos(position);
             character.RefreshAbilityCache();
             character.Initialization(data);
-            character.SetLifecycleState(Character.LifecycleState.Active);
-            character.stats[Character.Condition.MOOD] = mood;
-            character.stats[Character.Condition.SLEEP] = 80f;
-            character.stats[Character.Condition.HUNGER] = 80f;
-            character.stats[Character.Condition.FUN] = 80f;
+            character.SetLifecycleState(CharacterLifecycleState.Active);
+            character.stats[CharacterCondition.MOOD] = mood;
+            character.stats[CharacterCondition.SLEEP] = 80f;
+            character.stats[CharacterCondition.HUNGER] = 80f;
+            character.stats[CharacterCondition.FUN] = 80f;
             return character;
         }
 

@@ -105,11 +105,11 @@ public static class BlueprintResearchDebugScenarios
         BlueprintResearchRuntime runtime = world.CreateResearchRuntime();
         FacilityBlueprintSO blueprint = LoadBlueprint("BP_DefenseBasics");
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(2, 0));
-        Character researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
+        CharacterActor researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
 
         runtime.EnqueueBlueprint(blueprint);
-        BlueprintResearchWorkResult first = runtime.ApplyResearchWork(researcher, lab, 0.5f);
-        BlueprintResearchWorkResult second = runtime.ApplyResearchWork(researcher, lab, 999f);
+        BlueprintResearchWorkResult first = runtime.ApplyResearchWork(CharacterActor.From(researcher), lab, 0.5f);
+        BlueprintResearchWorkResult second = runtime.ApplyResearchWork(CharacterActor.From(researcher), lab, 999f);
 
         return first.Success
             && first.AddedProgress > 0f
@@ -126,13 +126,15 @@ public static class BlueprintResearchDebugScenarios
         BlueprintResearchRuntime runtime = world.CreateResearchRuntime();
         FacilityBlueprintSO blueprint = LoadBlueprint("BP_DefenseBasics");
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(2, 0));
-        Character researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
+        CharacterActor researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
 
         runtime.EnqueueBlueprint(blueprint);
-        BlueprintResearchWorkResult result = runtime.ApplyResearchWork(researcher, lab, 999f);
+        BlueprintResearchWorkResult result = runtime.ApplyResearchWork(CharacterActor.From(researcher), lab, 999f);
         IReadOnlyList<FacilityShopOffer> offers = FacilityShopService.CreateBasicPurchaseOffers(
             new[] { LoadBuilding("P1_SpikeTrap"), LoadBuilding("P1_GuardRoom") },
-            runtime.ShopUnlockState);
+            runtime.ShopUnlockState,
+            Array.Empty<int>(),
+            DefaultBuildingCostMultiplier);
 
         return result.Completed
             && offers.Any((offer) => offer.Building == LoadBuilding("P1_SpikeTrap"))
@@ -145,10 +147,10 @@ public static class BlueprintResearchDebugScenarios
         BlueprintResearchRuntime runtime = world.CreateResearchRuntime();
         FacilityBlueprintSO blueprint = LoadBlueprint("BP_BattleDining");
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(2, 0));
-        Character researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
+        CharacterActor researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
 
         runtime.EnqueueBlueprint(blueprint);
-        BlueprintResearchWorkResult result = runtime.ApplyResearchWork(researcher, lab, 999f);
+        BlueprintResearchWorkResult result = runtime.ApplyResearchWork(CharacterActor.From(researcher), lab, 999f);
 
         return result.Completed
             && runtime.State.UnlockedRecipeIds.Contains("recipe_battlefield_dining_2");
@@ -158,11 +160,11 @@ public static class BlueprintResearchDebugScenarios
     {
         using ResearchScenarioWorld world = new ResearchScenarioWorld();
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(2, 0));
-        Character fighter = world.CreateCharacter("Species_Orc", "Trait_Fighter");
-        Character researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
+        CharacterActor fighter = world.CreateCharacter("Species_Orc", "Trait_Fighter");
+        CharacterActor researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
 
-        float fighterWork = BlueprintResearchService.CalculateResearchWork(fighter, lab, 1f);
-        float researcherWork = BlueprintResearchService.CalculateResearchWork(researcher, lab, 1f);
+        float fighterWork = BlueprintResearchService.CalculateResearchWork(CharacterActor.From(fighter), lab, 1f);
+        float researcherWork = BlueprintResearchService.CalculateResearchWork(CharacterActor.From(researcher), lab, 1f);
         float labMultiplier = BlueprintResearchService.GetFacilityResearchMultiplier(lab);
 
         return researcherWork > fighterWork
@@ -174,7 +176,7 @@ public static class BlueprintResearchDebugScenarios
         using ResearchScenarioWorld world = new ResearchScenarioWorld();
         BlueprintResearchRuntime runtime = world.CreateResearchRuntime();
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(2, 0));
-        Character researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
+        CharacterActor researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
         AbilityWork work = researcher.GetAbility<AbilityWork>();
         GridPathSearchResult search = world.Grid.SearchPath(Vector2Int.zero);
 
@@ -203,6 +205,11 @@ public static class BlueprintResearchDebugScenarios
         return AssetDatabase.LoadAssetAtPath<FacilityBlueprintSO>($"Assets/Resources/SO/Blueprint/P1/{assetName}.asset");
     }
 
+    private static float DefaultBuildingCostMultiplier(BuildingSO building)
+    {
+        return 1f;
+    }
+
     private static BuildingSO LoadBuilding(string assetName)
     {
         return AssetDatabase.LoadAssetAtPath<BuildingSO>($"Assets/Resources/SO/Building/P1/{assetName}.asset");
@@ -223,7 +230,7 @@ public static class BlueprintResearchDebugScenarios
         private static readonly FieldInfo GridField =
             typeof(GridSystemManager).GetField("<grid>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo CharacterAwakeMethod =
-            typeof(Character).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            typeof(CharacterActor).GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private readonly GridSystemManager previousGridSystem;
         private readonly List<GameObject> objects = new List<GameObject>();
@@ -255,6 +262,7 @@ public static class BlueprintResearchDebugScenarios
         {
             GameObject obj = new GameObject("BlueprintResearchRuntime_Test");
             objects.Add(obj);
+            obj.AddComponent<DailyFacilityShopRuntime>();
             BlueprintResearchRuntime runtime = obj.AddComponent<BlueprintResearchRuntime>();
             runtime.EventStartListening<FacilityShopPurchasedEvent>();
             return runtime;
@@ -291,15 +299,16 @@ public static class BlueprintResearchDebugScenarios
             return building;
         }
 
-        public Character CreateCharacter(string speciesAssetName, string traitAssetName)
+        public CharacterActor CreateCharacter(string speciesAssetName, string traitAssetName)
         {
             GameObject obj = new GameObject($"Blueprint Research Character {speciesAssetName} {traitAssetName}");
             objects.Add(obj);
             obj.AddComponent<SpriteRenderer>();
             obj.AddComponent<AbilityMove>();
             obj.AddComponent<AbilityWork>();
-            obj.AddComponent<AIBrain>();
-            Character character = obj.AddComponent<Character>();
+            AIBrain brain = obj.AddComponent<AIBrain>();
+            brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
+            CharacterActor character = obj.AddComponent<CharacterActor>();
             CharacterAwakeMethod?.Invoke(character, null);
 
             CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
@@ -317,8 +326,8 @@ public static class BlueprintResearchDebugScenarios
             data.baseStats = CharacterStatBlock.CreateDefault();
             data.defaultWorkPriorities = WorkPriorityProfile.CreateDefault();
             character.Initialization(data);
-            character.stats[Character.Condition.SLEEP] = 100f;
-            character.stats[Character.Condition.MOOD] = 100f;
+            character.stats[CharacterCondition.SLEEP] = 100f;
+            character.stats[CharacterCondition.MOOD] = 100f;
             return character;
         }
 

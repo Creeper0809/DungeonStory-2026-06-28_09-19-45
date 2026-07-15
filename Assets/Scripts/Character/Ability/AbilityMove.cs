@@ -3,28 +3,41 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using VContainer;
 
 public class AbilityMove : CharacterAbility
 {
     private float moveSpeed;
     private CharacterSpawner spawner;
+    private ICharacterSpawnerProvider spawnerProvider;
+    private ICharacterAiSchedulingService aiSchedulingService;
     private Coroutine enterDungeonRoutine;
+    private Coroutine activeActionMovementRoutine;
+
+    public bool LastGridMoveWasBlocked { get; private set; }
+
+    [Inject]
+    public void ConstructAbilityMove(
+        ICharacterSpawnerProvider spawnerProvider,
+        ICharacterAiSchedulingService aiSchedulingService)
+    {
+        this.spawnerProvider = spawnerProvider
+            ?? throw new ArgumentNullException(nameof(spawnerProvider));
+        this.aiSchedulingService = aiSchedulingService
+            ?? throw new ArgumentNullException(nameof(aiSchedulingService));
+        TryResolveSpawner();
+    }
 
     protected override void Awake()
     {
         base.Awake();
-        GameObject spawnerObject = GameObject.FindGameObjectWithTag("CharacterSpawner");
-        if (spawnerObject != null)
-        {
-            spawner = spawnerObject.GetComponent<CharacterSpawner>();
-        }
     }
 
     public override void Initializtion(CharacterSO data)
     {
         base.Initializtion(data);
-        moveSpeed = character != null
-            ? character.GetMoveSpeed()
+        moveSpeed = actor != null
+            ? actor.GetMoveSpeed()
             : data != null
                 ? data.moveSpeed
                 : 1f;
@@ -35,6 +48,7 @@ public class AbilityMove : CharacterAbility
     {
         if (path == null) yield break;
 
+        int staleReplanAttempts = 0;
         while (path.Count > 0)
         {
             if (IsActionMovementCancelled(expectedAction))
@@ -45,13 +59,51 @@ public class AbilityMove : CharacterAbility
             GridMoveStep step = path.Dequeue();
             if (step == null) continue;
 
+            if (!IsAtStepStart(step))
+            {
+                if (staleReplanAttempts < 1
+                    && TryReplanCurrentActionPath(expectedAction, out Queue<GridMoveStep> rebuiltPath))
+                {
+                    staleReplanAttempts++;
+                    path = rebuiltPath;
+                    continue;
+                }
+
+                if (expectedAction != null && expectedAction.planKind == AIActionPlanKind.DestinationOnly)
+                {
+                    yield break;
+                }
+
+                SetGridMoveBlocked();
+                yield break;
+            }
+
+            if (IsWalkStepBlocked(step))
+            {
+                SetGridMoveBlocked();
+                yield break;
+            }
+
             RefreshCurrentActionReservation();
             yield return MoveByStep(step, expectedAction);
+
+            if (LastGridMoveWasBlocked || IsWalkStepBlocked(step))
+            {
+                SetGridMoveBlocked();
+                yield break;
+            }
         }
     }
 
     public IEnumerator MoveByStep(GridMoveStep step, AIAction expectedAction = null)
     {
+        LastGridMoveWasBlocked = false;
+        if (!IsAtStepStart(step))
+        {
+            SetGridMoveBlocked();
+            yield break;
+        }
+
         if (step.MoveType == GridMoveType.Walk)
         {
             yield return Move2GridPosition(step.To, expectedAction);
@@ -68,7 +120,13 @@ public class AbilityMove : CharacterAbility
             && !building.isDestroy
             && building is IGridMovementHandler movementHandler)
         {
-            yield return movementHandler.Traverse(character, step);
+            yield return movementHandler.Traverse(actor, step);
+            yield break;
+        }
+
+        if (RequiresMovementHandler(step))
+        {
+            SetGridMoveBlocked();
             yield break;
         }
 
@@ -80,13 +138,29 @@ public class AbilityMove : CharacterAbility
         if (grid == null) yield break;
 
         RefreshCurrentActionReservation();
+        Vector3 startPos = transform.position;
+        if (grid.IsMovementBlockedByWall(gridPosition))
+        {
+            SetGridMoveBlocked();
+            yield break;
+        }
+
+        int observedGridVersion = grid.version;
         Vector3 endPos = grid.GetWorldPos(gridPosition);
-        yield return Move2PosBySpeed(endPos, 1.0f, expectedAction);
+        yield return Move2PosBySpeedInternal(
+            endPos,
+            1.0f,
+            expectedAction,
+            gridPosition,
+            observedGridVersion,
+            startPos);
     }
 
     public void StartExitDungeon()
     {
-        if (character == null || character.CurrentLifecycleState == Character.LifecycleState.ExitingDungeon)
+        if (actor == null
+            || actor.Lifecycle == null
+            || actor.Lifecycle.CurrentState == CharacterLifecycleState.ExitingDungeon)
         {
             return;
         }
@@ -97,8 +171,8 @@ public class AbilityMove : CharacterAbility
             enterDungeonRoutine = null;
         }
 
-        character.SetLifecycleState(Character.LifecycleState.ExitingDungeon);
-        StartCoroutine(ExitDungeon());
+        actor.SetLifecycleState(CharacterLifecycleState.ExitingDungeon);
+        StartTrackedActionMovement(ExitDungeon());
     }
 
     public void StartEnterDungeon(Vector3 entryDoorWorldPosition, Vector2Int entryGridPosition)
@@ -108,17 +182,19 @@ public class AbilityMove : CharacterAbility
             StopCoroutine(enterDungeonRoutine);
         }
 
-        enterDungeonRoutine = StartCoroutine(EnterDungeon(entryDoorWorldPosition, entryGridPosition));
+        StartTrackedActionMovement(EnterDungeon(entryDoorWorldPosition, entryGridPosition));
     }
 
     public void StartMoveByCurrentActionPath(float waitDuration = 0f)
     {
-        StartCoroutine(MoveByCurrentActionPath(waitDuration));
+        AIAction expectedAction = GetCurrentAction();
+        StartTrackedActionMovement(MoveByCurrentActionPath(waitDuration, expectedAction));
     }
 
     public void StartWait(float duration)
     {
-        StartCoroutine(WaitForAiAction(duration));
+        AIAction expectedAction = GetCurrentAction();
+        StartTrackedActionMovement(WaitForAiAction(duration, expectedAction));
     }
 
     public bool StartIdleWander(float waitDuration, int minDistance = 2, int maxDistance = 8)
@@ -130,37 +206,76 @@ public class AbilityMove : CharacterAbility
             return false;
         }
 
-        StartCoroutine(MoveByPathThenWait(path, waitDuration));
+        AIAction expectedAction = GetCurrentAction();
+        StartTrackedActionMovement(MoveByPathThenWait(path, waitDuration, expectedAction));
         return true;
     }
 
-    private IEnumerator MoveByCurrentActionPath(float waitDuration)
+    public void CancelActiveMovement()
     {
-        yield return MoveByCurrentBestActionPath();
-
-        if (waitDuration > 0f)
+        if (activeActionMovementRoutine != null)
         {
-            yield return new WaitForSeconds(waitDuration);
-        }
-
-        if (character != null && character.ai != null)
-        {
-            character.ai.isBestActionEnd = true;
+            StopCoroutine(activeActionMovementRoutine);
+            activeActionMovementRoutine = null;
         }
     }
 
-    private IEnumerator MoveByPathThenWait(Queue<GridMoveStep> path, float waitDuration)
+    private void StartTrackedActionMovement(IEnumerator routine)
     {
-        yield return MoveByPath(path);
+        CancelActiveMovement();
+        activeActionMovementRoutine = StartCoroutine(TrackActionMovement(routine));
+    }
+
+    private IEnumerator TrackActionMovement(IEnumerator routine)
+    {
+        yield return routine;
+        activeActionMovementRoutine = null;
+    }
+
+    private AIAction GetCurrentAction()
+    {
+        return actor != null && actor.Brain != null
+            ? actor.Brain.bestAction
+            : null;
+    }
+
+    private IEnumerator MoveByCurrentActionPath(float waitDuration, AIAction expectedAction)
+    {
+        yield return MoveByActionPath(expectedAction);
 
         if (waitDuration > 0f)
         {
-            yield return new WaitForSeconds(waitDuration);
+            yield return WaitForAiActionDelay(waitDuration, expectedAction);
         }
 
-        if (character != null && character.ai != null)
+        if (IsActionMovementCancelled(expectedAction))
         {
-            character.ai.isBestActionEnd = true;
+            yield break;
+        }
+
+        if (actor != null && actor.Brain != null)
+        {
+            actor.Brain.isBestActionEnd = true;
+        }
+    }
+
+    private IEnumerator MoveByPathThenWait(Queue<GridMoveStep> path, float waitDuration, AIAction expectedAction)
+    {
+        yield return MoveByPath(path, expectedAction);
+
+        if (waitDuration > 0f)
+        {
+            yield return WaitForAiActionDelay(waitDuration, expectedAction);
+        }
+
+        if (IsActionMovementCancelled(expectedAction))
+        {
+            yield break;
+        }
+
+        if (actor != null && actor.Brain != null)
+        {
+            actor.Brain.isBestActionEnd = true;
         }
     }
 
@@ -171,12 +286,12 @@ public class AbilityMove : CharacterAbility
     {
         path = null;
         CacheCommonReferences();
-        if (character == null || grid == null)
+        if (actor == null || grid == null)
         {
             return false;
         }
 
-        Vector2Int originalPos = grid.GetXY(character.transform.position);
+        Vector2Int originalPos = grid.GetXY(actor.transform.position);
         GridPathSearchResult searchResult = GetIdleSearchResult(originalPos);
         if (searchResult == null)
         {
@@ -244,6 +359,12 @@ public class AbilityMove : CharacterAbility
             && step.MovementOccupant is IGridMovementHandler;
     }
 
+    private static bool RequiresMovementHandler(GridMoveStep step)
+    {
+        return step != null
+            && (step.MoveType == GridMoveType.Stair || step.MoveType == GridMoveType.Elevator);
+    }
+
     private GridPathSearchResult GetIdleSearchResult(Vector2Int originalPos)
     {
         if (grid == null)
@@ -256,8 +377,8 @@ public class AbilityMove : CharacterAbility
             return null;
         }
 
-        return character.ai != null
-            ? character.ai.GetPathSearch(character)
+        return actor != null && actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
             : grid.SearchPath(originalPos);
     }
 
@@ -277,10 +398,11 @@ public class AbilityMove : CharacterAbility
 
     public IEnumerator MoveByCurrentBestActionPath()
     {
-        AIAction action = character != null && character.ai != null
-            ? character.ai.bestAction
-            : null;
+        yield return MoveByActionPath(GetCurrentAction());
+    }
 
+    private IEnumerator MoveByActionPath(AIAction action)
+    {
         if (action == null)
         {
             yield break;
@@ -288,47 +410,98 @@ public class AbilityMove : CharacterAbility
 
         if (action.pathSteps != null && action.pathSteps.Count > 0)
         {
+            actor?.Brain?.SetActionPhase("\uC774\uB3D9", action.destination, $"{action.planKind} / {action.pathSteps.Count}\uCE78");
             yield return MoveByPath(new Queue<GridMoveStep>(action.pathSteps), action);
         }
     }
 
+    private bool TryReplanCurrentActionPath(
+        AIAction action,
+        out Queue<GridMoveStep> rebuiltPath)
+    {
+        rebuiltPath = null;
+        if (action == null
+            || actor == null
+            || actor.Brain == null)
+        {
+            return false;
+        }
+
+        actor.Brain.ClearPathSearchCache();
+        if (!action.TryRebuildPathFromCurrentPosition(actor, out AIActionFailure failure))
+        {
+            actor.Brain.SetActionPhase("\uACBD\uB85C \uC7AC\uD0D0\uC0C9 \uC2E4\uD328", action.destination, failure.ToString());
+            return false;
+        }
+
+        if (action.pathSteps == null || action.pathSteps.Count == 0)
+        {
+            actor.Brain.SetActionPhase("\uB3C4\uCC29", action.destination, action.planKind.ToString());
+            return false;
+        }
+
+        rebuiltPath = new Queue<GridMoveStep>(action.pathSteps);
+        actor.Brain.SetActionPhase(
+            "\uACBD\uB85C \uC7AC\uD0D0\uC0C9",
+            action.destination,
+            $"{action.planKind} / {action.pathSteps.Count}\uCE78");
+        return rebuiltPath.Count > 0;
+    }
+
     private void RefreshCurrentActionReservation()
     {
-        if (character == null || character.ai == null || character.ai.bestAction == null)
+        if (actor == null || actor.Brain == null || actor.Brain.bestAction == null)
         {
             return;
         }
 
-        character.ai.bestAction.RefreshReservation(character);
+        actor.Brain.bestAction.RefreshReservation(actor);
     }
 
     private bool IsActionMovementCancelled(AIAction expectedAction)
     {
         return expectedAction != null
-            && (character == null
-                || character.ai == null
-                || character.ai.bestAction != expectedAction
-                || character.ai.isBestActionEnd);
+            && (actor == null
+                || actor.Brain == null
+                || actor.Brain.bestAction != expectedAction
+                || actor.Brain.isBestActionEnd);
     }
 
-    private IEnumerator WaitForAiAction(float duration)
+    private IEnumerator WaitForAiAction(float duration, AIAction expectedAction)
     {
-        if (duration > 0f)
+        yield return WaitForAiActionDelay(duration, expectedAction);
+
+        if (IsActionMovementCancelled(expectedAction))
         {
-            yield return new WaitForSeconds(duration);
+            yield break;
         }
 
-        if (character != null && character.ai != null)
+        if (actor != null && actor.Brain != null)
         {
-            character.ai.isBestActionEnd = true;
+            actor.Brain.isBestActionEnd = true;
+        }
+    }
+
+    private IEnumerator WaitForAiActionDelay(float duration, AIAction expectedAction)
+    {
+        float timer = 0f;
+        while (timer < duration)
+        {
+            if (IsActionMovementCancelled(expectedAction))
+            {
+                yield break;
+            }
+
+            timer += Time.deltaTime;
+            yield return null;
         }
     }
 
     private IEnumerator EnterDungeon(Vector3 entryDoorWorldPosition, Vector2Int entryGridPosition)
     {
-        if (character != null)
+        if (actor != null)
         {
-            character.SetLifecycleState(Character.LifecycleState.EnteringDungeon);
+            actor.SetLifecycleState(CharacterLifecycleState.EnteringDungeon);
         }
 
         CacheCommonReferences();
@@ -340,10 +513,10 @@ public class AbilityMove : CharacterAbility
             yield return Move2PosBySpeed(grid.GetWorldPos(entryGridPosition));
         }
 
-        if (character != null)
+        if (actor != null)
         {
-            character.ChangeLayer("Default");
-            character.SetLifecycleState(Character.LifecycleState.Active);
+            actor.ChangeLayer("Default");
+            actor.SetLifecycleState(CharacterLifecycleState.Active);
         }
 
         enterDungeonRoutine = null;
@@ -358,9 +531,9 @@ public class AbilityMove : CharacterAbility
 
         if (grid == null)
         {
-            if (character != null)
+            if (actor != null)
             {
-                character.SetLifecycleState(Character.LifecycleState.Active);
+                actor.SetLifecycleState(CharacterLifecycleState.Active);
             }
             yield break;
         }
@@ -376,7 +549,7 @@ public class AbilityMove : CharacterAbility
             {
                 yield return MoveByPath(path);
             }
-            if(grid.GetXY(character.transform.position).y == 0)
+            if(actor != null && grid.GetXY(actor.transform.position).y == 0)
             {
                 break;
             }
@@ -384,30 +557,40 @@ public class AbilityMove : CharacterAbility
             counter++;
         }
 
-        if (spawner == null)
-        {
-            GameObject spawnerObject = GameObject.FindGameObjectWithTag("CharacterSpawner");
-            if (spawnerObject != null)
-            {
-                spawner = spawnerObject.GetComponent<CharacterSpawner>();
-            }
-        }
+        TryResolveSpawner();
 
         if (spawner != null)
         {
             yield return Move2PosBySpeed(spawner.GetEntryDoorWorldPosition());
             yield return Move2PosBySpeed(spawner.GetOutsideSpawnWorldPosition());
-            if (character != null)
+            if (actor != null)
             {
-                character.SetLifecycleState(Character.LifecycleState.Despawned);
+                actor.SetLifecycleState(CharacterLifecycleState.Despawned);
             }
-            yield return spawner.Interact(character);
+            yield return spawner.Interact(actor);
         }
-        else if (character != null)
+        else if (actor != null)
         {
-            character.SetLifecycleState(Character.LifecycleState.Active);
+            actor.SetLifecycleState(CharacterLifecycleState.Active);
         }
     }
+
+    private bool TryResolveSpawner()
+    {
+        if (spawner != null)
+        {
+            return true;
+        }
+
+        return spawnerProvider != null && spawnerProvider.TryGetSpawner(out spawner);
+    }
+
+    private ICharacterAiSchedulingService RequireAiSchedulingService()
+    {
+        return aiSchedulingService
+            ?? throw new InvalidOperationException($"{nameof(AbilityMove)} requires {nameof(ICharacterAiSchedulingService)} injection.");
+    }
+
     public IEnumerator Move2PosByTime(Vector3 endPos, float duration)
     {
         float timer = 0f;
@@ -422,15 +605,32 @@ public class AbilityMove : CharacterAbility
     }
     public IEnumerator Move2PosBySpeed(Vector3 endPos, float multifly = 1.0f, AIAction expectedAction = null)
     {
+        yield return Move2PosBySpeedInternal(
+            endPos,
+            multifly,
+            expectedAction,
+            null,
+            0,
+            transform.position);
+    }
+
+    private IEnumerator Move2PosBySpeedInternal(
+        Vector3 endPos,
+        float multifly,
+        AIAction expectedAction,
+        Vector2Int? blockedGridPosition,
+        int observedGridVersion,
+        Vector3 blockedFallbackPosition)
+    {
         Vector3 startPos = transform.position;
         float deltaX = endPos.x - startPos.x;
         if (Mathf.Abs(deltaX) > 0.01f && deltaX > 0f)
         {
-            character.Flip(Character.Facing.RIGHT);
+            actor?.Flip(CharacterFacing.RIGHT);
         }
         else if (Mathf.Abs(deltaX) > 0.01f)
         {
-            character.Flip(Character.Facing.LEFT);
+            actor?.Flip(CharacterFacing.LEFT);
         }
         float distance = Vector3.Distance(startPos, endPos);
         float totalSpeed = moveSpeed * multifly;
@@ -444,14 +644,24 @@ public class AbilityMove : CharacterAbility
 
         while (timer < duration)
         {
+            if (TryRollbackForChangedGridBlock(
+                blockedGridPosition,
+                ref observedGridVersion,
+                blockedFallbackPosition))
+            {
+                yield break;
+            }
+
             if (IsActionMovementCancelled(expectedAction))
             {
                 yield break;
             }
 
-            transform.position = Vector3.Lerp(startPos, endPos, (timer / duration));
+            Vector3 nextPosition = Vector3.Lerp(startPos, endPos, (timer / duration));
+            UpdateFacingForMovement(nextPosition.x - transform.position.x);
+            transform.position = nextPosition;
             timer += Time.deltaTime;
-            int frameStride = CharacterAiScheduler.GetMovementFrameStride(character);
+            int frameStride = RequireAiSchedulingService().GetMovementFrameStride(actor);
             for (int i = 1; i < frameStride && timer < duration; i++)
             {
                 yield return null;
@@ -460,10 +670,96 @@ public class AbilityMove : CharacterAbility
                     yield break;
                 }
 
+                if (TryRollbackForChangedGridBlock(
+                    blockedGridPosition,
+                    ref observedGridVersion,
+                    blockedFallbackPosition))
+                {
+                    yield break;
+                }
+
                 timer += Time.deltaTime;
             }
             yield return null;
         }
+
+        if (TryRollbackForChangedGridBlock(
+            blockedGridPosition,
+            ref observedGridVersion,
+            blockedFallbackPosition))
+        {
+            yield break;
+        }
+
+        UpdateFacingForMovement(endPos.x - transform.position.x);
         transform.position = endPos;
+    }
+
+    private bool TryRollbackForChangedGridBlock(
+        Vector2Int? blockedGridPosition,
+        ref int observedGridVersion,
+        Vector3 blockedFallbackPosition)
+    {
+        if (!blockedGridPosition.HasValue || grid == null)
+        {
+            return false;
+        }
+
+        int currentGridVersion = grid.version;
+        if (currentGridVersion == observedGridVersion)
+        {
+            return false;
+        }
+
+        observedGridVersion = currentGridVersion;
+        if (!grid.IsMovementBlockedByWall(blockedGridPosition.Value))
+        {
+            return false;
+        }
+
+        transform.position = blockedFallbackPosition;
+        SetGridMoveBlocked();
+        return true;
+    }
+
+    private bool IsWalkStepBlocked(GridMoveStep step)
+    {
+        return step != null
+            && step.MoveType == GridMoveType.Walk
+            && grid != null
+            && grid.IsMovementBlockedByWall(step.To);
+    }
+
+    private bool IsAtStepStart(GridMoveStep step)
+    {
+        return step != null
+            && grid != null
+            && grid.GetXY(transform.position) == step.From;
+    }
+
+    private void SetGridMoveBlocked()
+    {
+        LastGridMoveWasBlocked = true;
+        if (actor == null || actor.Brain == null)
+        {
+            return;
+        }
+
+        actor.Brain.ClearPathSearchCache();
+        if (actor.Brain.bestAction != null)
+        {
+            actor.Brain.SetActionPhase("\uC774\uB3D9 \uB9C9\uD798", actor.Brain.bestAction.destination);
+            actor.Brain.isBestActionEnd = true;
+        }
+    }
+
+    private void UpdateFacingForMovement(float deltaX)
+    {
+        if (actor == null || Mathf.Abs(deltaX) <= 0.001f)
+        {
+            return;
+        }
+
+        actor.Flip(deltaX > 0f ? CharacterFacing.RIGHT : CharacterFacing.LEFT);
     }
 }

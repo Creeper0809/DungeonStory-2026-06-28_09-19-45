@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class Stair : BuildableObject, IInteractable, IGridMovementHandler
@@ -10,39 +9,44 @@ public class Stair : BuildableObject, IInteractable, IGridMovementHandler
 
     public override GridMoveType GridMoveType => GridMoveType.Stair;
 
-    public IEnumerator Traverse(Character character, GridMoveStep step)
+    public IEnumerator Traverse(CharacterActor actor, GridMoveStep step)
     {
-        if (character == null || step == null) yield break;
+        if (actor == null || step == null) yield break;
 
-        AbilityMove moveable = character.GetAbility<AbilityMove>();
+        AbilityMove moveable = actor.GetAbility<AbilityMove>();
         if (moveable == null || grid == null) yield break;
 
         Vector3 fromAnchor = GetFloorCenterAnchor(step.From);
         Vector3 toAnchor = GetFloorCenterAnchor(step.To);
-        fromAnchor.z = character.transform.position.z;
-        toAnchor.z = character.transform.position.z;
+        fromAnchor.z = actor.transform.position.z;
+        toAnchor.z = actor.transform.position.z;
 
-        if ((character.transform.position - fromAnchor).sqrMagnitude > 0.01f)
+        if ((actor.transform.position - fromAnchor).sqrMagnitude > 0.01f)
         {
             yield return moveable.Move2PosBySpeed(fromAnchor, EnterSpeedMultiplier);
         }
 
-        List<RendererVisibilityState> rendererStates = CaptureRendererVisibility(character);
-        List<CanvasVisibilityState> canvasStates = CaptureCanvasVisibility(character);
-        SetCharacterTraversalVisible(rendererStates, canvasStates, false);
+        float hiddenTravelDelay = GetHiddenTravelDelay();
+        float failSafeDelay = hiddenTravelDelay + ReappearDelay + 0.5f;
+        actor.HideForTraversal(failSafeDelay);
 
-        yield return new WaitForSeconds(GetHiddenTravelDelay());
-        character.transform.position = toAnchor;
-        yield return new WaitForSeconds(ReappearDelay);
-
-        RestoreCharacterTraversalVisible(rendererStates, canvasStates);
+        try
+        {
+            yield return new WaitForSeconds(hiddenTravelDelay);
+            actor.transform.position = toAnchor;
+            yield return new WaitForSeconds(ReappearDelay);
+        }
+        finally
+        {
+            actor.RestoreTraversalVisibility();
+        }
     }
 
-    public IEnumerator Interact(Character character)
+    public IEnumerator Interact(CharacterActor actor)
     {
-        if (character == null || grid == null) yield break;
+        if (actor == null || grid == null) yield break;
 
-        Vector2Int from = grid.GetXY(character.transform.position);
+        Vector2Int from = grid.GetXY(actor.transform.position);
         Vector2Int to = from;
         GridCell cell = grid.GetGridCell(from);
         if (cell != null)
@@ -62,7 +66,7 @@ public class Stair : BuildableObject, IInteractable, IGridMovementHandler
             to = new Vector2Int(from.x, Mathf.Clamp(from.y + 1, 0, grid.height - 1));
         }
 
-        yield return Traverse(character, new GridMoveStep(from, to, this, this, GridMoveType.Stair));
+        yield return Traverse(actor, new GridMoveStep(from, to, this, this, GridMoveType.Stair));
     }
 
     private float GetHiddenTravelDelay()
@@ -110,102 +114,4 @@ public class Stair : BuildableObject, IInteractable, IGridMovementHandler
         return anchor;
     }
 
-    private static List<RendererVisibilityState> CaptureRendererVisibility(Character character)
-    {
-        List<RendererVisibilityState> states = new List<RendererVisibilityState>();
-        if (character == null) return states;
-
-        foreach (Renderer renderer in character.GetComponentsInChildren<Renderer>(true))
-        {
-            if (renderer != null)
-            {
-                states.Add(new RendererVisibilityState(renderer, renderer.enabled));
-            }
-        }
-
-        return states;
-    }
-
-    private static List<CanvasVisibilityState> CaptureCanvasVisibility(Character character)
-    {
-        List<CanvasVisibilityState> states = new List<CanvasVisibilityState>();
-        if (character == null) return states;
-
-        foreach (Canvas canvas in character.GetComponentsInChildren<Canvas>(true))
-        {
-            if (canvas != null)
-            {
-                states.Add(new CanvasVisibilityState(canvas, canvas.enabled));
-            }
-        }
-
-        return states;
-    }
-
-    private static void SetCharacterTraversalVisible(
-        List<RendererVisibilityState> rendererStates,
-        List<CanvasVisibilityState> canvasStates,
-        bool visible)
-    {
-        foreach (RendererVisibilityState state in rendererStates)
-        {
-            if (state.Renderer != null)
-            {
-                state.Renderer.enabled = visible;
-            }
-        }
-
-        foreach (CanvasVisibilityState state in canvasStates)
-        {
-            if (state.Canvas != null)
-            {
-                state.Canvas.enabled = visible;
-            }
-        }
-    }
-
-    private static void RestoreCharacterTraversalVisible(
-        List<RendererVisibilityState> rendererStates,
-        List<CanvasVisibilityState> canvasStates)
-    {
-        foreach (RendererVisibilityState state in rendererStates)
-        {
-            if (state.Renderer != null)
-            {
-                state.Renderer.enabled = state.Enabled;
-            }
-        }
-
-        foreach (CanvasVisibilityState state in canvasStates)
-        {
-            if (state.Canvas != null)
-            {
-                state.Canvas.enabled = state.Enabled;
-            }
-        }
-    }
-
-    private readonly struct RendererVisibilityState
-    {
-        public RendererVisibilityState(Renderer renderer, bool enabled)
-        {
-            Renderer = renderer;
-            Enabled = enabled;
-        }
-
-        public Renderer Renderer { get; }
-        public bool Enabled { get; }
-    }
-
-    private readonly struct CanvasVisibilityState
-    {
-        public CanvasVisibilityState(Canvas canvas, bool enabled)
-        {
-            Canvas = canvas;
-            Enabled = enabled;
-        }
-
-        public Canvas Canvas { get; }
-        public bool Enabled { get; }
-    }
 }

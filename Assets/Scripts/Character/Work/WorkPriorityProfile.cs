@@ -64,7 +64,7 @@ public static class WorkTaskCatalog
     {
         return workType switch
         {
-            FacilityWorkType.Operate => "근무",
+            FacilityWorkType.Operate => "운영",
             FacilityWorkType.Restock => "보충",
             FacilityWorkType.Repair => "수리",
             FacilityWorkType.Clean => "청소",
@@ -91,7 +91,7 @@ public static class WorkTaskCatalog
 public static class WorkCommandResolver
 {
     public static bool TryResolveFacilityCommand(
-        Character actor,
+        CharacterActor actor,
         BuildableObject target,
         out FacilityWorkType workType,
         out string failureReason)
@@ -157,7 +157,7 @@ public static class WorkCommandResolver
         if (assignableTypes.Count > 1)
         {
             workType = FacilityWorkType.None;
-            failureReason = "작업 종류를 명시해야 합니다.";
+            failureReason = "작업 종류를 명시해야 합니다";
             return false;
         }
 
@@ -165,17 +165,18 @@ public static class WorkCommandResolver
         return false;
     }
 
-    public static bool IsSuppressTarget(Character target)
+    public static bool IsSuppressTarget(CharacterActor target, Predicate<CharacterActor> isRebellionTarget)
     {
+        CharacterIdentity identity = target != null ? target.Identity : null;
         return target != null
-            && (target.characterType == CharacterType.Intruder
-                || (StaffDiscontentRuntime.Instance != null
-                    && StaffDiscontentRuntime.Instance.IsRebellionTarget(target)));
+            && ((identity != null && identity.CharacterType == CharacterType.Intruder)
+                || (isRebellionTarget != null && isRebellionTarget(target)));
     }
 
     public static bool TryResolveSuppressCommand(
-        Character actor,
-        Character target,
+        CharacterActor actor,
+        CharacterActor target,
+        Predicate<CharacterActor> isRebellionTarget,
         out string failureReason)
     {
         failureReason = string.Empty;
@@ -200,7 +201,7 @@ public static class WorkCommandResolver
 
         if (actor.IsDead)
         {
-            failureReason = "선택한 캐릭터가 행동할 수 없습니다";
+            failureReason = "선택된 캐릭터가 행동할 수 없습니다";
             return false;
         }
 
@@ -210,7 +211,7 @@ public static class WorkCommandResolver
             return false;
         }
 
-        if (!IsSuppressTarget(target))
+        if (!IsSuppressTarget(target, isRebellionTarget))
         {
             failureReason = "제압 대상이 아닙니다";
             return false;

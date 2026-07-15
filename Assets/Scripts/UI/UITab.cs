@@ -1,10 +1,19 @@
-using System.Collections;
-using System.Collections.Generic;
+using System;
 using UnityEngine;
+using VContainer;
 
 public class UITab : UIPopUp
 {
     public int id;
+    private IUiPopupService popupService;
+
+    [Inject]
+    public void Construct(IUiPopupService popupService)
+    {
+        this.popupService = popupService
+            ?? throw new ArgumentNullException(nameof(popupService));
+    }
+
     public bool ToggleTab(int id)
     {
         if (this.id != id)
@@ -26,7 +35,7 @@ public class UITab : UIPopUp
         }
         else
         {
-            UIManager.Instance.OpenPopup(this);
+            ResolvePopupService().Open(this);
             gameObject.SetActive(true);
             return true;
         }
@@ -38,6 +47,17 @@ public class UITab : UIPopUp
     public void CloseTab()
     {
         if (!gameObject.activeSelf) return;
-        UIManager.Instance.ClosePopupPeek(this);
+        ResolvePopupService().ClosePeek(this);
+    }
+
+    private IUiPopupService ResolvePopupService()
+    {
+        if (popupService == null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(UITab)} requires VContainer injection of {nameof(IUiPopupService)}.");
+        }
+
+        return popupService;
     }
 }

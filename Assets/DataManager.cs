@@ -4,28 +4,28 @@ using UnityEngine;
 
 public class DataManager
 {
-    private static DataManager instance;
-    public static DataManager Instance { 
-        get
+    private readonly Dictionary<Type, Dictionary<int, DataScriptableObject>> data;
+
+    public DataManager(IDataScriptableObjectSource source)
+    {
+        if (source == null)
         {
-            if(instance == null)
-            {
-                instance = new DataManager();
-            }
-            return instance;
+            throw new ArgumentNullException(nameof(source));
         }
-    }
-    private Dictionary<Type, Dictionary<int, DataScriptableObject>> data;
-    private DataManager()
-    {
+
         data = new Dictionary<Type, Dictionary<int, DataScriptableObject>>();
-        BuildAllData();
+        BuildAllData(source.LoadAll());
     }
-    private void BuildAllData()
+
+    private void BuildAllData(IReadOnlyCollection<DataScriptableObject> allScriptableObjects)
     {
-        DataScriptableObject[] allScriptableObjects = Resources.LoadAll<DataScriptableObject>("SO");
-        foreach (var scriptableObject in allScriptableObjects)
+        foreach (DataScriptableObject scriptableObject in allScriptableObjects)
         {
+            if (scriptableObject == null)
+            {
+                continue;
+            }
+
             Type type = scriptableObject.GetType();
             if (!data.ContainsKey(type))
             {
@@ -35,27 +35,30 @@ public class DataManager
             if (data[type].ContainsKey(scriptableObject.id))
             {
                 Debug.LogWarning(
-                    $"{type} id {scriptableObject.id} 중복 데이터가 있습니다. " +
-                    $"{data[type][scriptableObject.id].name}를 유지하고 {scriptableObject.name}는 무시합니다.");
+                    $"{type} id {scriptableObject.id} is duplicated. " +
+                    $"Keeping {data[type][scriptableObject.id].name} and ignoring {scriptableObject.name}.");
                 continue;
             }
 
             data[type].Add(scriptableObject.id, scriptableObject);
-            Debug.Log($"{type}에 {scriptableObject.name} 데이터가 추가되었습니다");
+            Debug.Log($"Loaded {type} data: {scriptableObject.name}");
         }
     }
+
     public Dictionary<int, T> GetData<T>() where T : DataScriptableObject
     {
-        if (data.TryGetValue(typeof(T), out var typeData))
+        if (data.TryGetValue(typeof(T), out Dictionary<int, DataScriptableObject> typeData))
         {
             Dictionary<int, T> result = new Dictionary<int, T>();
-            foreach (var item in typeData)
+            foreach (KeyValuePair<int, DataScriptableObject> item in typeData)
             {
                 result.Add(item.Key, (T)item.Value);
             }
+
             return result;
         }
-        Debug.Log("데이터 타입 찾지 못함");
+
+        Debug.Log($"No data found for {typeof(T).Name}.");
         return null;
     }
 }

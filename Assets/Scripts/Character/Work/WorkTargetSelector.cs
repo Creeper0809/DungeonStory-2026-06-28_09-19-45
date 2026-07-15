@@ -26,14 +26,14 @@ public sealed class WorkTargetSelector
         if (!canStartWork && !HasUrgentAvailableWork(searchResult, requestedWorkType))
         {
             work.AssignWork(null, FacilityWorkType.None);
-            work.WorkerCharacter?.AddLog(work.IsOffDuty ? "작업 보류: 비번" : "작업 보류: 피로/기분 보호");
+            work.WorkerActor?.AddLog(work.IsOffDuty ? "작업 보류: 비번" : "작업 보류: 피로/기분 보호");
             return false;
         }
 
         if (!canStartWork)
         {
             work.SetDutyState(AbilityWork.DutyState.OnDuty);
-            work.WorkerCharacter?.AddLog("비번 중 긴급 작업 합류");
+            work.WorkerActor?.AddLog("비번 중 긴급 작업 합류");
         }
 
         if (work.PriorityWorkTarget != null)
@@ -53,8 +53,21 @@ public sealed class WorkTargetSelector
                 return true;
             }
 
-            work.WorkerCharacter?.AddLog("우선 작업 취소: 대상 사용 불가");
+            work.WorkerActor?.AddLog("우선 작업 취소: 대상 사용 불가");
             work.ClearPriorityWorkTarget();
+        }
+
+        if (work.assignedShop != null
+            && requestedWorkType != FacilityWorkType.None
+            && TryEvaluateWorkTarget(
+                work.assignedShop,
+                searchResult,
+                requestedWorkType,
+                false,
+                out WorkTargetCandidate assignedCandidate))
+        {
+            work.AssignWork(work.assignedShop, assignedCandidate.WorkType);
+            return true;
         }
 
         if (work.assignedShop != null && CanUseAsWorkTarget(work.assignedShop, requestedWorkType))
@@ -131,7 +144,7 @@ public sealed class WorkTargetSelector
             return 0f;
         }
 
-        return Mathf.Clamp01(candidate.Score / 420f);
+        return Mathf.Clamp01(candidate.Score / 460f);
     }
 
     public IEnumerable<BuildableObject> GetReachableBuildings(GridPathSearchResult searchResult)
@@ -141,14 +154,14 @@ public sealed class WorkTargetSelector
             return searchResult.GetAllReachableBuilding();
         }
 
-        Grid activeGrid = WorkGridUtility.ResolveActiveGrid(work, null);
+        Grid activeGrid = work.WorkGridResolver.ResolveActiveGrid(work, null);
         if (activeGrid == null)
         {
             return Enumerable.Empty<BuildableObject>();
         }
 
-        Character actor = work.WorkerCharacter;
-        Vector2Int startPos = WorkGridUtility.GetGridPosition(activeGrid, actor);
+        CharacterActor actor = work.WorkerActor;
+        Vector2Int startPos = work.WorkGridResolver.GetGridPosition(activeGrid, actor);
         return activeGrid.GetAllReachableBuilding(startPos);
     }
 
@@ -204,7 +217,7 @@ public sealed class WorkTargetSelector
             return false;
         }
 
-        if (!workable.CanAssignWorker(work.WorkerCharacter, out string failureReason))
+        if (!workable.CanAssignWorker(work.WorkerActor, out string failureReason))
         {
             bestCandidate = WorkTargetCandidate.Invalid(
                 building,
@@ -264,7 +277,7 @@ public sealed class WorkTargetSelector
             }
 
             if (workType == FacilityWorkType.Research
-                && !BlueprintResearchRuntime.HasResearchWorkFor(building))
+                && !work.BlueprintResearchWorkService.HasResearchWorkFor(building))
             {
                 continue;
             }
@@ -316,16 +329,20 @@ public sealed class WorkTargetSelector
         WorkPriorityLevel priority,
         GridPathSearchResult searchResult)
     {
-        Character actor = work.WorkerCharacter;
+        CharacterActor actor = work.WorkerActor;
         float urgency = building.GetWorkUrgency(workType);
         float preferenceScore = actor != null ? actor.GetWorkPreferenceScore(workType) : 0.5f;
         float speedScore = actor != null ? Mathf.Clamp01(actor.GetWorkSpeedMultiplier(workType) / 2f) : 0.5f;
         float distanceScore = GetDistanceScore(building, searchResult);
+        float roomContextScore = GetRoomContextScore(building);
+        float facilityStateScore = GetFacilityStateScore(building, workType);
         float score = priority.GetBaseScore()
             + urgency
             + (preferenceScore * 35f)
             + (speedScore * 25f)
-            + distanceScore;
+            + distanceScore
+            + roomContextScore
+            + facilityStateScore;
 
         return new WorkTargetCandidate(
             building,
@@ -366,6 +383,50 @@ public sealed class WorkTargetSelector
         }
 
         return Mathf.Clamp(25f - path.Count, 0f, 25f);
+    }
+
+    private static float GetRoomContextScore(BuildableObject building)
+    {
+        if (building == null)
+        {
+            return 0f;
+        }
+
+        try
+        {
+            FacilityRoomOperationalProfile profile = building.GetRoomOperationalProfile();
+            if (profile == null || profile.Room == null)
+            {
+                return 8f;
+            }
+
+            if (!profile.IsUsableRoom)
+            {
+                return building.Facility != null && building.Facility.requiresRoomRole ? -15f : 0f;
+            }
+
+            return Mathf.Lerp(8f, 28f, profile.Room.GetQualityScore());
+        }
+        catch (System.InvalidOperationException)
+        {
+            return 8f;
+        }
+    }
+
+    private static float GetFacilityStateScore(BuildableObject building, FacilityWorkType workType)
+    {
+        if (building == null)
+        {
+            return 0f;
+        }
+
+        float score = Mathf.Lerp(-8f, 12f, Mathf.Clamp01(building.OperationalState.cleanliness / 100f));
+        if (building.IsDamaged && workType != FacilityWorkType.Repair)
+        {
+            score -= 18f;
+        }
+
+        return score;
     }
 
     private static bool CanUseSuppressFor(FacilityWorkType requestedWorkType)

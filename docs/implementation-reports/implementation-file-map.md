@@ -115,9 +115,11 @@
 | 연구 | `Assets/Scripts/Research/BlueprintResearchSystem.cs` |
 | 합성 | `Assets/Scripts/Synthesis/FacilitySynthesisSystem.cs`, `FacilitySynthesisRecipeSO.cs` |
 | 합성 UI | `Assets/Scripts/Synthesis/UI/FacilitySynthesisPanel.cs` |
+| 시설 계보 진화 | `Assets/Scripts/FacilityEvolution/*.cs`, `FacilityEvolutionRecipeSO.cs`, `FacilityEvolutionRuntime.cs`, `FacilityEvolutionRecordRuntime.cs`, `FacilityEvolutionLlmProposalProvider.cs`, `Assets/Scripts/FacilityEvolution/UI/FacilityEvolutionPanel.cs` |
 | 설계도 에셋 | `Assets/Resources/SO/Blueprint/P1/*.asset` |
 | 합성식 에셋 | `Assets/Resources/SO/Synthesis/P1/*.asset` |
-| 검증 | `FacilityShopDebugScenarios.cs`, `BlueprintResearchDebugScenarios.cs`, `FacilitySynthesisDebugScenarios.cs` |
+| 진화식 에셋 | `Assets/Resources/SO/FacilityEvolution/P1/*.asset` |
+| 검증 | `FacilityShopDebugScenarios.cs`, `BlueprintResearchDebugScenarios.cs`, `FacilitySynthesisDebugScenarios.cs`, `FacilityEvolutionDebugScenarios.cs` |
 
 ## 7. 도감
 

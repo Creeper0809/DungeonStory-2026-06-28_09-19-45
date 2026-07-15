@@ -99,10 +99,10 @@ public class DefenseActivationReport
 {
     private readonly List<string> effectTags = new List<string>();
 
-    public DefenseActivationReport(DefenseFacility facility, Character target, DefenseTriggerTiming timing)
+    public DefenseActivationReport(DefenseFacility facility, CharacterActor target, DefenseTriggerTiming timing)
     {
         Facility = facility;
-        Target = target;
+        TargetActor = target;
         Timing = timing;
         Concept = facility != null && facility.BuildingData != null
             ? facility.BuildingData.Defense.concept
@@ -110,13 +110,13 @@ public class DefenseActivationReport
     }
 
     public DefenseFacility Facility { get; }
-    public Character Target { get; }
+    public CharacterActor TargetActor { get; }
     public DefenseTriggerTiming Timing { get; }
     public DefenseAttackConcept Concept { get; }
     public float TotalDamage { get; private set; }
     public float MovementDelaySeconds { get; private set; }
     public IReadOnlyList<string> EffectTags => effectTags;
-    public bool Triggered => Facility != null && Target != null;
+    public bool Triggered => Facility != null && TargetActor != null;
 
     public void AddDamage(float amount)
     {
@@ -170,6 +170,7 @@ public class DefenseFacility : Facility
     private float nextTriggerTime;
 
     public DefenseFacilityData Defense => BuildingData != null ? BuildingData.Defense : null;
+    public float CooldownRemaining => Mathf.Max(0f, nextTriggerTime - Time.time);
 
     public bool CanTrigger(DefenseTriggerTiming timing, out string failureReason)
     {
@@ -208,7 +209,10 @@ public class DefenseFacility : Facility
         return true;
     }
 
-    public DefenseActivationReport Trigger(Character intruder, DefenseTriggerTiming timing)
+    public DefenseActivationReport Trigger(
+        CharacterActor intruder,
+        DefenseTriggerTiming timing,
+        IDefenseStatusRuntimeService statusRuntimeService)
     {
         if (intruder == null || !CanTrigger(timing, out _))
         {
@@ -217,21 +221,28 @@ public class DefenseFacility : Facility
 
         DefenseActivationReport report = new DefenseActivationReport(this, intruder, timing);
         nextTriggerTime = Time.time + Mathf.Max(0f, Defense.cooldownSeconds);
-        DefenseEffectResolver.ApplyEffects(this, intruder, report);
+        DefenseEffectResolver.ApplyEffects(this, intruder, report, statusRuntimeService);
         intruder.AddLog(report.FormatSummary());
         DefenseFacilityTriggeredEvent.Trigger(report);
         return report;
     }
+
 }
 
 public static class DefenseFacilityResolver
 {
     public static List<DefenseActivationReport> TriggerAt(
         Grid grid,
-        Character intruder,
+        CharacterActor intruder,
         Vector2Int position,
-        DefenseTriggerTiming timing)
+        DefenseTriggerTiming timing,
+        IDefenseStatusRuntimeService statusRuntimeService)
     {
+        if (statusRuntimeService == null)
+        {
+            throw new ArgumentNullException(nameof(statusRuntimeService));
+        }
+
         List<DefenseActivationReport> reports = new List<DefenseActivationReport>();
         if (grid == null || intruder == null || !grid.IsValidGridPos(position))
         {
@@ -249,7 +260,7 @@ public static class DefenseFacilityResolver
             .Distinct();
         foreach (DefenseFacility defense in defenses)
         {
-            DefenseActivationReport report = defense.Trigger(intruder, timing);
+            DefenseActivationReport report = defense.Trigger(intruder, timing, statusRuntimeService);
             if (report != null)
             {
                 reports.Add(report);
@@ -258,6 +269,7 @@ public static class DefenseFacilityResolver
 
         return reports;
     }
+
 }
 
 public static class DefenseEffectResolver
@@ -266,16 +278,23 @@ public static class DefenseEffectResolver
 
     public static void ApplyEffects(
         DefenseFacility facility,
-        Character target,
-        DefenseActivationReport report)
+        CharacterActor target,
+        DefenseActivationReport report,
+        IDefenseStatusRuntimeService statusRuntimeService)
     {
         if (facility == null || target == null || report == null || facility.Defense == null)
         {
             return;
         }
 
+        if (statusRuntimeService == null)
+        {
+            throw new ArgumentNullException(nameof(statusRuntimeService));
+        }
+
         DefenseFacilityData defense = facility.Defense;
-        DefenseStatusRuntime statusRuntime = DefenseStatusRuntime.GetOrAdd(target);
+        DefenseStatusRuntime statusRuntime = statusRuntimeService.GetOrAdd(target)
+            ?? throw new InvalidOperationException($"{nameof(IDefenseStatusRuntimeService)} could not provide {nameof(DefenseStatusRuntime)}.");
         DefenseEffectSO[] effectAssets = defense.effectAssets ?? Array.Empty<DefenseEffectSO>();
         if (effectAssets.Length > 0)
         {
@@ -305,7 +324,7 @@ public static class DefenseEffectResolver
 
     public static void ApplyEffect(
         DefenseEffectData effect,
-        Character target,
+        CharacterActor target,
         DefenseStatusRuntime statusRuntime,
         DefenseActivationReport report,
         DefenseFacilityData defense)
@@ -350,21 +369,26 @@ public static class DefenseEffectResolver
         }
     }
 
-    public static float TickStatuses(Character target, float deltaSeconds)
+    public static float TickStatuses(
+        CharacterActor target,
+        float deltaSeconds,
+        IDefenseStatusRuntimeService statusRuntimeService)
     {
         if (target == null || target.IsDead)
         {
             return 0f;
         }
 
-        DefenseStatusRuntime statusRuntime = target.GetComponent<DefenseStatusRuntime>();
-        return statusRuntime != null
-            ? statusRuntime.Tick(target, deltaSeconds)
-            : 0f;
+        if (statusRuntimeService == null)
+        {
+            throw new ArgumentNullException(nameof(statusRuntimeService));
+        }
+
+        return statusRuntimeService.TickStatuses(target, deltaSeconds);
     }
 
     private static void ApplyDamage(
-        Character target,
+        CharacterActor target,
         DefenseStatusRuntime statusRuntime,
         DefenseActivationReport report,
         float amount,
@@ -381,24 +405,33 @@ public static class DefenseEffectResolver
     }
 }
 
+public readonly struct DefenseStatusSnapshot
+{
+    public DefenseStatusSnapshot(DefenseStatusKind kind, float value, float remainingSeconds, int stacks)
+    {
+        Kind = kind;
+        Value = value;
+        RemainingSeconds = Mathf.Max(0f, remainingSeconds);
+        Stacks = Mathf.Max(0, stacks);
+    }
+
+    public DefenseStatusKind Kind { get; }
+    public float Value { get; }
+    public float RemainingSeconds { get; }
+    public int Stacks { get; }
+}
+
 public class DefenseStatusRuntime : MonoBehaviour
 {
     private readonly List<DefenseRuntimeStatus> statuses = new List<DefenseRuntimeStatus>();
 
-    public static DefenseStatusRuntime GetOrAdd(Character character)
-    {
-        if (character == null)
-        {
-            return null;
-        }
-
-        if (!character.TryGetComponent(out DefenseStatusRuntime runtime))
-        {
-            runtime = character.gameObject.AddComponent<DefenseStatusRuntime>();
-        }
-
-        return runtime;
-    }
+    public IReadOnlyList<DefenseStatusSnapshot> ActiveStatuses => statuses
+        .Select((status) => new DefenseStatusSnapshot(
+            status.kind,
+            status.value,
+            status.remainingSeconds,
+            status.stacks))
+        .ToArray();
 
     public int ApplyStatus(DefenseStatusKind kind, float value, float duration, int stacks)
     {
@@ -428,7 +461,7 @@ public class DefenseStatusRuntime : MonoBehaviour
         return corrosion != null ? 1f + Mathf.Max(0f, corrosion.value) : 1f;
     }
 
-    public float Tick(Character target, float deltaSeconds)
+    public float Tick(CharacterActor target, float deltaSeconds)
     {
         if (target == null || deltaSeconds <= 0f)
         {

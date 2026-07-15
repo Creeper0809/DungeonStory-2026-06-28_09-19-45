@@ -1,10 +1,19 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
+using VContainer;
 
 public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupant
 {
     private const float DefaultAiReservationSeconds = 12f;
+    private static readonly IFacilityCandidateCache FallbackFacilityCandidateCache =
+        new FacilityCandidateCacheStore();
+    private static readonly IRoomFacilityPolicy FallbackRoomFacilityPolicy =
+        new RoomFacilityPolicyService(new RoomLayoutCache());
+    private static readonly IBlueprintResearchWorkService FallbackBlueprintResearchWorkService =
+        new BuildableObjectNoopBlueprintResearchWorkService();
+    private static readonly IWorldInfoClickSelector FallbackWorldInfoClickSelector =
+        new BuildableObjectNoopWorldInfoClickSelector();
 
     public int id { get; private set; }
     public Vector2Int centerPos { get; protected set; }
@@ -19,10 +28,16 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     public bool isDestroy;
     [SerializeField] private bool isDamaged;
     [SerializeField] private int facilityLevel = 1;
+    [SerializeField] private FacilityOperationalState operationalState = new FacilityOperationalState();
     private int currentUserCount;
-    private readonly Dictionary<Character, float> visitReservations = new Dictionary<Character, float>();
-    private Character workerReservation;
+    private readonly Dictionary<CharacterActor, float> visitReservations = new Dictionary<CharacterActor, float>();
+    private CharacterActor workerReservation;
     private float workerReservationUntil;
+    private IBlueprintResearchWorkService blueprintResearchWorkService;
+    private IWorldInfoClickSelector worldInfoClickSelector;
+    private IFacilityCandidateCache facilityCandidateCache;
+    private IRoomFacilityPolicy roomFacilityPolicy;
+
     public int GridId => id;
     public bool IsGridDestroyed => isDestroy;
     public bool IsGridVisitable => isVisitable();
@@ -33,6 +48,10 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     public bool IsDamaged => isDamaged;
     public int FacilityLevel => facilityLevel;
     public int CurrentUserCount => currentUserCount;
+    public FacilityOperationalData Operational => BuildingData != null ? BuildingData.Operational : null;
+    public FacilityOperationalState OperationalState => operationalState ??= new FacilityOperationalState();
+    public int EffectiveCapacity => ResolveRoomFacilityPolicy().GetEffectiveCapacity(this);
+
     public int ActiveVisitReservationCount
     {
         get
@@ -41,7 +60,8 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             return visitReservations.Count;
         }
     }
-    public Character WorkerReservation
+
+    public CharacterActor WorkerReservation
     {
         get
         {
@@ -52,6 +72,23 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
     public virtual void Start()
     {
+    }
+
+    [Inject]
+    public void ConstructBuildableObject(
+        IBlueprintResearchWorkService blueprintResearchWorkService,
+        IWorldInfoClickSelector worldInfoClickSelector,
+        IFacilityCandidateCache facilityCandidateCache,
+        IRoomFacilityPolicy roomFacilityPolicy)
+    {
+        this.blueprintResearchWorkService = blueprintResearchWorkService
+            ?? throw new ArgumentNullException(nameof(blueprintResearchWorkService));
+        this.worldInfoClickSelector = worldInfoClickSelector
+            ?? throw new ArgumentNullException(nameof(worldInfoClickSelector));
+        this.facilityCandidateCache = facilityCandidateCache
+            ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
+        this.roomFacilityPolicy = roomFacilityPolicy
+            ?? throw new ArgumentNullException(nameof(roomFacilityPolicy));
     }
 
     public virtual void SetGrid(Grid grid)
@@ -68,9 +105,15 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         isDamaged = false;
         facilityLevel = 1;
         currentUserCount = 0;
+        visitReservations.Clear();
+        workerReservation = null;
+        workerReservationUntil = 0f;
+        operationalState ??= new FacilityOperationalState();
+        operationalState.CopyFrom(null);
         centerPos = buildPos;
         category = placement.Category;
         buildPoses = placement.GetGridPosList(buildPos);
+        ModularFacilityRuntimeEffects.ConfigureVisual(this);
     }
 
     public virtual Vector3 GetMovementWorldPosition(Vector2Int gridPosition)
@@ -89,30 +132,66 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         return anchor;
     }
 
-    public bool TryGetNearestWalkableWorldPosition(Vector3 fromWorld, out Vector3 worldPosition)
+    public bool TryGetFacilityOccupiedWorldPosition(Vector3 fromWorld, out Vector3 worldPosition)
     {
         worldPosition = fromWorld;
-        if (grid == null)
+        if (grid == null || buildPoses == null || buildPoses.Count == 0)
         {
             return false;
         }
 
-        Vector2Int origin = grid.GetXY(fromWorld);
-        if (TryFindNearestWalkableCell(origin, requireEmptyBuildingLayer: true, out Vector2Int emptyCell)
-            || TryFindNearestWalkableCell(origin, requireEmptyBuildingLayer: false, out emptyCell))
+        if (TryFindNearestFacilityCell(fromWorld, requireRegisteredOccupant: true, out Vector2Int facilityCell)
+            || TryFindNearestFacilityCell(fromWorld, requireRegisteredOccupant: false, out facilityCell))
         {
-            worldPosition = grid.GetWorldPos(emptyCell);
+            worldPosition = grid.GetWorldPos(facilityCell);
             return true;
         }
 
         return false;
     }
 
+    public Vector3 GetFacilityAnchorWorldPosition(FacilityAnchorKind kind, Vector3 fromWorld)
+    {
+        return TryGetFacilityAnchorWorldPosition(kind, fromWorld, out Vector3 worldPosition)
+            ? worldPosition
+            : transform.position;
+    }
+
+    public bool TryGetFacilityAnchorWorldPosition(
+        FacilityAnchorKind kind,
+        Vector3 fromWorld,
+        out Vector3 worldPosition)
+    {
+        worldPosition = transform.position;
+        if (grid == null || buildPoses == null || buildPoses.Count == 0)
+        {
+            return false;
+        }
+
+        if (TryGetConfiguredFacilityAnchorWorldPosition(kind, out worldPosition))
+        {
+            return true;
+        }
+
+        switch (kind)
+        {
+            case FacilityAnchorKind.Work:
+                return TryGetHorizontalFootprintAnchorWorldPosition(0.85f, out worldPosition);
+            case FacilityAnchorKind.Checkout:
+                return TryGetHorizontalFootprintAnchorWorldPosition(0.75f, out worldPosition);
+            case FacilityAnchorKind.Use:
+            case FacilityAnchorKind.Exit:
+            default:
+                return TryGetFacilityOccupiedWorldPosition(fromWorld, out worldPosition)
+                    || TryGetHorizontalFootprintAnchorWorldPosition(0.5f, out worldPosition);
+        }
+    }
+
     public void DestroySelf()
     {
         OnBuildingDestroyed?.Invoke();
         isDestroy = true;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
         if (Application.isPlaying)
         {
             Destroy(gameObject);
@@ -131,7 +210,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         }
 
         isDamaged = value;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
     }
 
     public void SetFacilityLevel(int value)
@@ -143,7 +222,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         }
 
         facilityLevel = nextLevel;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
     }
 
     public bool SupportsFacilityRole(FacilityRole role)
@@ -156,7 +235,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         return Facility != null && Facility.SupportsWork(workType);
     }
 
-    public bool CanVisit(Character visitor, out string failureReason)
+    public bool CanVisit(CharacterActor visitor, out string failureReason)
     {
         PruneExpiredVisitReservations();
         failureReason = string.Empty;
@@ -173,14 +252,20 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             return false;
         }
 
+        if (!ResolveRoomFacilityPolicy().IsFacilityRoleAvailable(this, facilityData.roles, out failureReason))
+        {
+            return false;
+        }
+
         if (isDamaged && facilityData.disabledWhenDamaged)
         {
             failureReason = "시설 파손";
             return false;
         }
 
-        if (facilityData.capacity > 0
-            && currentUserCount + GetActiveVisitReservationCountExcept(visitor) >= facilityData.capacity)
+        int effectiveCapacity = EffectiveCapacity;
+        if (effectiveCapacity > 0
+            && currentUserCount + GetActiveVisitReservationCountExcept(visitor) >= effectiveCapacity)
         {
             failureReason = "수용 인원 초과";
             return false;
@@ -197,7 +282,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         return true;
     }
 
-    public bool TryBeginUse(Character visitor, out string failureReason)
+    public bool TryBeginUse(CharacterActor visitor, out string failureReason)
     {
         if (!CanVisit(visitor, out failureReason))
         {
@@ -206,21 +291,23 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         ReleaseVisitReservation(visitor);
         currentUserCount++;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        OperationalState.completedUses++;
+        OperationalState.cleanliness = Mathf.Clamp(OperationalState.cleanliness - 1.5f, 0f, 100f);
+        MarkFacilityDynamicStateDirty();
         FacilityVisitEvent.Trigger(visitor, this);
         return true;
     }
 
-    public void EndUse(Character visitor)
+    public void EndUse(CharacterActor visitor)
     {
         if (currentUserCount > 0)
         {
             currentUserCount--;
-            FacilityCandidateCache.MarkDynamicStateDirty();
+            MarkFacilityDynamicStateDirty();
         }
     }
 
-    public bool TryReserveVisit(Character visitor, out string failureReason, float seconds = DefaultAiReservationSeconds)
+    public bool TryReserveVisit(CharacterActor visitor, out string failureReason, float seconds = DefaultAiReservationSeconds)
     {
         failureReason = string.Empty;
         if (visitor == null)
@@ -235,11 +322,11 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         }
 
         visitReservations[visitor] = Time.time + Mathf.Max(0.1f, seconds);
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
         return true;
     }
 
-    public void RefreshVisitReservation(Character visitor, float seconds = DefaultAiReservationSeconds)
+    public void RefreshVisitReservation(CharacterActor visitor, float seconds = DefaultAiReservationSeconds)
     {
         if (visitor == null || !visitReservations.ContainsKey(visitor))
         {
@@ -249,7 +336,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         visitReservations[visitor] = Time.time + Mathf.Max(0.1f, seconds);
     }
 
-    public void ReleaseVisitReservation(Character visitor)
+    public void ReleaseVisitReservation(CharacterActor visitor)
     {
         if (visitor == null)
         {
@@ -258,11 +345,11 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         if (visitReservations.Remove(visitor))
         {
-            FacilityCandidateCache.MarkDynamicStateDirty();
+            MarkFacilityDynamicStateDirty();
         }
     }
 
-    public bool TryReserveWorker(Character worker, out string failureReason, float seconds = DefaultAiReservationSeconds)
+    public bool TryReserveWorker(CharacterActor worker, out string failureReason, float seconds = DefaultAiReservationSeconds)
     {
         failureReason = string.Empty;
         if (worker == null)
@@ -280,11 +367,11 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         workerReservation = worker;
         workerReservationUntil = Time.time + Mathf.Max(0.1f, seconds);
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
         return true;
     }
 
-    public void RefreshWorkerReservation(Character worker, float seconds = DefaultAiReservationSeconds)
+    public void RefreshWorkerReservation(CharacterActor worker, float seconds = DefaultAiReservationSeconds)
     {
         PruneExpiredWorkerReservation();
         if (worker == null || workerReservation != worker)
@@ -295,13 +382,13 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         workerReservationUntil = Time.time + Mathf.Max(0.1f, seconds);
     }
 
-    public bool HasWorkerReservationForOther(Character worker)
+    public bool HasWorkerReservationForOther(CharacterActor worker)
     {
         PruneExpiredWorkerReservation();
         return workerReservation != null && workerReservation != worker;
     }
 
-    public void ReleaseWorkerReservation(Character worker)
+    public void ReleaseWorkerReservation(CharacterActor worker)
     {
         if (worker == null || workerReservation != worker)
         {
@@ -310,7 +397,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         workerReservation = null;
         workerReservationUntil = 0f;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
     }
 
     public bool CanAssignWork(FacilityWorkType workType, out string failureReason)
@@ -344,12 +431,11 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         return true;
     }
-
-    private int GetActiveVisitReservationCountExcept(Character visitor)
+    private int GetActiveVisitReservationCountExcept(CharacterActor visitor)
     {
         PruneExpiredVisitReservations();
         int count = 0;
-        foreach (Character reservedVisitor in visitReservations.Keys)
+        foreach (CharacterActor reservedVisitor in visitReservations.Keys)
         {
             if (reservedVisitor != null && reservedVisitor != visitor)
             {
@@ -368,21 +454,21 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         }
 
         bool changed = false;
-        List<Character> expired = null;
-        foreach (KeyValuePair<Character, float> pair in visitReservations)
+        List<CharacterActor> expired = null;
+        foreach (KeyValuePair<CharacterActor, float> pair in visitReservations)
         {
             if (pair.Key != null && Time.time < pair.Value)
             {
                 continue;
             }
 
-            expired ??= new List<Character>();
+            expired ??= new List<CharacterActor>();
             expired.Add(pair.Key);
         }
 
         if (expired != null)
         {
-            foreach (Character visitor in expired)
+            foreach (CharacterActor visitor in expired)
             {
                 visitReservations.Remove(visitor);
                 changed = true;
@@ -391,7 +477,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         if (changed)
         {
-            FacilityCandidateCache.MarkDynamicStateDirty();
+            MarkFacilityDynamicStateDirty();
         }
     }
 
@@ -409,43 +495,103 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         workerReservation = null;
         workerReservationUntil = 0f;
-        FacilityCandidateCache.MarkDynamicStateDirty();
+        MarkFacilityDynamicStateDirty();
     }
 
-    private bool TryFindNearestWalkableCell(
-        Vector2Int origin,
-        bool requireEmptyBuildingLayer,
+    private bool TryFindNearestFacilityCell(
+        Vector3 fromWorld,
+        bool requireRegisteredOccupant,
         out Vector2Int result)
     {
+        result = default;
+        if (grid == null || buildPoses == null || buildPoses.Count == 0)
+        {
+            return false;
+        }
+
+        int floor = centerPos.y;
+        Vector2Int origin = grid.GetXY(fromWorld);
+        origin.y = floor;
         bool found = false;
         Vector2Int best = default;
         int bestDistance = int.MaxValue;
-
-        foreach (GridCell cell in grid.GetCells())
+        foreach (Vector2Int position in buildPoses)
         {
-            if (cell == null || !grid.IsWalkable(cell.Position))
+            if (position.y != floor || !grid.IsValidGridPos(position))
             {
                 continue;
             }
 
-            if (requireEmptyBuildingLayer && cell.GetOccupant(GridLayer.Building) != null)
+            GridCell cell = grid.GetGridCell(position);
+            if (requireRegisteredOccupant
+                && (cell == null || !cell.ContainsOccupant(this)))
             {
                 continue;
             }
 
-            int distance = Mathf.Abs(cell.Position.x - origin.x) + Mathf.Abs(cell.Position.y - origin.y);
+            int distance = Mathf.Abs(position.x - origin.x);
             if (found && distance >= bestDistance)
             {
                 continue;
             }
 
             found = true;
-            best = cell.Position;
+            best = position;
             bestDistance = distance;
         }
 
         result = best;
         return found;
+    }
+
+    private bool TryGetConfiguredFacilityAnchorWorldPosition(
+        FacilityAnchorKind kind,
+        out Vector3 worldPosition)
+    {
+        worldPosition = transform.position;
+        if (BuildingData == null
+            || BuildingData.FacilityAnchors == null
+            || !BuildingData.FacilityAnchors.TryGetOffset(kind, out Vector2 offset))
+        {
+            return false;
+        }
+
+        worldPosition = grid.GetWorldPos(new Vector2(centerPos.x + offset.x, centerPos.y + offset.y));
+        return true;
+    }
+
+    private bool TryGetHorizontalFootprintAnchorWorldPosition(
+        float normalizedX,
+        out Vector3 worldPosition)
+    {
+        worldPosition = transform.position;
+        if (grid == null || buildPoses == null || buildPoses.Count == 0)
+        {
+            return false;
+        }
+
+        int minX = int.MaxValue;
+        int maxX = int.MinValue;
+        foreach (Vector2Int position in buildPoses)
+        {
+            if (position.y != centerPos.y)
+            {
+                continue;
+            }
+
+            minX = Mathf.Min(minX, position.x);
+            maxX = Mathf.Max(maxX, position.x);
+        }
+
+        if (minX == int.MaxValue || maxX == int.MinValue)
+        {
+            return false;
+        }
+
+        float clamped = Mathf.Clamp01(normalizedX);
+        float x = Mathf.Lerp(minX, maxX, clamped);
+        worldPosition = grid.GetWorldPos(new Vector2(x, centerPos.y));
+        return true;
     }
 
     public virtual float GetWorkUrgency(FacilityWorkType workType)
@@ -474,7 +620,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             }
         }
 
-        if (workType == FacilityWorkType.Research && BlueprintResearchRuntime.HasResearchWorkFor(this))
+        if (workType == FacilityWorkType.Research && ResolveBlueprintResearchWorkService().HasResearchWorkFor(this))
         {
             urgency += 45f;
         }
@@ -484,12 +630,101 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
     public virtual bool isVisitable()
     {
-        return CanVisit(null, out _);
+        return CanVisit((CharacterActor)null, out _);
     }
 
     private void OnMouseDown()
     {
+        RequireWorldInfoClickSelector().TryHandleWorldInfoClick();
+    }
+
+    public void TriggerWorldInfoClick()
+    {
         OnBuildingClicked?.Invoke(this);
     }
 
+    protected void MarkFacilityDynamicStateDirty()
+    {
+        ResolveFacilityCandidateCache().MarkDynamicStateDirty();
+    }
+
+    public FacilityRoomOperationalProfile GetRoomOperationalProfile()
+    {
+        return ResolveRoomFacilityPolicy().GetOperationalProfile(this);
+    }
+
+    public void RestoreOperationalState(FacilityOperationalState state)
+    {
+        operationalState ??= new FacilityOperationalState();
+        operationalState.CopyFrom(state);
+        MarkFacilityDynamicStateDirty();
+    }
+
+    private IFacilityCandidateCache ResolveFacilityCandidateCache()
+    {
+        return facilityCandidateCache ?? FallbackFacilityCandidateCache;
+    }
+
+    private IRoomFacilityPolicy ResolveRoomFacilityPolicy()
+    {
+        return roomFacilityPolicy ?? FallbackRoomFacilityPolicy;
+    }
+
+    private IBlueprintResearchWorkService ResolveBlueprintResearchWorkService()
+    {
+        return blueprintResearchWorkService ?? FallbackBlueprintResearchWorkService;
+    }
+
+    private IWorldInfoClickSelector RequireWorldInfoClickSelector()
+    {
+        return worldInfoClickSelector ?? FallbackWorldInfoClickSelector;
+    }
+
+    private sealed class BuildableObjectNoopBlueprintResearchWorkService : IBlueprintResearchWorkService
+    {
+        public bool HasResearchWorkFor(BuildableObject facility) => false;
+
+        public BlueprintResearchWorkResult ApplyResearchWork(
+            CharacterActor researcher,
+            BuildableObject researchFacility,
+            float seconds)
+        {
+            return new BlueprintResearchWorkResult(
+                false,
+                null,
+                0f,
+                0f,
+                1f,
+                false,
+                "Blueprint research runtime is not available.");
+        }
+    }
+
+    private sealed class BuildableObjectNoopWorldInfoClickSelector : IWorldInfoClickSelector
+    {
+        public bool TryHandleWorldInfoClick() => false;
+
+        public bool TryTriggerCharacterUnderPointer() => false;
+
+        public bool TryGetPreferredCharacterUnderPointer(out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacterAtScreenPosition(
+            Vector3 screenPosition,
+            Camera camera,
+            out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacter(Collider2D[] hits, out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+    }
 }

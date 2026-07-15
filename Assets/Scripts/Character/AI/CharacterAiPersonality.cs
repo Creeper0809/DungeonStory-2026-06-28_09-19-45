@@ -20,7 +20,9 @@ public class CharacterAiPersonality
         {
             return ClampMultiplier(curiosity);
         }
-        if (actionSet is AIEat || actionSet is AIRest)
+        if (actionSet is AIEat
+            || actionSet is AIRest
+            || actionSet is AIFacilityRoleAction)
         {
             return ClampMultiplier(selfCare);
         }
@@ -44,11 +46,20 @@ public class CharacterAiPersonality
 
 public static class CharacterAiPersonalityUtility
 {
-    public static float GetActionScoreMultiplier(Character character, AIActionSet actionSet)
+    public static float GetActionScoreMultiplier(CharacterActor actor, AIActionSet actionSet)
     {
-        CharacterAiPersonality personality = character != null && character.data != null
-            ? character.data.aiPersonality
+        CharacterIdentity identity = actor != null ? actor.Identity : null;
+        CharacterAiPersonality personality = identity != null && identity.Data != null
+            ? identity.Data.aiPersonality
             : null;
-        return personality != null ? personality.GetActionMultiplier(actionSet) : 1f;
+        float baseMultiplier = personality != null ? personality.GetActionMultiplier(actionSet) : 1f;
+        float runtimeMultiplier = actor != null && actor.PersonaRuntime != null
+            ? actor.PersonaRuntime.GetActionMultiplier(actionSet)
+            : 1f;
+        float configuredMultiplier = Mathf.Clamp(baseMultiplier * runtimeMultiplier, 0.1f, 4f);
+        return CharacterMoodImpulseUtility.GetGoodMoodAdherenceMultiplier(
+            actor,
+            actionSet,
+            configuredMultiplier);
     }
 }

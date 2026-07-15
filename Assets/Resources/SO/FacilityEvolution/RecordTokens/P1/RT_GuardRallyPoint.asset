@@ -1,0 +1,37 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e1a78c497354124b972aecb5f3ad18f, type: 3}
+  m_Name: RT_GuardRallyPoint
+  m_EditorClassIdentifier: Assembly-CSharp::FacilityEvolutionRecordTokenDefinitionSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 9205
+  tokenId: GuardRallyPoint
+  displayName: "\uACBD\uBE44 \uC9D1\uACB0\uC9C0"
+  description: "\uACBD\uBE44\uB098 \uC804\uD22C \uC778\uC6D0\uC774 \uC774 \uC2DC\uC124\uC744
+    \uC9D1\uACB0\uC9C0\uCC98\uB7FC \uC774\uC6A9\uD55C \uAE30\uB85D\uC774\uB2E4."
+  sourceMetric: ZoneSafetyScore
+  threshold: 0.4
+  decayPolicy: recent+long-term
+  consumePolicy: 1
+  recipeTags:
+  - Security
+  - Combat
+  uiHint: "\uC774 \uC2DC\uC124 \uC8FC\uBCC0\uC774 \uACBD\uBE44 \uB3D9\uC120\uC758
+    \uAE30\uC900\uC810\uC774 \uB418\uACE0 \uC788\uC2B5\uB2C8\uB2E4."

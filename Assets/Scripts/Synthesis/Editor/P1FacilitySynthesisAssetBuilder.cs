@@ -128,7 +128,8 @@ public static class P1FacilitySynthesisAssetBuilder
                     preferredSpeciesTags = new[] { "Orc" },
                     dislikedSpeciesTags = Array.Empty<string>(),
                     disabledWhenDamaged = true,
-                    requiresStock = true
+                    requiresStock = true,
+                    requiresRoomRole = true
                 },
                 EmptyDefense()),
             new SynthesisBuildingSpec(
@@ -152,7 +153,8 @@ public static class P1FacilitySynthesisAssetBuilder
                     preferredSpeciesTags = new[] { "Orc", "Vampire" },
                     dislikedSpeciesTags = Array.Empty<string>(),
                     disabledWhenDamaged = true,
-                    requiresStock = true
+                    requiresStock = true,
+                    requiresRoomRole = true
                 },
                 EmptyDefense()),
             new SynthesisBuildingSpec(
@@ -225,7 +227,8 @@ public static class P1FacilitySynthesisAssetBuilder
                     preferredSpeciesTags = new[] { "Orc" },
                     dislikedSpeciesTags = Array.Empty<string>(),
                     disabledWhenDamaged = true,
-                    requiresStock = false
+                    requiresStock = false,
+                    requiresRoomRole = true
                 },
                 DefenseData(
                     DefenseAttackConcept.Guard,
@@ -258,7 +261,8 @@ public static class P1FacilitySynthesisAssetBuilder
                     preferredSpeciesTags = new[] { "Orc" },
                     dislikedSpeciesTags = Array.Empty<string>(),
                     disabledWhenDamaged = true,
-                    requiresStock = true
+                    requiresStock = true,
+                    requiresRoomRole = true
                 },
                 EmptyDefense()),
             new SynthesisBuildingSpec(
@@ -282,7 +286,8 @@ public static class P1FacilitySynthesisAssetBuilder
                     preferredSpeciesTags = new[] { "Vampire" },
                     dislikedSpeciesTags = Array.Empty<string>(),
                     disabledWhenDamaged = true,
-                    requiresStock = true
+                    requiresStock = true,
+                    requiresRoomRole = true
                 },
                 EmptyDefense()),
             new SynthesisBuildingSpec(
@@ -357,7 +362,8 @@ public static class P1FacilitySynthesisAssetBuilder
                     preferredSpeciesTags = new[] { "Orc" },
                     dislikedSpeciesTags = Array.Empty<string>(),
                     disabledWhenDamaged = true,
-                    requiresStock = false
+                    requiresStock = false,
+                    requiresRoomRole = true
                 },
                 DefenseData(
                     DefenseAttackConcept.Guard,

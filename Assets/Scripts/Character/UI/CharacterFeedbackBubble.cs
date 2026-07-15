@@ -1,7 +1,8 @@
 using TMPro;
-using System.Collections.Generic;
+using System;
 using Sirenix.OdinInspector;
 using UnityEngine;
+using VContainer;
 
 public enum CharacterFeedbackState
 {
@@ -13,47 +14,78 @@ public enum CharacterFeedbackState
     Fatigue
 }
 
-[RequireComponent(typeof(Character))]
+[RequireComponent(typeof(CharacterStats))]
+[RequireComponent(typeof(CharacterLog))]
+[RequireComponent(typeof(CharacterVisual))]
+[RequireComponent(typeof(CharacterActor))]
 [DrawWithUnity]
 public class CharacterFeedbackBubble : MonoBehaviour
 {
-    private static readonly Stack<TextMeshPro> TextPool = new Stack<TextMeshPro>();
-
     [SerializeField] private Vector3 localOffset = new Vector3(0f, 1.35f, 0f);
     [SerializeField] private float temporaryDuration = 2.5f;
     [SerializeField] private float logFeedbackCooldown = 0.35f;
     [SerializeField] private TextMeshPro text;
 
-    private Character character;
+    private CharacterActor actor;
+    private CharacterStats characterStats;
+    private CharacterLog characterLog;
+    private CharacterVisual characterVisual;
     private float visibleUntil;
     private float nextLogFeedbackTime;
+    private ICharacterAiSchedulingService aiSchedulingService;
+    private ICharacterFeedbackBubbleViewFactory bubbleViewFactory;
 
     public CharacterFeedbackState CurrentState { get; private set; } = CharacterFeedbackState.None;
 
+    [Inject]
+    public void ConstructCharacterFeedbackBubble(
+        ICharacterAiSchedulingService aiSchedulingService,
+        ICharacterFeedbackBubbleViewFactory bubbleViewFactory)
+    {
+        this.aiSchedulingService = aiSchedulingService
+            ?? throw new ArgumentNullException(nameof(aiSchedulingService));
+        this.bubbleViewFactory = bubbleViewFactory
+            ?? throw new ArgumentNullException(nameof(bubbleViewFactory));
+    }
+
     private void Awake()
     {
-        character = GetComponent<Character>();
+        actor = GetComponent<CharacterActor>();
+        characterStats = GetComponent<CharacterStats>();
+        characterLog = GetComponent<CharacterLog>();
+        characterVisual = GetComponent<CharacterVisual>();
         ApplyState(CharacterFeedbackState.None);
     }
 
     private void OnEnable()
     {
-        character ??= GetComponent<Character>();
-        if (character == null) return;
+        actor ??= GetComponent<CharacterActor>();
+        characterStats ??= GetComponent<CharacterStats>();
+        characterLog ??= GetComponent<CharacterLog>();
 
-        character.OnLogAdded += OnLogAdded;
-        character.OnStatChange += OnStatChanged;
+        if (characterLog != null)
+        {
+            characterLog.OnLogAdded += OnLogAdded;
+        }
+
+        if (characterStats != null)
+        {
+            characterStats.OnStatChange += OnStatChanged;
+        }
     }
 
     private void OnDisable()
     {
-        if (character == null)
+        if (characterLog != null)
         {
-            return;
+            characterLog.OnLogAdded -= OnLogAdded;
         }
 
-        character.OnLogAdded -= OnLogAdded;
-        character.OnStatChange -= OnStatChanged;
+        if (characterStats != null)
+        {
+            characterStats.OnStatChange -= OnStatChanged;
+        }
+
         if (text != null)
         {
             text.gameObject.SetActive(false);
@@ -62,7 +94,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!CharacterAiScheduler.ShouldShowCharacterFeedback(character))
+        if (!RequireAiSchedulingService().ShouldShowCharacterFeedback(actor))
         {
             HideView();
             return;
@@ -80,7 +112,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
 
     public void Show(CharacterFeedbackState state)
     {
-        if (!CharacterAiScheduler.ShouldShowCharacterFeedback(character))
+        if (!RequireAiSchedulingService().ShouldShowCharacterFeedback(actor))
         {
             return;
         }
@@ -91,17 +123,29 @@ public class CharacterFeedbackBubble : MonoBehaviour
 
     public CharacterFeedbackState EvaluatePersistentState()
     {
-        character ??= GetComponent<Character>();
-        if (character == null || character.stats == null)
+        characterStats ??= GetComponent<CharacterStats>();
+        if (characterStats == null || characterStats.Stats == null)
         {
             return CharacterFeedbackState.None;
         }
 
-        float sleep = GetStat(Character.Condition.SLEEP, 100f);
-        float mood = GetStat(Character.Condition.MOOD, 100f);
+        float sleep = GetStat(CharacterCondition.SLEEP, 100f);
+        float mood = GetStat(CharacterCondition.MOOD, 100f);
+        float excretion = GetStat(CharacterCondition.EXCRETION, 100f);
+        float hygiene = GetStat(CharacterCondition.HYGIENE, 100f);
         if (sleep <= 25f)
         {
             return CharacterFeedbackState.Fatigue;
+        }
+
+        if (excretion <= 15f)
+        {
+            return CharacterFeedbackState.Confused;
+        }
+
+        if (hygiene <= 20f)
+        {
+            return CharacterFeedbackState.Discontent;
         }
 
         if (mood <= 15f)
@@ -168,7 +212,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
     private void OnLogAdded(CharacterLogEntry entry)
     {
         if (Time.time < nextLogFeedbackTime
-            || !CharacterAiScheduler.ShouldShowCharacterFeedback(character))
+            || !RequireAiSchedulingService().ShouldShowCharacterFeedback(actor))
         {
             return;
         }
@@ -181,7 +225,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
         }
     }
 
-    private void OnStatChanged(System.Collections.Generic.Dictionary<Character.Condition, float> stats)
+    private void OnStatChanged(System.Collections.Generic.Dictionary<CharacterCondition, float> stats)
     {
         if (CurrentState == CharacterFeedbackState.None || Time.time > visibleUntil)
         {
@@ -221,27 +265,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
             return;
         }
 
-        text = TextPool.Count > 0 ? TextPool.Pop() : CreateTextView();
-        text.transform.SetParent(transform, false);
-        text.transform.localPosition = GetLocalOffset();
-        text.gameObject.SetActive(true);
-
-        MeshRenderer renderer = text.GetComponent<MeshRenderer>();
-        if (renderer != null)
-        {
-            renderer.sortingOrder = 200;
-        }
-    }
-
-    private static TextMeshPro CreateTextView()
-    {
-        GameObject bubbleObject = new GameObject("CharacterFeedbackBubble", typeof(TextMeshPro));
-        TextMeshPro view = bubbleObject.GetComponent<TextMeshPro>();
-        view.alignment = TextAlignmentOptions.Center;
-        view.fontSize = 3.2f;
-        view.textWrappingMode = TextWrappingModes.NoWrap;
-        TMPKoreanFont.Apply(view);
-        return view;
+        text = RequireBubbleViewFactory().Acquire(transform, GetLocalOffset());
     }
 
     private void ReleaseView()
@@ -251,28 +275,42 @@ public class CharacterFeedbackBubble : MonoBehaviour
             return;
         }
 
-        text.text = string.Empty;
-        text.gameObject.SetActive(false);
-        text.transform.SetParent(null, false);
-        TextPool.Push(text);
+        RequireBubbleViewFactory().Release(text);
         text = null;
     }
 
     private Vector3 GetLocalOffset()
     {
-        character ??= GetComponent<Character>();
-        if (character == null)
+        characterVisual ??= GetComponent<CharacterVisual>();
+        if (characterVisual == null)
         {
             return localOffset;
         }
 
-        float y = Mathf.Max(localOffset.y, character.GetVisualTopLocalY() + 0.35f);
+        float y = Mathf.Max(localOffset.y, characterVisual.GetVisualTopLocalY() + 0.35f);
         return new Vector3(localOffset.x, y, localOffset.z);
     }
 
-    private float GetStat(Character.Condition condition, float defaultValue)
+    private float GetStat(CharacterCondition condition, float defaultValue)
     {
-        return character.stats.TryGetValue(condition, out float value) ? value : defaultValue;
+        return characterStats != null
+            && characterStats.Stats != null
+            && characterStats.Stats.TryGetValue(condition, out float value)
+                ? value
+                : defaultValue;
+    }
+
+    private ICharacterAiSchedulingService RequireAiSchedulingService()
+    {
+        return aiSchedulingService
+            ?? throw new InvalidOperationException($"{nameof(CharacterFeedbackBubble)} requires {nameof(ICharacterAiSchedulingService)} injection.");
+    }
+
+    private ICharacterFeedbackBubbleViewFactory RequireBubbleViewFactory()
+    {
+        return bubbleViewFactory
+            ?? throw new InvalidOperationException(
+                $"{nameof(CharacterFeedbackBubble)} requires {nameof(ICharacterFeedbackBubbleViewFactory)} injection.");
     }
 
     private static Color GetColor(CharacterFeedbackState state)
