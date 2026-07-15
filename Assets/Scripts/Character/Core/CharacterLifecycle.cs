@@ -179,7 +179,7 @@ public class CharacterLifecycle : SerializedMonoBehaviour
                     yield break;
                 }
 
-                if (grid.TryFindNearestWalkablePositionOnSameFloor(currentPos, out Vector2Int walkablePosition))
+                if (grid.TryFindNearbyWalkablePositionOnSameFloor(currentPos, out Vector2Int walkablePosition))
                 {
                     transform.position = grid.GetWorldPos(walkablePosition);
                     actor?.Brain?.ClearPathSearchCache();
@@ -229,7 +229,7 @@ public class CharacterLifecycle : SerializedMonoBehaviour
         }
 
         actor?.GetAbility<AbilityMove>()?.CancelActiveMovement();
-        if (grid.TryFindNearestWalkablePositionOnSameFloor(currentPos, out Vector2Int walkablePosition))
+        if (grid.TryFindNearbyWalkablePositionOnSameFloor(currentPos, out Vector2Int walkablePosition))
         {
             transform.position = grid.GetWorldPos(walkablePosition);
         }

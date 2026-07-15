@@ -78,7 +78,10 @@ public sealed class GridBuildingObjectFactory : IGridBuildingObjectFactory
             visualSize.y / spriteSize.y,
             1f);
 
-        SpriteRenderer renderer = placedObject.AddComponent<SpriteRenderer>();
+        GameObject visualObject = new GameObject("Visual");
+        visualObject.transform.SetParent(placedObject.transform, false);
+
+        SpriteRenderer renderer = visualObject.AddComponent<SpriteRenderer>();
         renderer.sprite = sprite;
         renderer.drawMode = SpriteDrawMode.Simple;
         renderer.sortingLayerName = buildingData.layer == GridLayer.FloorOverlay
@@ -89,13 +92,13 @@ public sealed class GridBuildingObjectFactory : IGridBuildingObjectFactory
             GridLayer.FloorOverlay => 110,
             _ => MountedFixtureSortingOrder
         };
-        renderer.transform.localScale = scale;
+        visualObject.transform.localScale = scale;
 
         Vector3 desiredCenter = new Vector3(0f, visualSize.y * 0.5f, 0f);
         Vector3 scaledBoundsCenter = new Vector3(
             sprite.bounds.center.x * scale.x,
             sprite.bounds.center.y * scale.y,
             0f);
-        renderer.transform.localPosition = desiredCenter - scaledBoundsCenter;
+        visualObject.transform.localPosition = desiredCenter - scaledBoundsCenter;
     }
 }

@@ -231,13 +231,17 @@ public sealed class CharacterAiScheduler : MonoBehaviour
                     bool needsInitialTreeTick = behaviorTree != null
                         && behaviorTree.ExternalBehavior != null
                         && behaviorTree.DungeonStoryTickCount == 0;
+                    bool hasSelectedActionWaitingToStart = HasSelectedActionWaitingToStart(actor);
 
-                    if (!actor.IsAiDecisionPending && !needsInitialTreeTick)
+                    if (!actor.IsAiDecisionPending
+                        && !needsInitialTreeTick
+                        && !hasSelectedActionWaitingToStart)
                     {
                         continue;
                     }
 
                     if (!needsInitialTreeTick
+                        && !hasSelectedActionWaitingToStart
                         && nextDecisionTime.TryGetValue(actor, out float dueTime)
                         && now < dueTime)
                     {
@@ -354,7 +358,38 @@ public sealed class CharacterAiScheduler : MonoBehaviour
     private static bool TryRunFallbackDecision(CharacterActor actor)
     {
         AIBrain brain = actor != null ? actor.ai ?? actor.GetComponent<AIBrain>() : null;
-        return brain != null && brain.DecideAction();
+        if (brain == null)
+        {
+            return false;
+        }
+
+        if (HasSelectedActionWaitingToStart(actor))
+        {
+            return actor.TryExecuteSelectedAiAction();
+        }
+
+        bool decided = brain.DecideAction();
+        if (!decided)
+        {
+            return false;
+        }
+
+        return HasSelectedActionWaitingToStart(actor)
+            ? actor.TryExecuteSelectedAiAction()
+            : true;
+    }
+
+    private static bool HasSelectedActionWaitingToStart(CharacterActor actor)
+    {
+        AIBrain brain = actor != null ? actor.Brain : null;
+        AIAction selectedAction = brain != null ? brain.bestAction : null;
+        return actor != null
+            && actor.CanRunAi
+            && brain != null
+            && selectedAction != null
+            && selectedAction.actionset != null
+            && !selectedAction.HasStarted
+            && !brain.isBestActionEnd;
     }
 
     private static void ConfigureBehaviorManagerForManualTick()

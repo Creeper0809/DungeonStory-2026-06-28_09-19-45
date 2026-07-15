@@ -23,7 +23,7 @@ public class GridTexture : SerializedMonoBehaviour, IGridBuildingVisual
     [SerializeField] private int hallwaySortingOrder = 100;
     [SerializeField] private Tilemap ceilingOverlayTilemap;
     [SerializeField] private string ceilingOverlaySortingLayerName = "Wall";
-    [SerializeField] private int ceilingOverlaySortingOrder = 104;
+    [SerializeField] private int ceilingOverlaySortingOrder = 110;
     private readonly GridWallTileCalculator wallTileCalculator = new GridWallTileCalculator();
     private readonly Dictionary<SpriteTileKey, Tile> spriteTiles = new Dictionary<SpriteTileKey, Tile>();
 
@@ -482,12 +482,56 @@ public class GridTexture : SerializedMonoBehaviour, IGridBuildingVisual
             renderer.sortingLayerName = ceilingOverlaySortingLayerName;
         }
 
-        renderer.sortingOrder = ceilingOverlaySortingOrder;
+        int wallOrder = GetWallTilemapSortingOrder(renderer.sortingLayerName);
+        int sortingOrder = Mathf.Max(ceilingOverlaySortingOrder, wallOrder + 1);
+        sortingOrder = Mathf.Max(sortingOrder, InteriorDoorVisualLayout.SortingOrder + 1);
+        sortingOrder = Mathf.Max(sortingOrder, DungeonDoorVisualLayout.CeilingSortingOrder + 1);
+        renderer.sortingOrder = sortingOrder;
+    }
+
+    private void EnsureCeilingOverlayTilemap()
+    {
+        if (ceilingOverlayTilemap != null || wallTilemap == null)
+        {
+            return;
+        }
+
+        GameObject overlayObject = new GameObject("CeilingOverlay", typeof(Tilemap), typeof(TilemapRenderer));
+        Transform wallTransform = wallTilemap.transform;
+        Transform parent = wallTransform.parent != null ? wallTransform.parent : transform;
+        overlayObject.transform.SetParent(parent, false);
+        overlayObject.transform.localPosition = wallTransform.localPosition;
+        overlayObject.transform.localRotation = wallTransform.localRotation;
+        overlayObject.transform.localScale = wallTransform.localScale;
+
+        ceilingOverlayTilemap = overlayObject.GetComponent<Tilemap>();
+        ceilingOverlayTilemap.color = wallTilemap.color;
+        ceilingOverlayTilemap.tileAnchor = wallTilemap.tileAnchor;
+        ceilingOverlayTilemap.orientation = wallTilemap.orientation;
+    }
+
+    private int GetWallTilemapSortingOrder(string targetSortingLayer)
+    {
+        TilemapRenderer wallRenderer = wallTilemap != null
+            ? wallTilemap.GetComponent<TilemapRenderer>()
+            : null;
+        if (wallRenderer == null || wallRenderer.sortingLayerName != targetSortingLayer)
+        {
+            return int.MinValue;
+        }
+
+        return wallRenderer.sortingOrder;
     }
 
     private void SynchronizeCeilingOverlay(Grid grid)
     {
-        if (grid == null || wallTilemap == null || ceilingOverlayTilemap == null)
+        if (grid == null || wallTilemap == null)
+        {
+            return;
+        }
+
+        EnsureCeilingOverlayTilemap();
+        if (ceilingOverlayTilemap == null)
         {
             return;
         }

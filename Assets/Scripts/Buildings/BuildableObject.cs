@@ -150,6 +150,11 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         return false;
     }
 
+    public bool ContainsGridPosition(Vector2Int gridPosition)
+    {
+        return buildPoses != null && buildPoses.Contains(gridPosition);
+    }
+
     public Vector3 GetFacilityAnchorWorldPosition(FacilityAnchorKind kind, Vector3 fromWorld)
     {
         return TryGetFacilityAnchorWorldPosition(kind, fromWorld, out Vector3 worldPosition)

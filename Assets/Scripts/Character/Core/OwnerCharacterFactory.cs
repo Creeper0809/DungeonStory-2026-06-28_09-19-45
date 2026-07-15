@@ -14,6 +14,9 @@ public interface IOwnerCharacterFactory
 
 public sealed class OwnerCharacterFactory : IOwnerCharacterFactory
 {
+    private static readonly Vector2 OwnerClickColliderOffset = new Vector2(0f, 0.5f);
+    private static readonly Vector2 OwnerClickColliderSize = Vector2.one;
+
     private readonly IObjectResolver objectResolver;
     private readonly IGridSystemProvider gridSystemProvider;
     private readonly ICharacterVisualRootFactory visualRootFactory;
@@ -60,6 +63,7 @@ public sealed class OwnerCharacterFactory : IOwnerCharacterFactory
     private CharacterActor EnsureOwnerComponents(GameObject ownerObject)
     {
         visualRootFactory.EnsureVisualRoot(ownerObject);
+        EnsureOwnerClickCollider(ownerObject);
 
         BehaviorTree behaviorTree = ownerObject.GetComponent<BehaviorTree>();
         if (behaviorTree == null)
@@ -92,6 +96,24 @@ public sealed class OwnerCharacterFactory : IOwnerCharacterFactory
         actor.EnsureRuntimeState();
         actor.AbilityCache?.RefreshAbilityCache();
         return actor;
+    }
+
+    private static void EnsureOwnerClickCollider(GameObject ownerObject)
+    {
+        if (ownerObject == null)
+        {
+            return;
+        }
+
+        BoxCollider2D collider = ownerObject.GetComponent<BoxCollider2D>();
+        if (collider == null)
+        {
+            collider = ownerObject.AddComponent<BoxCollider2D>();
+        }
+
+        collider.isTrigger = true;
+        collider.offset = OwnerClickColliderOffset;
+        collider.size = OwnerClickColliderSize;
     }
 
     private void InjectOwnerRuntime(GameObject ownerObject)

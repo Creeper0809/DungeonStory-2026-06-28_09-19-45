@@ -521,7 +521,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
                 part.buildPoses.Any(room.ContainsCell));
             bool mountedValid = instances
                 .Where(part => part.BuildingData.UsesIndependentRenderer)
-                .All(part => part.GetComponent<SpriteRenderer>() is SpriteRenderer renderer
+                .All(part => part.GetComponentInChildren<SpriteRenderer>() is SpriteRenderer renderer
                     && renderer.enabled
                     && renderer.sprite == part.BuildingData.sprite
                     && part.buildPoses.All(cell => ReferenceEquals(
@@ -1240,7 +1240,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
         foreach (BuildingSO part in expectedParts.Where(item => item.UsesIndependentRenderer))
         {
             BuildableObject placed = placedParts.FirstOrDefault(item => item != null && item.id == part.id);
-            SpriteRenderer renderer = placed != null ? placed.GetComponent<SpriteRenderer>() : null;
+            SpriteRenderer renderer = placed != null ? placed.GetComponentInChildren<SpriteRenderer>() : null;
             Check(renderer != null && renderer.enabled && renderer.sprite == part.sprite,
                 "RENDERER_" + part.id,
                 renderer != null

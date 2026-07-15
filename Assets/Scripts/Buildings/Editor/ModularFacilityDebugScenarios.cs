@@ -44,9 +44,10 @@ public static class ModularFacilityDebugScenarios
         VerifyMountedPartsDoNotProvideFloorSupport();
         VerifyExtendedRoomRoles();
         VerifyLegacyInitialPlacementRecipes();
+        VerifyLegacyInitialRoomBoundariesRespectExterior();
         VerifyAllLegacyRecipesAsFormalRooms();
         VerifyModularRoomComposition();
-        Debug.Log("ModularFacilityDebugScenarios passed: 73 operational contracts, assets, runtime instances, migration, slots, support, and room composition.");
+        Debug.Log("ModularFacilityDebugScenarios passed: operational contracts, assets, runtime instances, migration, slots, support, and room composition.");
     }
 
     private static void VerifyOperationalContracts()
@@ -863,9 +864,9 @@ public static class ModularFacilityDebugScenarios
             Require(ReferenceEquals(cell.GetOccupant(GridLayer.FloorOverlay), overlay), "Floor overlay did not occupy the FloorOverlay slot.");
             Require(ReferenceEquals(cell.GetTopOccupant(), floor), "Floor facility must retain selection priority over mounted parts.");
 
-            Require(wall.GetComponent<SpriteRenderer>() != null, "Wall fixture needs an independent SpriteRenderer.");
-            Require(ceiling.GetComponent<SpriteRenderer>() != null, "Ceiling fixture needs an independent SpriteRenderer.");
-            Require(overlay.GetComponent<SpriteRenderer>() != null, "Floor overlay needs an independent SpriteRenderer.");
+            Require(wall.GetComponentInChildren<SpriteRenderer>() != null, "Wall fixture needs an independent SpriteRenderer.");
+            Require(ceiling.GetComponentInChildren<SpriteRenderer>() != null, "Ceiling fixture needs an independent SpriteRenderer.");
+            Require(overlay.GetComponentInChildren<SpriteRenderer>() != null, "Floor overlay needs an independent SpriteRenderer.");
             Require(wall.GetComponent<BoxCollider2D>()?.isTrigger == true, "Mounted fixture collider must not block character physics.");
 
             TestOccupant character = new TestOccupant(9999);
@@ -898,7 +899,7 @@ public static class ModularFacilityDebugScenarios
 
                 if (asset.UsesIndependentRenderer)
                 {
-                    SpriteRenderer renderer = instance.GetComponent<SpriteRenderer>();
+                    SpriteRenderer renderer = instance.GetComponentInChildren<SpriteRenderer>();
                     Require(renderer != null && renderer.sprite == asset.sprite,
                         $"{asset.name} did not create its independent renderer.");
                     Require(renderer.sortingLayerName == (asset.layer == GridLayer.FloorOverlay ? "DungeonHallway" : "Wall"),
@@ -996,6 +997,88 @@ public static class ModularFacilityDebugScenarios
                 }
             }
         }
+    }
+
+    private static void VerifyLegacyInitialRoomBoundariesRespectExterior()
+    {
+        Dictionary<int, BuildingSO> modularById = LoadAll().ToDictionary((asset) => asset.id);
+        BuildingSO wall = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/Wall.asset");
+        BuildingSO door = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/InteriorDoor.asset");
+        BuildingSO stair = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/Stair.asset");
+        BuildingSO leftRoom = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/P1/P1_ResearchLab.asset");
+        BuildingSO rightRoom = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/P1/P1_ManaStorage.asset");
+        Require(wall != null && wall.IsStructuralWall && !wall.IsInteriorDoor,
+            "Initial room wall asset is not available.");
+        Require(door != null && door.IsInteriorDoor, "Initial room door asset is not available.");
+        Require(stair != null && stair.Placement.IsMovement, "Initial movement connector asset is not available.");
+        Require(leftRoom != null, "Legacy research lab asset is not available.");
+        Require(rightRoom != null, "Legacy mana storage asset is not available.");
+
+        Vector2Int leftAnchor = new Vector2Int(20, 0);
+        Vector2Int rightAnchor = new Vector2Int(26, 0);
+        IReadOnlyList<InitialBuildInfo> expanded = ModularFacilityInitialPlacementMigrator.ExpandInitialRooms(
+            new[]
+            {
+                new InitialBuildInfo { Position = leftAnchor, Building = leftRoom },
+                new InitialBuildInfo { Position = rightAnchor, Building = rightRoom }
+            },
+            id => id == wall.id
+                ? wall
+                : id == door.id
+                ? door
+                : modularById.TryGetValue(id, out BuildingSO data)
+                    ? data
+                    : null);
+
+        int leftStartX = leftAnchor.x - (leftRoom.width / 2);
+        int rightStartX = rightAnchor.x - (rightRoom.width / 2);
+        Vector2Int exteriorLeft = new Vector2Int(leftStartX - 1, leftAnchor.y);
+        Vector2Int interiorLeftRoomRight = new Vector2Int(leftStartX + Mathf.Max(1, leftRoom.width), leftAnchor.y);
+        Vector2Int interiorRightRoomLeft = new Vector2Int(rightStartX - 1, rightAnchor.y);
+        Vector2Int exteriorRight = new Vector2Int(rightStartX + Mathf.Max(1, rightRoom.width), rightAnchor.y);
+
+        Require(IsWallAt(expanded, exteriorLeft), "Initial row left exterior boundary must remain a wall.");
+        Require(IsDoorAt(expanded, interiorLeftRoomRight), "Initial left room internal boundary must be a door.");
+        Require(IsDoorAt(expanded, interiorRightRoomLeft), "Initial right room internal boundary must be a door.");
+        Require(IsWallAt(expanded, exteriorRight), "Initial row right exterior boundary must remain a wall.");
+
+        Vector2Int roomAnchor = new Vector2Int(20, 0);
+        Vector2Int stairAnchor = new Vector2Int(25, 0);
+        IReadOnlyList<InitialBuildInfo> expandedWithMovement = ModularFacilityInitialPlacementMigrator.ExpandInitialRooms(
+            new[]
+            {
+                new InitialBuildInfo { Position = roomAnchor, Building = leftRoom },
+                new InitialBuildInfo { Position = stairAnchor, Building = stair }
+            },
+            id => id == wall.id
+                ? wall
+                : id == door.id
+                ? door
+                : modularById.TryGetValue(id, out BuildingSO data)
+                    ? data
+                    : null);
+
+        int roomStartX = roomAnchor.x - (leftRoom.width / 2);
+        Vector2Int roomRightBoundary = new Vector2Int(roomStartX + Mathf.Max(1, leftRoom.width), roomAnchor.y);
+        Require(IsDoorAt(expandedWithMovement, roomRightBoundary),
+            "Initial room boundary facing a stair must be a door.");
+    }
+
+    private static bool IsWallAt(IEnumerable<InitialBuildInfo> placements, Vector2Int position)
+    {
+        BuildingSO building = placements.FirstOrDefault(item => item != null && item.Position == position)?.Building;
+        return building != null && building.IsStructuralWall && !building.IsInteriorDoor;
+    }
+
+    private static bool IsDoorAt(IEnumerable<InitialBuildInfo> placements, Vector2Int position)
+    {
+        BuildingSO building = placements.FirstOrDefault(item => item != null && item.Position == position)?.Building;
+        return building != null && building.IsInteriorDoor;
     }
 
     private static void VerifyAllLegacyRecipesAsFormalRooms()
@@ -1097,7 +1180,7 @@ public static class ModularFacilityDebugScenarios
                     mountedCount = parts.Count(part => part.BuildingData.UsesIndependentRenderer);
                     foreach (BuildableObject mounted in parts.Where(part => part.BuildingData.UsesIndependentRenderer))
                     {
-                        SpriteRenderer renderer = mounted.GetComponent<SpriteRenderer>();
+                        SpriteRenderer renderer = mounted.GetComponentInChildren<SpriteRenderer>();
                         Require(renderer != null && renderer.enabled && renderer.sprite == mounted.BuildingData.sprite,
                             $"{monolith.name}/{mounted.BuildingData.objectName} mounted renderer is invalid.");
                         Require(mounted.buildPoses.All(cell => ReferenceEquals(

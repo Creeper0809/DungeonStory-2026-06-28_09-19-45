@@ -29,6 +29,7 @@ public static class GridVisualDebugScenarios
         List<string> errors = new List<string>();
         RunScenario("sprite tile visual footprint alignment", VerifySpriteTileTransformMatchesGridFootprint, errors);
         RunScenario("structural wall keeps full-height render", VerifyStructuralWallKeepsFullHeightRender, errors);
+        RunScenario("interior wall ceiling overlay renders in front", VerifyInteriorWallCeilingOverlayRendersInFront, errors);
         RunScenario("dungeon door keeps original three-cell art", VerifyDungeonDoorKeepsOriginalArt, errors);
         RunScenario("interior door fits one wall cell", VerifyInteriorDoorFitsOneCell, errors);
         RunScenario("interior door stays grounded in preserved wall", VerifyInteriorDoorStaysGroundedInPreservedWall, errors);
@@ -149,6 +150,82 @@ public static class GridVisualDebugScenarios
         Object.DestroyImmediate(wallTile);
         Object.DestroyImmediate(floorTile);
         return rendered;
+    }
+
+    private static bool VerifyInteriorWallCeilingOverlayRendersInFront()
+    {
+        BuildingSO wall = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/Wall.asset");
+        BuildingSO hallway = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/Hallway.asset");
+        if (wall == null || hallway == null || !wall.IsStructuralWall)
+        {
+            return false;
+        }
+
+        Grid grid = new Grid(5, 1);
+        GridBuildingPlacementService placement = new GridBuildingPlacementService(
+            grid,
+            hallway,
+            null,
+            new GridBuildingFactory(InjectBuildingDependencies),
+            new BuildingPlacementValidator());
+        bool leftPlaced = placement.TryPlaceBuilding(hallway, new Vector2Int(1, 0), out _);
+        bool wallPlaced = placement.TryPlaceBuilding(wall, new Vector2Int(2, 0), out _);
+        bool rightPlaced = placement.TryPlaceBuilding(hallway, new Vector2Int(3, 0), out _);
+
+        GameObject root = new GameObject("InteriorWallCeilingOverlayTest", typeof(UnityEngine.Grid));
+        GameObject wallTilemapObject = new GameObject("Wall", typeof(Tilemap), typeof(TilemapRenderer));
+        wallTilemapObject.transform.SetParent(root.transform, false);
+        Tilemap wallTilemap = wallTilemapObject.GetComponent<Tilemap>();
+        TilemapRenderer wallRenderer = wallTilemapObject.GetComponent<TilemapRenderer>();
+        wallRenderer.sortingLayerName = "Wall";
+        wallRenderer.sortingOrder = 100;
+        Tile wallTile = ScriptableObject.CreateInstance<Tile>();
+        wallTile.sprite = wall.sprite;
+        Tile floorTile = ScriptableObject.CreateInstance<Tile>();
+        floorTile.sprite = hallway.sprite;
+
+        GridTexture texture = root.AddComponent<GridTexture>();
+        texture.wallTilemap = wallTilemap;
+        texture.wall = wallTile;
+        texture.floor = floorTile;
+        texture.DrawWall(grid);
+
+        Tilemap overlayTilemap = null;
+        foreach (Tilemap candidate in root.GetComponentsInChildren<Tilemap>())
+        {
+            if (candidate != null && candidate != wallTilemap && candidate.name == "CeilingOverlay")
+            {
+                overlayTilemap = candidate;
+                break;
+            }
+        }
+
+        TilemapRenderer overlayRenderer = overlayTilemap != null
+            ? overlayTilemap.GetComponent<TilemapRenderer>()
+            : null;
+        int topY = GridBuildingTileTransformCalculator.DefaultCellTileHeight - 1;
+        bool valid = leftPlaced
+            && wallPlaced
+            && rightPlaced
+            && overlayTilemap != null
+            && overlayRenderer != null
+            && wallTilemap.GetTile(new Vector3Int(-2, topY, 0)) == wallTile
+            && overlayTilemap.GetTile(new Vector3Int(-2, topY, 0)) == floorTile
+            && overlayTilemap.GetTile(new Vector3Int(-1, topY, 0)) == floorTile
+            && overlayTilemap.GetTile(new Vector3Int(-3, topY, 0)) == floorTile
+            && overlayRenderer.sortingLayerName == wallRenderer.sortingLayerName
+            && overlayRenderer.sortingOrder > wallRenderer.sortingOrder
+            && overlayRenderer.sortingOrder > InteriorDoorVisualLayout.SortingOrder;
+
+        Object.DestroyImmediate((grid.GetGridCell(new Vector2Int(1, 0))?.GetOccupant(GridLayer.Hallway) as Component)?.gameObject);
+        Object.DestroyImmediate((grid.GetGridCell(new Vector2Int(2, 0))?.GetOccupant(GridLayer.Building) as Component)?.gameObject);
+        Object.DestroyImmediate((grid.GetGridCell(new Vector2Int(3, 0))?.GetOccupant(GridLayer.Hallway) as Component)?.gameObject);
+        Object.DestroyImmediate(root);
+        Object.DestroyImmediate(wallTile);
+        Object.DestroyImmediate(floorTile);
+        return valid;
     }
 
     private static bool VerifyDungeonDoorKeepsOriginalArt()

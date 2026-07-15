@@ -30,6 +30,7 @@ public static class GridFoundationDebugScenarios
 
         RunScenario("walk path", VerifyWalkPath, errors);
         RunScenario("stale walk path is blocked by a newly placed wall", VerifyStaleWalkPathBlockedByWall, errors);
+        RunScenario("nearby walkable search does not scan entire floor", VerifyNearbyWalkableSearchDoesNotScanEntireFloor, errors);
         RunScenario("stair path", VerifyStairPath, errors);
         RunScenario("entry exit path", VerifyEntryExitPath, errors);
         RunScenario("unreachable movement excluded", VerifyUnreachableMovementIsExcluded, errors);
@@ -119,6 +120,24 @@ public static class GridFoundationDebugScenarios
 
         Object.DestroyImmediate(placedWall.gameObject);
         return valid;
+    }
+
+    private static bool VerifyNearbyWalkableSearchDoesNotScanEntireFloor()
+    {
+        Grid grid = new Grid(6, 1);
+        AddHallway(grid, new Vector2Int(5, 0));
+
+        bool ignoredFarCell = !grid.TryFindNearbyWalkablePositionOnSameFloor(
+            new Vector2Int(2, 0),
+            out _);
+
+        AddHallway(grid, new Vector2Int(3, 0));
+        bool foundAdjacentCell = grid.TryFindNearbyWalkablePositionOnSameFloor(
+            new Vector2Int(2, 0),
+            out Vector2Int nearby)
+            && nearby == new Vector2Int(3, 0);
+
+        return ignoredFarCell && foundAdjacentCell;
     }
 
     private static bool VerifyStairPath()

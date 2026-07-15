@@ -64,19 +64,20 @@ public static class ModularFacilityInitialPlacementMigrator
         IEnumerable<InitialBuildInfo> placements,
         Func<int, BuildingSO> findBuildingData)
     {
+        List<InitialBuildInfo> source = placements != null
+            ? placements.Where(placement => placement != null).ToList()
+            : new List<InitialBuildInfo>();
+        Dictionary<int, RowConnectionLayout> connectionsByFloor = CreateRowConnectionLayout(source);
         List<InitialBuildInfo> result = new List<InitialBuildInfo>();
-        foreach (InitialBuildInfo placement in placements ?? Enumerable.Empty<InitialBuildInfo>())
+        foreach (InitialBuildInfo placement in source)
         {
             if (!TryExpand(placement, findBuildingData, out IReadOnlyList<InitialBuildInfo> expanded))
             {
-                if (placement != null)
-                {
-                    result.Add(placement);
-                }
+                result.Add(placement);
                 continue;
             }
 
-            result.AddRange(CreateInitialRoomBoundary(placement, findBuildingData));
+            result.AddRange(CreateInitialRoomBoundary(placement, findBuildingData, connectionsByFloor));
             result.AddRange(expanded);
         }
 
@@ -128,7 +129,8 @@ public static class ModularFacilityInitialPlacementMigrator
 
     private static IEnumerable<InitialBuildInfo> CreateInitialRoomBoundary(
         InitialBuildInfo placement,
-        Func<int, BuildingSO> findBuildingData)
+        Func<int, BuildingSO> findBuildingData,
+        IReadOnlyDictionary<int, RowConnectionLayout> connectionsByFloor)
     {
         if (placement?.Building == null || findBuildingData == null)
         {
@@ -144,16 +146,62 @@ public static class ModularFacilityInitialPlacementMigrator
 
         int startX = placement.Position.x - (placement.Building.width / 2);
         int endX = startX + Mathf.Max(1, placement.Building.width) - 1;
+        int leftBoundaryX = startX - 1;
+        int rightBoundaryX = endX + 1;
+        RowConnectionLayout connections = connectionsByFloor != null
+            && connectionsByFloor.TryGetValue(placement.Position.y, out RowConnectionLayout rowConnections)
+                ? rowConnections
+                : RowConnectionLayout.Empty;
+        BuildingSO leftBoundary = ShouldOpenBoundary(leftBoundaryX, connections) ? door : wall;
+        BuildingSO rightBoundary = ShouldOpenBoundary(rightBoundaryX, connections) ? door : wall;
+
         yield return new InitialBuildInfo
         {
-            Position = new Vector2Int(startX - 1, placement.Position.y),
-            Building = wall
+            Position = new Vector2Int(leftBoundaryX, placement.Position.y),
+            Building = leftBoundary
         };
         yield return new InitialBuildInfo
         {
-            Position = new Vector2Int(endX + 1, placement.Position.y),
-            Building = door
+            Position = new Vector2Int(rightBoundaryX, placement.Position.y),
+            Building = rightBoundary
         };
+    }
+
+    private static Dictionary<int, RowConnectionLayout> CreateRowConnectionLayout(
+        IReadOnlyCollection<InitialBuildInfo> placements)
+    {
+        return placements
+            .Where(placement => placement?.Building != null && IsConnectionContent(placement.Building))
+            .SelectMany(CreateConnectionSpans)
+            .GroupBy(span => span.Y)
+            .ToDictionary(
+                group => group.Key,
+                group => new RowConnectionLayout(group.ToArray()));
+    }
+
+    private static IEnumerable<ConnectionSpan> CreateConnectionSpans(InitialBuildInfo placement)
+    {
+        foreach (IGrouping<int, Vector2Int> row in placement.Building.GetGridPosList(placement.Position)
+            .GroupBy(position => position.y))
+        {
+            yield return new ConnectionSpan(
+                row.Key,
+                row.Min(position => position.x),
+                row.Max(position => position.x));
+        }
+    }
+
+    private static bool IsConnectionContent(BuildingSO building)
+    {
+        return IsLegacyMonolith(building)
+            || building.Placement.IsMovement
+            || building.IsDoor;
+    }
+
+    private static bool ShouldOpenBoundary(int boundaryX, RowConnectionLayout connections)
+    {
+        return connections.HasContentLeftOf(boundaryX)
+            && connections.HasContentRightOf(boundaryX);
     }
 
     private static IReadOnlyDictionary<string, int> BuildModularIdMap()
@@ -197,5 +245,41 @@ public static class ModularFacilityInitialPlacementMigrator
 
         public string Code { get; }
         public int OffsetX { get; }
+    }
+
+    private readonly struct ConnectionSpan
+    {
+        public ConnectionSpan(int y, int minX, int maxX)
+        {
+            Y = y;
+            MinX = minX;
+            MaxX = maxX;
+        }
+
+        public int Y { get; }
+        public int MinX { get; }
+        public int MaxX { get; }
+    }
+
+    private readonly struct RowConnectionLayout
+    {
+        public static readonly RowConnectionLayout Empty = new RowConnectionLayout(Array.Empty<ConnectionSpan>());
+
+        private readonly ConnectionSpan[] spans;
+
+        public RowConnectionLayout(ConnectionSpan[] spans)
+        {
+            this.spans = spans ?? Array.Empty<ConnectionSpan>();
+        }
+
+        public bool HasContentLeftOf(int boundaryX)
+        {
+            return spans.Any(span => span.MaxX < boundaryX);
+        }
+
+        public bool HasContentRightOf(int boundaryX)
+        {
+            return spans.Any(span => span.MinX > boundaryX);
+        }
     }
 }

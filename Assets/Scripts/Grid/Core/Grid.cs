@@ -822,6 +822,39 @@ public class Grid
         return found;
     }
 
+    public bool TryFindNearbyWalkablePositionOnSameFloor(
+        Vector2Int start,
+        out Vector2Int walkablePosition,
+        int maxDistance = 1)
+    {
+        if (IsValidGridPos(start) && IsWalkable(start))
+        {
+            walkablePosition = start;
+            return true;
+        }
+
+        int clampedDistance = Mathf.Max(1, maxDistance);
+        for (int distance = 1; distance <= clampedDistance; distance++)
+        {
+            Vector2Int left = new Vector2Int(start.x - distance, start.y);
+            if (IsValidGridPos(left) && IsWalkable(left))
+            {
+                walkablePosition = left;
+                return true;
+            }
+
+            Vector2Int right = new Vector2Int(start.x + distance, start.y);
+            if (IsValidGridPos(right) && IsWalkable(right))
+            {
+                walkablePosition = right;
+                return true;
+            }
+        }
+
+        walkablePosition = default;
+        return false;
+    }
+
     public bool IsConnectedWithAny(IReadOnlyCollection<Vector2Int> end)
     {
         if (end == null) return false;

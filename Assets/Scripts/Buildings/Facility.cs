@@ -157,7 +157,11 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
         worker = null;
         actor.Brain?.SetActionPhase("\uC2DC\uC124 \uD1F4\uC7A5", this);
         actor.transform.position -= new Vector3(0f, 0.15f);
-        if (TryGetFacilityOccupiedWorldPosition(actor.transform.position, out Vector3 exitPosition))
+        Vector2Int actorGridPosition = grid != null
+            ? grid.GetXY(actor.transform.position)
+            : centerPos;
+        if (!ContainsGridPosition(actorGridPosition)
+            && TryGetFacilityOccupiedWorldPosition(actor.transform.position, out Vector3 exitPosition))
         {
             actor.transform.position = exitPosition;
         }

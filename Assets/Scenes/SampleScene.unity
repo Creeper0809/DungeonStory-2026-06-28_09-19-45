@@ -14405,7 +14405,7 @@ MonoBehaviour:
   driveCharacterUpdates: 1
   driveBehaviorDesignerTrees: 1
   requireBehaviorTreeOnCharacters: 1
-  characterAiExternalBehavior: {fileID: 0}
+  characterAiExternalBehavior: {fileID: 11400000, guid: 5ca7280068555f246b5c33db28a1d1e3, type: 2}
   limitPathSearches: 1
   limitFeedbackToVisibleCharacters: 1
   adaptBudgetsToFrameCost: 1

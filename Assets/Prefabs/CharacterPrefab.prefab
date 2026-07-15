@@ -297,6 +297,8 @@ MonoBehaviour:
   isExecuted: 0
   actionFailureCooldown: 1
   actionSwitchScoreMargin: 0.12
+  actionTransitionCooldown: 0.75
+  defaultActionPersistenceSeconds: 0.75
   debugCandidateLimit: 3
 --- !u!114 &135853966593013072
 MonoBehaviour:
@@ -351,6 +353,8 @@ MonoBehaviour:
   maxHealth: 100
   currentHealth: 100
   injurySeverity: 0
+  baseMood: 55
+  interactionMoodFactors: []
 --- !u!114 &744063168552919680
 MonoBehaviour:
   m_ObjectHideFlags: 0
