@@ -72,9 +72,7 @@ public static class RoomDetector
             return true;
         }
 
-        string objectName = building.BuildingData != null ? building.BuildingData.objectName : building.name;
-        return string.Equals(objectName, "Door", System.StringComparison.OrdinalIgnoreCase)
-            || objectName == "문";
+        return building.BuildingData?.IsDoor == true;
     }
 
     internal static bool IsWall(BuildableObject building)
@@ -91,7 +89,9 @@ public static class RoomDetector
 
     private static bool IsInteriorCell(Grid grid, RoomOccupancySnapshot snapshot, Vector2Int position)
     {
-        return grid.IsValidGridPos(position)
+        GridCell cell = grid.GetGridCell(position);
+        return cell != null
+            && cell.AreaType == GridCellAreaType.DungeonInterior
             && grid.IsWalkable(position)
             && !snapshot.HasDoor(position)
             && !snapshot.HasWall(position);
@@ -260,7 +260,7 @@ public static class RoomDetector
             && !IsWall(building)
             && building.BuildingData != null
             && building.BuildingData.Facility != null
-            && building.BuildingData.Facility.selfContainedRoom
+            && building.BuildingData.IsSelfContainedRoom()
             && building.BuildingData.Facility.roles != FacilityRole.None;
     }
 
@@ -275,7 +275,10 @@ public static class RoomDetector
 
         foreach (Vector2Int position in positions)
         {
-            if (grid.IsValidGridPos(position) && !cells.Contains(position))
+            GridCell cell = grid.GetGridCell(position);
+            if (cell != null
+                && cell.AreaType == GridCellAreaType.DungeonInterior
+                && !cells.Contains(position))
             {
                 cells.Add(position);
             }

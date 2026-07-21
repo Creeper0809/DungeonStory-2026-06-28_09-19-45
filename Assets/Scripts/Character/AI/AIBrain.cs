@@ -17,21 +17,6 @@ public class AIBrain : CharacterAbility
     private const string ShoppingActionPath = "SO/AI/Action/Shopping";
     private const string LookAroundActionPath = "SO/AI/Action/LookAround";
     private const string ExitDungeonActionPath = "SO/AI/Action/ExitDungeon";
-    private static readonly ICharacterAiActionAssetCatalog FallbackActionAssetCatalog =
-        new ResourceCharacterAiActionAssetCatalog(new UnityResourcesAssetLoader());
-    private static readonly ICharacterAiSchedulingService FallbackAiSchedulingService =
-        new AIBrainImmediateSchedulingService();
-    private static readonly IFacilityCandidateCache FallbackFacilityCandidateCache =
-        new FacilityCandidateCacheStore();
-    private static readonly IRoomFacilityPolicy FallbackRoomFacilityPolicy =
-        new RoomFacilityPolicyService(new RoomLayoutCache());
-    private static readonly ICharacterAiFacilityLookup FallbackFacilityLookup =
-        new AIBrainSceneFacilityLookup();
-    private static readonly ICharacterAiJobGiverCatalog FallbackJobGiverCatalog =
-        new CharacterAiJobGiverCatalog();
-    private static readonly ICharacterAiDecisionPipeline FallbackDecisionPipeline =
-        new CharacterAiDecisionPipeline();
-
     public AIAction[] availableActions;
     [ReadOnly]public AIAction bestAction;
     public bool isBestActionEnd = true;
@@ -45,6 +30,7 @@ public class AIBrain : CharacterAbility
     private readonly Dictionary<AIActionSet, float> actionFailureCooldownUntil = new Dictionary<AIActionSet, float>();
     private readonly List<AIAction> destinationFailedThisDecision = new List<AIAction>();
     private readonly List<AIActionDebugCandidate> lastCandidateScores = new List<AIActionDebugCandidate>();
+    private IReadOnlyList<AIActionDebugCandidate> lastCandidateScoresView;
     private float noActionLogCooldownUntil;
     private AIAction queuedAction;
     private ICharacterAiActionAssetCatalog actionAssetCatalog;
@@ -63,7 +49,8 @@ public class AIBrain : CharacterAbility
     private float nextActionSwitchAllowedAt;
     public bool IsPathSearchDeferred { get; private set; }
     public AIActionFailure LastActionFailure => lastActionFailure;
-    public IReadOnlyList<AIActionDebugCandidate> LastCandidateScores => lastCandidateScores;
+    public IReadOnlyList<AIActionDebugCandidate> LastCandidateScores =>
+        lastCandidateScoresView ??= ReadOnlyView.List(lastCandidateScores);
     public string CurrentActionDebugLabel => currentActionDebugLabel;
     public string CurrentActionPhase => currentActionPhase;
     public int DebugVersion { get; private set; }
@@ -115,9 +102,47 @@ public class AIBrain : CharacterAbility
     public void UseOwnerWorkActions()
     {
         List<AIAction> actions = new List<AIAction>();
-        AddRequiredAction<AIWork>(actions, WorkActionPath);
-        AddRequiredAction<AIWait>(actions, WaitActionPath);
+        AddRequiredAction(actions, WorkActionPath, CharacterAiBranch.Work);
+        AddRuntimeHaulAction(actions);
+        AddRequiredAction(actions, WaitActionPath, CharacterAiBranch.Wait);
         availableActions = actions.ToArray();
+    }
+
+    public void UseStaffWorkActions()
+    {
+        List<AIAction> actions = availableActions != null
+            ? availableActions
+                .Where(action => action?.actionset != null
+                    && action.actionset.Branch != CharacterAiBranch.ExitDungeon)
+                .ToList()
+            : new List<AIAction>();
+        AddRequiredAction(actions, WorkActionPath, CharacterAiBranch.Work);
+        AddRequiredAction(actions, WaitActionPath, CharacterAiBranch.Wait);
+        AddRequiredAction(actions, EatActionPath, CharacterAiBranch.Eat);
+        AddRequiredAction(actions, RestActionPath, CharacterAiBranch.Rest);
+        AddRequiredAction(actions, ToiletActionPath, CharacterAiBranch.Toilet);
+        AddRequiredAction(actions, HygieneActionPath, CharacterAiBranch.Hygiene);
+        AddRuntimeHaulAction(actions);
+        availableActions = actions.ToArray();
+        isBestActionEnd = true;
+        ClearPathSearchCache();
+    }
+
+    private void AddRuntimeHaulAction(List<AIAction> actions)
+    {
+        if (actions == null
+            || actions.Any(action => action?.actionset is AIHaul))
+        {
+            return;
+        }
+
+        AIHaul haul = ScriptableObject.CreateInstance<AIHaul>();
+        haul.hideFlags = HideFlags.HideAndDontSave;
+        haul.actionName = "운반";
+        actions.Add(new AIAction
+        {
+            actionset = haul
+        });
     }
 
     private void NormalizeConfiguredActions()
@@ -153,80 +178,69 @@ public class AIBrain : CharacterAbility
         List<AIAction> actions = availableActions != null
             ? availableActions.ToList()
             : new List<AIAction>();
-        AddRequiredAction<AIEat>(actions, EatActionPath);
-        AddRequiredAction<AIRest>(actions, RestActionPath);
-        AddRequiredFacilityRoleAction(actions, ToiletActionPath, FacilityRole.Toilet);
-        AddRequiredFacilityRoleAction(actions, HygieneActionPath, FacilityRole.Hygiene);
-        AddRequiredAction<AIShopping>(actions, ShoppingActionPath);
-        AddRequiredAction<AILookAround>(actions, LookAroundActionPath);
-        AddRequiredAction<AIExitDungeon>(actions, ExitDungeonActionPath);
+        AddRequiredAction(actions, EatActionPath, CharacterAiBranch.Eat);
+        AddRequiredAction(actions, RestActionPath, CharacterAiBranch.Rest);
+        AddRequiredAction(actions, ToiletActionPath, CharacterAiBranch.Toilet);
+        AddRequiredAction(actions, HygieneActionPath, CharacterAiBranch.Hygiene);
+        AddRequiredAction(actions, ShoppingActionPath, CharacterAiBranch.Shopping);
+        AddRequiredAction(actions, LookAroundActionPath, CharacterAiBranch.LookAround);
+        AddRequiredAction(actions, ExitDungeonActionPath, CharacterAiBranch.ExitDungeon);
         availableActions = actions.ToArray();
     }
 
-    private void AddRequiredAction<T>(List<AIAction> actions, string resourcePath) where T : AIActionSet
-    {
-        if (actions.Any((action) => action.actionset is T)) return;
-
-        actions.Add(new AIAction { actionset = RequireActionCatalog().GetRequiredAction<T>(resourcePath) });
-    }
-
-    private void AddRequiredFacilityRoleAction(
+    private void AddRequiredAction(
         List<AIAction> actions,
         string resourcePath,
-        FacilityRole role)
+        CharacterAiBranch branch)
     {
-        if (actions.Any((action) =>
-                action.actionset is AIFacilityRoleAction roleAction
-                && roleAction.Role == role))
+        if (actions.Any(action => action?.actionset != null && action.actionset.Branch == branch))
         {
             return;
         }
 
         actions.Add(new AIAction
         {
-            actionset = RequireActionCatalog().GetRequiredFacilityRoleAction(resourcePath, role)
+            actionset = RequireActionCatalog().GetRequiredAction(resourcePath, branch)
         });
     }
 
     private ICharacterAiActionAssetCatalog RequireActionCatalog()
     {
-        return actionAssetCatalog ?? FallbackActionAssetCatalog;
+        return RuntimeDependency.Require(actionAssetCatalog, this);
     }
 
     private ICharacterAiSchedulingService RequireAiSchedulingService()
     {
-        return aiSchedulingService ?? FallbackAiSchedulingService;
+        return RuntimeDependency.Require(aiSchedulingService, this);
     }
 
     public FacilityScoringContext RequireFacilityScoringContext()
     {
-        if (!facilityScoringContext.IsConfigured)
-        {
-            facilityScoringContext = FacilityScoringContext.WithoutReputationBiasForIsolatedTest(
-                FallbackRoomFacilityPolicy);
-        }
-
+        RuntimeDependency.Ensure(
+            facilityScoringContext.IsConfigured,
+            this,
+            nameof(FacilityScoringContext));
         return facilityScoringContext;
     }
 
     public IFacilityCandidateCache RequireFacilityCandidateCache()
     {
-        return facilityCandidateCache ?? FallbackFacilityCandidateCache;
+        return RuntimeDependency.Require(facilityCandidateCache, this);
     }
 
     public ICharacterAiFacilityLookup RequireFacilityLookup()
     {
-        return facilityLookup ?? FallbackFacilityLookup;
+        return RuntimeDependency.Require(facilityLookup, this);
     }
 
     public ICharacterAiJobGiverCatalog RequireJobGiverCatalog()
     {
-        return jobGiverCatalog ?? FallbackJobGiverCatalog;
+        return RuntimeDependency.Require(jobGiverCatalog, this);
     }
 
     public ICharacterAiDecisionPipeline RequireDecisionPipeline()
     {
-        return decisionPipeline ?? FallbackDecisionPipeline;
+        return RuntimeDependency.Require(decisionPipeline, this);
     }
 
     public bool DecideAction()
@@ -564,6 +578,14 @@ public class AIBrain : CharacterAbility
         RequireAiSchedulingService().RequestImmediateDecision(actor);
     }
 
+    public void InvalidateQueuedActionForNextDecision()
+    {
+        queuedAction?.ReleaseReservation(actor);
+        queuedAction = null;
+        ClearPathSearchCache();
+        MarkDebugDirty();
+    }
+
     public void ClearSelectedActionForIdle(string idleLabel)
     {
         bestAction?.ReleaseReservation(actor);
@@ -754,7 +776,10 @@ public class AIBrain : CharacterAbility
 
         if (!string.IsNullOrWhiteSpace(reason))
         {
-            actor?.AddLog($"AI replan: {reason}");
+            actor?.AddActivity(CharacterActivityEvent.InternalAi(
+                CharacterActivityOutcomes.Changed,
+                "replan",
+                $"AI replan: {reason}"));
         }
 
         return true;
@@ -791,7 +816,7 @@ public class AIBrain : CharacterAbility
             return "\uACBD\uB85C \uC5C6\uC74C";
         }
 
-        int stepCount = action.pathSteps != null ? action.pathSteps.Count : 0;
+        int stepCount = action.pathSteps.Count;
         return $"{action.planKind} / {stepCount}\uCE78";
     }
 
@@ -963,11 +988,6 @@ public class AIBrain : CharacterAbility
             && Time.time < until;
     }
 
-    private void RecordActionFailure(AIActionSet actionSet, string reason)
-    {
-        RecordActionFailure(actionSet, AIActionFailure.FromReason(reason));
-    }
-
     private void RecordActionFailure(AIActionSet actionSet, AIActionFailure failure)
     {
         if (actionSet == null) return;
@@ -976,7 +996,10 @@ public class AIBrain : CharacterAbility
         lastFailedActionSet = actionSet;
         lastActionFailure = failure.HasFailure ? failure : AIActionFailure.Create(AIActionFailureKind.Unknown);
         actor?.Blackboard?.ReportActionFailure(actionSet, lastActionFailure);
-        actor?.AddLog($"AI \uC2E4\uD328: {GetActionLabel(actionSet)} - {lastActionFailure}");
+        actor?.AddActivity(CharacterActivityEvent.InternalAi(
+            CharacterActivityOutcomes.Failed,
+            lastActionFailure.Kind.ToString(),
+            $"AI \uC2E4\uD328: {GetActionLabel(actionSet)} - {lastActionFailure}"));
         MarkDebugDirty();
     }
     private void RecordNoActionFailure()
@@ -988,30 +1011,32 @@ public class AIBrain : CharacterAbility
         lastActionFailure = AIActionFailure.Create(AIActionFailureKind.NoAction, "\uC2E4\uD589 \uAC00\uB2A5\uD55C \uD589\uB3D9 \uC5C6\uC74C");
         currentActionDebugLabel = "\uB300\uAE30";
         actor?.Blackboard?.ReportActionFailure(null, lastActionFailure);
-        actor?.AddLog("AI \uB300\uAE30: \uC2E4\uD589 \uAC00\uB2A5\uD55C \uD589\uB3D9 \uC5C6\uC74C");
+        actor?.AddActivity(CharacterActivityEvent.InternalAi(
+            CharacterActivityOutcomes.Blocked,
+            "no-action",
+            "AI \uB300\uAE30: \uC2E4\uD589 \uAC00\uB2A5\uD55C \uD589\uB3D9 \uC5C6\uC74C"));
         MarkDebugDirty();
     }
     private static string GetActionLabel(AIActionSet actionSet)
     {
         if (actionSet == null) return "\uD589\uB3D9 \uC5C6\uC74C";
-        return !string.IsNullOrWhiteSpace(actionSet.actionName)
-            ? actionSet.actionName
-            : actionSet.GetType().Name;
+        return actionSet.GetDisplayLabel();
     }
 
     private AIActionFailure RefineActionFailure(AIAction action, AIActionFailure failure)
     {
-        if (action?.actionset is AIWork
+        if (action?.actionset != null
+            && action.actionset.HasSemanticTag(CharacterAiActionTags.Work)
             && actor != null
             && actor.TryGetAbility(out AbilityWork work)
             && work.TryGetLastRejectedWorkCandidate(out WorkTargetCandidate candidate)
             && candidate.Building != null)
         {
-            return AIActionFailure.FromReason(
-                candidate.FailureReason,
+            return AIActionFailure.Create(
                 candidate.FailureKind != AIActionFailureKind.None
                     ? candidate.FailureKind
                     : failure.Kind,
+                candidate.FailureReason,
                 candidate.Building);
         }
 
@@ -1029,7 +1054,7 @@ public class AIBrain : CharacterAbility
             GetActionLabel(action.actionset),
             action.score,
             failure,
-            action.destination));
+            failure.Target != null ? failure.Target : action.destination));
         MarkDebugDirty();
     }
 
@@ -1201,28 +1226,6 @@ public class AIBrain : CharacterAbility
         DebugVersion++;
     }
 
-    private sealed class AIBrainImmediateSchedulingService : ICharacterAiSchedulingService
-    {
-        public bool IsDrivingAi => false;
-        public void Register(CharacterActor actor) { }
-        public void Unregister(CharacterActor actor) { }
-        public void RequestImmediateDecision(CharacterActor actor) { }
-        public bool TryConsumePathSearchBudget() => true;
-        public bool ShouldShowCharacterFeedback(CharacterActor actor) => false;
-        public int GetMovementFrameStride(CharacterActor actor) => 1;
-        public void ResetPathSearchBudgetForDebug() { }
-    }
-
-    private sealed class AIBrainSceneFacilityLookup : ICharacterAiFacilityLookup
-    {
-        public BuildableObject FindFacility(int id, string tag)
-        {
-            return UnityEngine.Object.FindObjectsByType<BuildableObject>(
-                    FindObjectsInactive.Include,
-                    FindObjectsSortMode.None)
-                .FirstOrDefault(building => CharacterAiDecisionPipeline.MatchesFacility(building, id, tag));
-        }
-    }
 }
 public enum AIActionPlanKind
 {
@@ -1230,6 +1233,64 @@ public enum AIActionPlanKind
     NoDestination,
     DestinationOnly,
     MovePath
+}
+
+public sealed class AIActionPlan
+{
+    private static readonly IReadOnlyList<GridMoveStep> EmptyPath =
+        ReadOnlyView.List(Array.Empty<GridMoveStep>());
+
+    private AIActionPlan(
+        AIActionPlanKind kind,
+        BuildableObject destination,
+        IEnumerable<GridMoveStep> pathSteps)
+    {
+        GridMoveStep[] path = pathSteps?.ToArray() ?? Array.Empty<GridMoveStep>();
+        if (path.Any((step) => step == null))
+        {
+            throw new ArgumentException("An AI action path cannot contain null steps.", nameof(pathSteps));
+        }
+
+        bool valid = kind switch
+        {
+            AIActionPlanKind.None => destination == null && path.Length == 0,
+            AIActionPlanKind.NoDestination => destination == null && path.Length == 0,
+            AIActionPlanKind.DestinationOnly => destination != null && path.Length == 0,
+            AIActionPlanKind.MovePath => destination != null && path.Length > 0,
+            _ => false
+        };
+        if (!valid)
+        {
+            throw new ArgumentException(
+                $"Invalid AI action plan: kind={kind}, destination={destination != null}, steps={path.Length}.");
+        }
+
+        Kind = kind;
+        Destination = destination;
+        PathSteps = path.Length == 0 ? EmptyPath : ReadOnlyView.List(path);
+    }
+
+    public static AIActionPlan None { get; } =
+        new AIActionPlan(AIActionPlanKind.None, null, null);
+
+    public static AIActionPlan WithoutDestination { get; } =
+        new AIActionPlan(AIActionPlanKind.NoDestination, null, null);
+
+    public AIActionPlanKind Kind { get; }
+    public BuildableObject Destination { get; }
+    public IReadOnlyList<GridMoveStep> PathSteps { get; }
+
+    public static AIActionPlan AtDestination(BuildableObject destination)
+    {
+        return new AIActionPlan(AIActionPlanKind.DestinationOnly, destination, null);
+    }
+
+    public static AIActionPlan MoveTo(
+        BuildableObject destination,
+        IEnumerable<GridMoveStep> pathSteps)
+    {
+        return new AIActionPlan(AIActionPlanKind.MovePath, destination, pathSteps);
+    }
 }
 
 [Serializable]
@@ -1245,9 +1306,7 @@ public class AIAction
             _score = Mathf.Clamp01(value);
         }
     }
-    public BuildableObject destination;
-    public Queue<GridMoveStep> pathSteps;
-    public AIActionPlanKind planKind;
+    private AIActionPlan plan = AIActionPlan.None;
     public float startedAt = -1f;
     private AIActionSet reservedActionSet;
     private BuildableObject reservedDestination;
@@ -1255,6 +1314,20 @@ public class AIAction
     public float RunningSeconds => HasStarted ? Time.time - startedAt : 0f;
     public bool HasReservation => reservedActionSet != null && reservedDestination != null;
     public BuildableObject ReservedDestination => reservedDestination;
+    public AIActionPlan Plan => plan;
+    public BuildableObject destination => plan.Destination;
+    public IReadOnlyList<GridMoveStep> pathSteps => plan.PathSteps;
+    public AIActionPlanKind planKind => plan.Kind;
+
+    public AIAction()
+    {
+    }
+
+    public AIAction(AIActionSet actionset, AIActionPlan initialPlan)
+    {
+        this.actionset = actionset;
+        plan = initialPlan ?? throw new ArgumentNullException(nameof(initialPlan));
+    }
 
     public void MarkStarted(float time)
     {
@@ -1305,9 +1378,7 @@ public class AIAction
     public bool SetDestinationWithFailure(CharacterActor actor, out AIActionFailure failure)
     {
         ReleaseReservation(actor);
-        destination = null;
-        pathSteps = null;
-        planKind = AIActionPlanKind.None;
+        plan = AIActionPlan.None;
         startedAt = -1f;
         failure = AIActionFailure.None;
         if (actor == null
@@ -1320,35 +1391,42 @@ public class AIAction
         }
 
         GridPathSearchResult searchResult = actor.Brain != null ? actor.Brain.GetPathSearch(actor) : null;
-        if (!actionset.TryResolveDestinationWithFailure(actor, searchResult, out destination, out failure))
+        if (!actionset.TryResolveDestinationWithFailure(
+                actor,
+                searchResult,
+                out BuildableObject resolvedDestination,
+                out failure))
         {
             return false;
         }
 
-        if (destination == null)
+        if (resolvedDestination == null)
         {
-            planKind = AIActionPlanKind.NoDestination;
+            plan = AIActionPlan.WithoutDestination;
             return !actionset.RequiresDestination;
         }
 
+        Queue<GridMoveStep> resolvedPath;
         if (searchResult != null)
         {
-            pathSteps = searchResult.GetMovePathTo(destination);
-            return ResolvePathPlan(actor, destination, out failure)
-                && TryReserveResolvedDestination(actor, destination, out failure);
+            resolvedPath = searchResult.GetMovePathTo(resolvedDestination);
+        }
+        else
+        {
+            Func<Vector2Int, bool> condition =
+                (pos) => grid.GetGridCell(pos)?.ContainsOccupant(resolvedDestination) == true;
+            resolvedPath = grid.GetMovePath(actor.GetNowXY(), condition);
         }
 
-        Func<Vector2Int, bool> condition = (pos) => grid.GetGridCell(pos)?.ContainsOccupant(destination) == true;
-        pathSteps = grid.GetMovePath(actor.GetNowXY(), condition);
-        return ResolvePathPlan(actor, destination, out failure)
-            && TryReserveResolvedDestination(actor, destination, out failure);
+        return ResolvePathPlan(actor, resolvedDestination, resolvedPath, out failure)
+            && TryReserveResolvedDestination(actor, resolvedDestination, out failure);
     }
 
     public bool TryRebuildPathFromCurrentPosition(CharacterActor actor, out AIActionFailure failure)
     {
         failure = AIActionFailure.None;
-        pathSteps = null;
-        planKind = AIActionPlanKind.None;
+        BuildableObject currentDestination = destination;
+        plan = AIActionPlan.None;
         if (actor == null
             || actor.Brain == null
             || actionset == null
@@ -1358,21 +1436,25 @@ public class AIAction
             return false;
         }
 
-        if (destination == null)
+        if (currentDestination == null)
         {
-            planKind = AIActionPlanKind.NoDestination;
+            plan = AIActionPlan.WithoutDestination;
             return !actionset.RequiresDestination;
         }
 
-        if (destination.isDestroy)
+        if (currentDestination.isDestroy)
         {
-            failure = AIActionFailure.Create(AIActionFailureKind.Destroyed, "\uBAA9\uD45C \uD30C\uAD34\uB428", destination);
+            failure = AIActionFailure.Create(
+                AIActionFailureKind.Destroyed,
+                "\uBAA9\uD45C \uD30C\uAD34\uB428",
+                currentDestination);
             return false;
         }
 
-        Func<Vector2Int, bool> condition = (pos) => grid.GetGridCell(pos)?.ContainsOccupant(destination) == true;
-        pathSteps = grid.GetMovePath(actor.GetNowXY(), condition);
-        return ResolvePathPlan(actor, destination, out failure);
+        Func<Vector2Int, bool> condition =
+            (pos) => grid.GetGridCell(pos)?.ContainsOccupant(currentDestination) == true;
+        Queue<GridMoveStep> rebuiltPath = grid.GetMovePath(actor.GetNowXY(), condition);
+        return ResolvePathPlan(actor, currentDestination, rebuiltPath, out failure);
     }
 
     public void RefreshReservation(CharacterActor actor)
@@ -1410,7 +1492,12 @@ public class AIAction
 
         if (!actionset.TryReserveDestination(actor, destination, out failure))
         {
-            planKind = AIActionPlanKind.None;
+            if (failure.Target == null)
+            {
+                failure = new AIActionFailure(failure.Kind, failure.Reason, destination);
+            }
+
+            plan = AIActionPlan.None;
             return false;
         }
 
@@ -1419,30 +1506,27 @@ public class AIAction
         return true;
     }
 
-    private bool ResolvePathPlan(CharacterActor actor, BuildableObject destination, out string failureReason)
-    {
-        bool result = ResolvePathPlan(actor, destination, out AIActionFailure failure);
-        failureReason = failure.ToString();
-        return result;
-    }
-
-    private bool ResolvePathPlan(CharacterActor actor, BuildableObject destination, out AIActionFailure failure)
+    private bool ResolvePathPlan(
+        CharacterActor actor,
+        BuildableObject destination,
+        Queue<GridMoveStep> pathSteps,
+        out AIActionFailure failure)
     {
         failure = AIActionFailure.None;
         if (pathSteps != null && pathSteps.Count > 0)
         {
-            planKind = AIActionPlanKind.MovePath;
+            plan = AIActionPlan.MoveTo(destination, pathSteps);
             return true;
         }
 
         if (IsCharacterAtDestination(actor, destination))
         {
-            planKind = AIActionPlanKind.DestinationOnly;
+            plan = AIActionPlan.AtDestination(destination);
             return true;
         }
 
         failure = AIActionFailure.Create(AIActionFailureKind.NoPath, "\uACBD\uB85C \uC5C6\uC74C", destination);
-        planKind = AIActionPlanKind.None;
+        plan = AIActionPlan.None;
         return false;
     }
 

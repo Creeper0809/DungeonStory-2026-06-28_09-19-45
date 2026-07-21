@@ -261,6 +261,8 @@ public sealed class BuildPlacementUxPlayModeVerificationRunner : MonoBehaviour
         {
             Debug.LogError("Build placement UX verification failed. " + BuildPlacementUxPlayModeVerifier.ReportPath);
         }
+
+        EditorApplication.ExitPlaymode();
     }
 
     private void OnLogMessageReceived(string condition, string stackTrace, LogType type)

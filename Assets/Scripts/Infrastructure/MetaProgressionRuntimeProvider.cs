@@ -12,6 +12,9 @@ public interface IMetaProgressionRuntimeReader
     int GetStartingOwnerTraitCandidateBonus();
     float GetOwnerMaxHealthMultiplier();
     float GetInvasionWarningThresholdMultiplier();
+    float GetCommerceStockCostMultiplier(StockCategory category);
+    float GetFortressFacilityCostMultiplier(BuildingSO building);
+    float GetArcaneResearchWorkMultiplier();
     bool IsRecipePreserved(string recipeId);
     IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(IEnumerable<BuildingSO> buildings);
 }
@@ -66,6 +69,27 @@ public sealed class MetaProgressionRuntimeReader : IMetaProgressionRuntimeReader
     {
         return provider.TryGetRuntime(out MetaProgressionRuntime runtime)
             ? runtime.GetInvasionWarningThresholdMultiplier()
+            : 1f;
+    }
+
+    public float GetCommerceStockCostMultiplier(StockCategory category)
+    {
+        return provider.TryGetRuntime(out MetaProgressionRuntime runtime)
+            ? runtime.GetCommerceStockCostMultiplier(category)
+            : 1f;
+    }
+
+    public float GetFortressFacilityCostMultiplier(BuildingSO building)
+    {
+        return provider.TryGetRuntime(out MetaProgressionRuntime runtime)
+            ? runtime.GetFortressFacilityCostMultiplier(building)
+            : 1f;
+    }
+
+    public float GetArcaneResearchWorkMultiplier()
+    {
+        return provider.TryGetRuntime(out MetaProgressionRuntime runtime)
+            ? runtime.GetArcaneResearchWorkMultiplier()
             : 1f;
     }
 

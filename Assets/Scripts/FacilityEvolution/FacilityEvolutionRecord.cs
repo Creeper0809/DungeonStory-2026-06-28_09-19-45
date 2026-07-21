@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using UnityEngine;
 
@@ -19,10 +20,20 @@ public sealed class FacilityEvolutionRecord
     private readonly Dictionary<string, float> metrics = new Dictionary<string, float>();
     private readonly Dictionary<string, int> tokens = new Dictionary<string, int>();
     private readonly List<string> recentEvents = new List<string>();
+    private readonly IReadOnlyDictionary<string, float> metricsView;
+    private readonly IReadOnlyDictionary<string, int> tokensView;
+    private readonly IReadOnlyList<string> recentEventsView;
 
-    public IReadOnlyDictionary<string, float> Metrics => metrics;
-    public IReadOnlyDictionary<string, int> Tokens => tokens;
-    public IReadOnlyList<string> RecentEvents => recentEvents;
+    public FacilityEvolutionRecord()
+    {
+        metricsView = new ReadOnlyDictionary<string, float>(metrics);
+        tokensView = new ReadOnlyDictionary<string, int>(tokens);
+        recentEventsView = recentEvents.AsReadOnly();
+    }
+
+    public IReadOnlyDictionary<string, float> Metrics => metricsView;
+    public IReadOnlyDictionary<string, int> Tokens => tokensView;
+    public IReadOnlyList<string> RecentEvents => recentEventsView;
 
     public float GetMetric(string key)
     {

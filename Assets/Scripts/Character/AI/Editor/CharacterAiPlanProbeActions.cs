@@ -38,14 +38,14 @@ internal sealed class ProbeEatActionSet : AIEat
         return probeScore;
     }
 
-    public override bool TryResolveDestination(
+    public override bool TryResolveDestinationWithFailure(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
-        out string failureReason)
+        out AIActionFailure failure)
     {
         destination = null;
-        failureReason = string.Empty;
+        failure = AIActionFailure.None;
         return true;
     }
 
@@ -99,14 +99,14 @@ internal sealed class ProbeShoppingActionSet : AIShopping
         return probeScore;
     }
 
-    public override bool TryResolveDestination(
+    public override bool TryResolveDestinationWithFailure(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
-        out string failureReason)
+        out AIActionFailure failure)
     {
         destination = null;
-        failureReason = string.Empty;
+        failure = AIActionFailure.None;
         return true;
     }
 

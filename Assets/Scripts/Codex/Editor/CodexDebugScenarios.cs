@@ -90,21 +90,23 @@ public static class CodexDebugScenarios
         using CodexScenarioWorld world = new CodexScenarioWorld();
         CodexRuntime runtime = world.CreateRuntime();
         CodexEntrySnapshot hint = runtime.GetEntries(CodexEntryCategory.Facility)
-            .FirstOrDefault((entry) => entry.entryId == "special_recipe_hint:recipe_storm_fire_3");
+            .FirstOrDefault((entry) => entry.entryId == "special_recipe_hint:recipe_arcane_ritual_2");
 
         bool hiddenAsHint = hint != null
             && ContainsLinePart(hint, "특수 조합식 힌트")
-            && !hint.lines.Any((line) => line.Text.Contains("경보 코일 + 화염 분사구"));
+            && !hint.lines.Any((line) => line.Text.Contains("룬안정기 + 촛대"));
 
         BlueprintResearchState researchState = new BlueprintResearchState();
-        researchState.UnlockRecipe("recipe_trap_chain_3");
+        researchState.UnlockRecipe("recipe_arcane_ritual_2");
         CodexService.ImportSynthesisRecipes(runtime.State, researchState, CreateSynthesisRecipeQuery());
-        BuildingSO stormFire = LoadBuilding("P1_StormFireTrap");
-        CodexEntrySnapshot stormFireEntry = runtime.State.GetSnapshot(CodexEntryCategory.Facility, $"facility:{stormFire.id}");
+        BuildingSO ritualFocus = LoadBuilding("M04_의식초점석");
+        CodexEntrySnapshot ritualFocusEntry = runtime.State.GetSnapshot(
+            CodexEntryCategory.Facility,
+            $"facility:{ritualFocus.id}");
 
         return hiddenAsHint
-            && stormFireEntry != null
-            && ContainsLinePart(stormFireEntry, "조합식: 2성 경보 코일 + 1성 화염 분사구 -> 3성 폭뢰 분사구");
+            && ritualFocusEntry != null
+            && ContainsLinePart(ritualFocusEntry, "조합식: 룬안정기 + 촛대 -> 의식초점석");
     }
 
     private static bool VerifyDefenseObservationUpdatesInvasionCodex()
@@ -149,48 +151,48 @@ public static class CodexDebugScenarios
         using CodexScenarioWorld world = new CodexScenarioWorld();
         CodexRuntime runtime = world.CreateRuntime();
         FacilityEvolutionRecipeSO recipe = AssetDatabase.LoadAssetAtPath<FacilityEvolutionRecipeSO>(
-            "Assets/Resources/SO/FacilityEvolution/P1/EV_BattleDining.asset");
+            "Assets/Resources/SO/FacilityEvolution/P1/EV_AlchemyBench.asset");
         if (recipe == null)
         {
             return false;
         }
 
-        BuildableObject battleDining = world.CreateFacility("P1_BattleDining");
+        BuildableObject alchemyBench = world.CreateFacility("Q02_연금술작업대");
         FacilityEvolutionProposal proposal = new FacilityEvolutionProposal(
-            "용병 이용 기록과 전투 기물이 강하게 누적된 고기 식당",
+            "마력 안정 장치와 연구 기록이 축적된 연구실",
             new[] { recipe.EffectiveId },
             new Dictionary<string, string>
             {
-                { recipe.EffectiveId, "용병 이용 기록과 전투 정체성이 전투 식당 계보와 맞습니다." }
+                { recipe.EffectiveId, "연구와 의식 정체성이 연금술 계보와 맞습니다." }
             },
-            new[] { FacilityEvolutionTerms.Combat },
-            "용병들이 식탁을 전투 전 회의 장소로 바꾸었습니다.",
+            new[] { FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Ritual },
+            "연구 기록과 룬 안정 장치가 연금술 작업 흐름을 만들었습니다.",
             0.92f,
             FacilityEvolutionProposalSources.LocalLlm);
         FacilityEvolutionResult result = new FacilityEvolutionResult(
             true,
             recipe,
-            battleDining,
+            alchemyBench,
             2,
-            FacilityShopService.GetBuildingName(LoadBuilding("P1_MeatRestaurant")),
+            FacilityShopService.GetBuildingName(LoadBuilding("Q01_연구책상")),
             proposal,
-            "전투 식당 진화 완료",
-            new[] { FacilityEvolutionTerms.Combat });
+            "비전 연구 진화 완료",
+            new[] { FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Ritual });
 
         runtime.OnTriggerEvent(new FacilityEvolutionCompletedEvent(result));
 
-        BuildingSO battleDiningData = LoadBuilding("P1_BattleDining");
+        BuildingSO alchemyBenchData = LoadBuilding("Q02_연금술작업대");
         CodexEntrySnapshot entry = runtime.State.GetSnapshot(
             CodexEntryCategory.Facility,
-            $"facility:{battleDiningData.id}");
+            $"facility:{alchemyBenchData.id}");
 
         return entry != null
-            && ContainsLinePart(entry, "계보 진화: 고기 식당 -> 2성 전투 식당 (2성)")
-            && ContainsLinePart(entry, "진화식: 전투 식당 진화")
-            && ContainsLinePart(entry, "정체성: 용병 이용 기록과 전투 기물이 강하게 누적된 고기 식당")
-            && ContainsLinePart(entry, "진화 기록: 용병들이 식탁을 전투 전 회의 장소로 바꾸었습니다.")
+            && ContainsLinePart(entry, "계보 진화: 연구책상 -> 연금술작업대 (2성)")
+            && ContainsLinePart(entry, "진화식: 비전 연구 진화")
+            && ContainsLinePart(entry, "정체성: 마력 안정 장치와 연구 기록이 축적된 연구실")
+            && ContainsLinePart(entry, "진화 기록: 연구 기록과 룬 안정 장치가 연금술 작업 흐름을 만들었습니다.")
             && ContainsLinePart(entry, "해석 출처: LocalLLM")
-            && ContainsLinePart(entry, "변이: Combat");
+            && ContainsLinePart(entry, "변이: Research, Ritual");
     }
 
     private static bool VerifyCodexPanelRendering()
@@ -229,7 +231,12 @@ public static class CodexDebugScenarios
 
     private static BuildingSO LoadBuilding(string assetName)
     {
-        return AssetDatabase.LoadAssetAtPath<BuildingSO>($"Assets/Resources/SO/Building/P1/{assetName}.asset");
+        BuildingSO modular = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            $"Assets/Resources/SO/Building/Modular/{assetName}.asset");
+        return modular != null
+            ? modular
+            : AssetDatabase.LoadAssetAtPath<BuildingSO>(
+                $"Assets/Resources/SO/Building/P1/{assetName}.asset");
     }
 
     private static CharacterSO LoadCharacter(string assetName)
@@ -289,6 +296,13 @@ public static class CodexDebugScenarios
             GameObject obj = new GameObject("CodexRuntime_Test");
             objects.Add(obj);
             CodexRuntime runtime = obj.AddComponent<CodexRuntime>();
+            IFacilitySynthesisRecipeQuery recipeQuery = CreateSynthesisRecipeQuery();
+            ScenarioCodexReferenceCatalog referenceCatalog = new ScenarioCodexReferenceCatalog();
+            runtime.ConstructCodexRuntime(
+                new ScenarioBlueprintResearchStateService(),
+                new CodexReferenceImporter(referenceCatalog, recipeQuery),
+                recipeQuery,
+                new ScenarioFacilityShopCatalog(referenceCatalog.Facilities));
             runtime.ImportReferenceData();
             return runtime;
         }
@@ -336,6 +350,54 @@ public static class CodexDebugScenarios
             foreach (GameObject obj in objects.Where((obj) => obj != null))
             {
                 Object.DestroyImmediate(obj);
+            }
+        }
+
+        private sealed class ScenarioBlueprintResearchStateService : IBlueprintResearchStateService
+        {
+            private readonly BlueprintResearchState state = new BlueprintResearchState();
+
+            public BlueprintResearchState GetState()
+            {
+                return state;
+            }
+        }
+
+        private sealed class ScenarioCodexReferenceCatalog : ICodexReferenceCatalog
+        {
+            public IReadOnlyCollection<CharacterSpeciesSO> Species { get; } =
+                AssetDatabase.FindAssets("t:CharacterSpeciesSO")
+                    .Select(AssetDatabase.GUIDToAssetPath)
+                    .Select(AssetDatabase.LoadAssetAtPath<CharacterSpeciesSO>)
+                    .Where(species => species != null)
+                    .ToArray();
+
+            public IReadOnlyCollection<BuildingSO> Facilities { get; } =
+                AssetDatabase.FindAssets("t:BuildingSO")
+                    .Select(AssetDatabase.GUIDToAssetPath)
+                    .Select(AssetDatabase.LoadAssetAtPath<BuildingSO>)
+                    .Where(building => building != null)
+                    .ToArray();
+        }
+
+        private sealed class ScenarioFacilityShopCatalog : IFacilityShopCatalog
+        {
+            public ScenarioFacilityShopCatalog(IReadOnlyCollection<BuildingSO> buildings)
+            {
+                Buildings = buildings ?? Array.Empty<BuildingSO>();
+                Blueprints = AssetDatabase.FindAssets("t:FacilityBlueprintSO")
+                    .Select(AssetDatabase.GUIDToAssetPath)
+                    .Select(AssetDatabase.LoadAssetAtPath<FacilityBlueprintSO>)
+                    .Where(blueprint => blueprint != null)
+                    .ToArray();
+            }
+
+            public IReadOnlyCollection<BuildingSO> Buildings { get; }
+            public IReadOnlyCollection<FacilityBlueprintSO> Blueprints { get; }
+
+            public BuildingSO FindBuildingById(int buildingId)
+            {
+                return Buildings.FirstOrDefault(building => building != null && building.id == buildingId);
             }
         }
     }

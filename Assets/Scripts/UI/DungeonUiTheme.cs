@@ -1,25 +1,44 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 public static class DungeonUiTheme
 {
-    public static readonly Color CanvasScrim = Hex("101619FF");
-    public static readonly Color Panel = Hex("172124FF");
-    public static readonly Color Surface = Hex("202D31FF");
-    public static readonly Color SurfaceRaised = Hex("314247FF");
-    public static readonly Color SurfaceMuted = Hex("11191CFF");
-    public static readonly Color Border = Hex("3A4B50FF");
-    public static readonly Color TextPrimary = Hex("F1F4F2FF");
-    public static readonly Color TextSecondary = Hex("AEBBB9FF");
-    public static readonly Color Accent = Hex("3D8B70FF");
-    public static readonly Color AccentHover = Hex("4DA181FF");
-    public static readonly Color AccentPressed = Hex("2F6B57FF");
-    public static readonly Color Warning = Hex("D2A449FF");
-    public static readonly Color Danger = Hex("C95E5AFF");
-    public static readonly Color Good = Hex("4CB88BFF");
+    private static readonly Color StandardCanvasScrim = Hex("40565BFF");
+    private static readonly Color StandardPanel = Hex("435D64FF");
+    private static readonly Color StandardSurface = Hex("567179FF");
+    private static readonly Color StandardSurfaceRaised = Hex("789198FF");
+    private static readonly Color StandardSurfaceMuted = Hex("34484EFF");
+    private static readonly Color StandardBorder = Hex("A9BEC2FF");
+    private static readonly Color StandardTextPrimary = Hex("F5F7F4FF");
+    private static readonly Color StandardTextSecondary = Hex("D2DDD9FF");
+    private static readonly Color StandardAccent = Hex("56B892FF");
+
+    public static Color CanvasScrim => IsHighContrast ? Hex("182428FF") : StandardCanvasScrim;
+    public static Color Panel => IsHighContrast ? Hex("172126FF") : StandardPanel;
+    public static Color Surface => IsHighContrast ? Hex("223137FF") : StandardSurface;
+    public static Color SurfaceRaised => IsHighContrast ? Hex("344951FF") : StandardSurfaceRaised;
+    public static Color SurfaceMuted => IsHighContrast ? Hex("10191DFF") : StandardSurfaceMuted;
+    public static Color Border => IsHighContrast ? Hex("D8E4E1FF") : StandardBorder;
+    public static Color TextPrimary => IsHighContrast ? Color.white : StandardTextPrimary;
+    public static Color TextSecondary => IsHighContrast ? Hex("D8E4E1FF") : StandardTextSecondary;
+    public static Color Accent => IsHighContrast ? Hex("46D69BFF") : StandardAccent;
+    public static Color AccentHover => IsHighContrast ? Hex("79F0BFFF") : Hex("8CE0BFFF");
+    public static Color AccentPressed => IsHighContrast ? Hex("2CA879FF") : Hex("3E8B70FF");
+    public static Color Warning => IsHighContrast ? Hex("FFD15AFF") : Hex("D2A449FF");
+    public static Color Danger => IsHighContrast ? Hex("FF7770FF") : Hex("C95E5AFF");
+    public static Color Good => IsHighContrast ? Hex("55E6A7FF") : Hex("4CB88BFF");
+    public static float ModalScrimAlpha => IsHighContrast ? 0.56f : 0.34f;
+    public static float OwnerSelectionScrimAlpha => IsHighContrast ? 0.62f : 0.42f;
+    public static float ResultScrimAlpha => IsHighContrast ? 0.60f : 0.40f;
+    public static Color ModalScrim => WithAlpha(CanvasScrim, ModalScrimAlpha);
+    public static Color OwnerSelectionScrim => WithAlpha(CanvasScrim, OwnerSelectionScrimAlpha);
+    public static Color ResultScrim => WithAlpha(CanvasScrim, ResultScrimAlpha);
+
+    private static bool IsHighContrast => DungeonUserSettingsRuntime.Current.highContrast;
 
     public static Color GetMeterColor(float normalizedValue)
     {
@@ -45,9 +64,9 @@ public static class DungeonUiTheme
             highlightedColor = destructive ? Hex("FFBAB7FF") : selected ? Hex("C5F0DEFF") : Hex("C8D7DAFF"),
             pressedColor = destructive ? Hex("C47B78FF") : selected ? Hex("8FCDB5FF") : Hex("91A5AAFF"),
             selectedColor = Color.white,
-            disabledColor = Hex("26303499"),
+            disabledColor = Hex("3F4E53CC"),
             colorMultiplier = 1f,
-            fadeDuration = 0.08f
+            fadeDuration = DungeonUserSettingsRuntime.Current.reducedMotion ? 0f : 0.08f
         };
 
         TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
@@ -68,6 +87,11 @@ public static class DungeonUiTheme
 
         return color;
     }
+
+    private static Color WithAlpha(Color color, float alpha)
+    {
+        return new Color(color.r, color.g, color.b, Mathf.Clamp01(alpha));
+    }
 }
 
 [DisallowMultipleComponent]
@@ -77,8 +101,10 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
 
     private ITmpKoreanFontService fontService;
     private Canvas targetCanvas;
-    private int? activeTabId;
+    private TabId? activeTabId;
     private float nextRefreshAt;
+    private readonly Dictionary<int, TextScaleBaseline> textScaleBaselines =
+        new Dictionary<int, TextScaleBaseline>();
 
     public static DungeonUiThemeRuntime Ensure(Canvas canvas, ITmpKoreanFontService fontService)
     {
@@ -99,7 +125,7 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
         return runtime;
     }
 
-    public void SetActiveTab(int? tabId)
+    public void SetActiveTab(TabId? tabId)
     {
         activeTabId = tabId;
         StyleBottomNavigation();
@@ -119,6 +145,7 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
         StyleTopHud();
         StyleBottomNavigation();
         StyleLegacyPanels();
+        ApplyTextScale();
     }
 
     private void Update()
@@ -135,7 +162,8 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
         if (scaler == null) return;
 
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        float uiScale = Mathf.Clamp(DungeonUserSettingsRuntime.Current.uiScale, 0.8f, 1.25f);
+        scaler.referenceResolution = new Vector2(1920f / uiScale, 1080f / uiScale);
         scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
         scaler.matchWidthOrHeight = 0.5f;
     }
@@ -209,9 +237,13 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
 
         Button[] buttons = controls.GetComponentsInChildren<Button>(true);
         const float widthForThreeButtons = 292f;
-        float panelWidth = widthForThreeButtons
+        float desiredPanelWidth = widthForThreeButtons
             * Mathf.Max(3, buttons.Length)
             / 3f;
+        float canvasWidth = GetCanvasSize().x;
+        float panelWidth = Mathf.Min(
+            desiredPanelWidth,
+            Mathf.Max(240f, canvasWidth - 48f));
 
         rect.anchorMin = Vector2.one;
         rect.anchorMax = Vector2.one;
@@ -253,8 +285,9 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
             {
                 label.fontSize = 18f;
                 label.enableAutoSizing = true;
-                label.fontSizeMin = 12f;
+                label.fontSizeMin = panelWidth < desiredPanelWidth ? 9f : 12f;
                 label.fontSizeMax = 18f;
+                label.textWrappingMode = TextWrappingModes.NoWrap;
             }
         }
     }
@@ -290,15 +323,32 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
         for (int index = 0; index < buttons.Length; index++)
         {
             Button button = buttons[index];
-            bool selected = activeTabId.HasValue && index == activeTabId.Value;
+            LayoutElement layoutElement = button.GetComponent<LayoutElement>();
+            if (layoutElement == null)
+            {
+                layoutElement = button.gameObject.AddComponent<LayoutElement>();
+            }
+
+            layoutElement.minWidth = 0f;
+            layoutElement.preferredWidth = 0f;
+            layoutElement.flexibleWidth = 1f;
+            layoutElement.minHeight = 0f;
+            layoutElement.preferredHeight = 0f;
+            layoutElement.flexibleHeight = 1f;
+
+            UITabButtonBinding binding = button.GetComponent<UITabButtonBinding>();
+            bool selected = activeTabId.HasValue
+                && binding != null
+                && binding.Id == activeTabId.Value;
             DungeonUiTheme.StyleButton(button, selected);
             TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
             if (label != null)
             {
                 label.fontSize = 18f;
                 label.enableAutoSizing = true;
-                label.fontSizeMin = 12f;
+                label.fontSizeMin = GetCanvasSize().x < 1200f ? 8f : 12f;
                 label.fontSizeMax = 18f;
+                label.textWrappingMode = TextWrappingModes.NoWrap;
             }
         }
     }
@@ -394,6 +444,51 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
         return null;
     }
 
+    private void ApplyTextScale()
+    {
+        float scale = Mathf.Clamp(DungeonUserSettingsRuntime.Current.textScale, 0.9f, 1.25f);
+        TMP_Text[] texts = targetCanvas.GetComponentsInChildren<TMP_Text>(true);
+        HashSet<int> liveIds = new HashSet<int>();
+        foreach (TMP_Text text in texts)
+        {
+            if (text == null)
+            {
+                continue;
+            }
+
+            int id = text.GetInstanceID();
+            liveIds.Add(id);
+            if (!textScaleBaselines.TryGetValue(id, out TextScaleBaseline baseline))
+            {
+                baseline = new TextScaleBaseline(text.fontSize, text.fontSizeMin, text.fontSizeMax);
+                textScaleBaselines.Add(id, baseline);
+            }
+
+            text.fontSize = baseline.FontSize * scale;
+            text.fontSizeMin = baseline.FontSizeMin * scale;
+            text.fontSizeMax = baseline.FontSizeMax * scale;
+        }
+
+        foreach (int staleId in textScaleBaselines.Keys.Where(id => !liveIds.Contains(id)).ToArray())
+        {
+            textScaleBaselines.Remove(staleId);
+        }
+    }
+
+    private readonly struct TextScaleBaseline
+    {
+        public TextScaleBaseline(float fontSize, float fontSizeMin, float fontSizeMax)
+        {
+            FontSize = fontSize;
+            FontSizeMin = fontSizeMin;
+            FontSizeMax = fontSizeMax;
+        }
+
+        public float FontSize { get; }
+        public float FontSizeMin { get; }
+        public float FontSizeMax { get; }
+    }
+
     private static void SetTopLeft(RectTransform rect, Vector2 position, Vector2 size)
     {
         rect.anchorMin = new Vector2(0f, 1f);
@@ -418,5 +513,15 @@ public sealed class DungeonUiThemeRuntime : MonoBehaviour
         {
             image.color = color;
         }
+    }
+
+    private Vector2 GetCanvasSize()
+    {
+        if (targetCanvas != null && targetCanvas.transform is RectTransform rect)
+        {
+            return rect.rect.size;
+        }
+
+        return new Vector2(Screen.width, Screen.height);
     }
 }

@@ -19,6 +19,7 @@ public sealed class SceneBuildableLeakValidator : IInitializable
 
         CollectMissingScriptObjects(invalidSceneObjects);
         CollectLeakedFacilities(invalidSceneObjects);
+        CollectDuplicateRuntimeServices<LocalLlmRequestQueue>(invalidSceneObjects);
 
         if (invalidSceneObjects.Count == 0)
         {
@@ -30,6 +31,19 @@ public sealed class SceneBuildableLeakValidator : IInitializable
             "These objects can overlap runtime grid buildings and pollute click/collider selection. " +
             "Remove or repair the following scene objects before PlayMode:\n" +
             string.Join("\n", invalidSceneObjects));
+    }
+
+    private void CollectDuplicateRuntimeServices<T>(List<string> invalidSceneObjects)
+        where T : Component
+    {
+        IReadOnlyList<T> services = sceneQuery.All<T>(includeInactive: true);
+        if (services.Count <= 1)
+        {
+            return;
+        }
+
+        invalidSceneObjects.Add(
+            $"- Duplicate runtime service: {typeof(T).Name} has {services.Count} loaded instances.");
     }
 
     private void CollectLeakedFacilities(List<string> invalidSceneObjects)
@@ -94,8 +108,9 @@ public sealed class SceneBuildableLeakValidator : IInitializable
             return false;
         }
 
-        bool isFacility = buildable is Shop || buildable is DefenseFacility;
-        if (!isFacility)
+        // CharacterSpawner inherits BuildableObject for grid entry helpers, but it is a
+        // legitimate scene service rather than a placed building instance.
+        if (buildable is CharacterSpawner)
         {
             return false;
         }

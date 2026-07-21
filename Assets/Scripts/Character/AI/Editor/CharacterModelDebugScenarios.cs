@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -125,12 +124,9 @@ public static class CharacterModelDebugScenarios
     private static bool VerifyCharacterRuntimeProfile()
     {
         CharacterSO data = CreateCharacterData("Species_Vampire", "Trait_Researcher");
-        GameObject obj = new GameObject("Character Model Scenario Character");
-        obj.AddComponent<SpriteRenderer>();
-        CharacterActor character = obj.AddComponent<CharacterActor>();
-        typeof(CharacterActor)
-            .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?.Invoke(character, null);
+        GameObject obj = CharacterAiPlanDebugFixtures.CreateActorObject(
+            "Character Model Scenario Character");
+        CharacterActor character = obj.GetComponent<CharacterActor>();
 
         character.Initialization(data);
         bool connected = character.SpeciesTag == "Vampire"

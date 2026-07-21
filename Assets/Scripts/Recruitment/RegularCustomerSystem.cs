@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using VContainer;
 
 public enum RegularCustomerStatus
 {
@@ -24,10 +25,10 @@ public enum RecruitCapability
 [Serializable]
 public class RegularCustomerRules
 {
-    public int regularVisitThreshold = 3;
+    public int regularVisitThreshold = 2;
     public float regularAverageSatisfactionThreshold = 65f;
-    public int recruitCandidateVisitThreshold = 4;
-    public float recruitCandidateAverageSatisfactionThreshold = 75f;
+    public int recruitCandidateVisitThreshold = 2;
+    public float recruitCandidateAverageSatisfactionThreshold = 65f;
     public RecruitCapability defaultRecruitCapabilities = RecruitCapability.All;
 
     public static RegularCustomerRules CreateDefault()
@@ -38,13 +39,31 @@ public class RegularCustomerRules
 
 public sealed class RegularCustomerSnapshot
 {
-    public int customerId;
-    public string displayName;
-    public string speciesTag;
-    public int visitCount;
-    public float averageSatisfaction;
-    public RegularCustomerStatus status;
-    public RecruitCapability recruitCapabilities;
+    public RegularCustomerSnapshot(
+        string customerId,
+        string displayName,
+        string speciesTag,
+        int visitCount,
+        float averageSatisfaction,
+        RegularCustomerStatus status,
+        RecruitCapability recruitCapabilities)
+    {
+        this.customerId = customerId?.Trim() ?? string.Empty;
+        this.displayName = displayName ?? string.Empty;
+        this.speciesTag = speciesTag ?? string.Empty;
+        this.visitCount = Mathf.Max(0, visitCount);
+        this.averageSatisfaction = Mathf.Clamp(averageSatisfaction, 0f, 100f);
+        this.status = status;
+        this.recruitCapabilities = recruitCapabilities;
+    }
+
+    public string customerId { get; }
+    public string displayName { get; }
+    public string speciesTag { get; }
+    public int visitCount { get; }
+    public float averageSatisfaction { get; }
+    public RegularCustomerStatus status { get; }
+    public RecruitCapability recruitCapabilities { get; }
 
     public string ToSummaryText()
     {
@@ -56,9 +75,11 @@ public sealed class RegularCustomerRecord
 {
     private float satisfactionTotal;
 
-    public RegularCustomerRecord(int customerId, CharacterActor customer, RecruitCapability recruitCapabilities)
+    public RegularCustomerRecord(string customerId, CharacterActor customer, RecruitCapability recruitCapabilities)
     {
+        customer = CharacterActorCollection.GetCanonical(customer);
         CustomerId = customerId;
+        ActiveActor = customer;
         DisplayName = RegularCustomerService.GetCustomerDisplayName(customer, customerId);
         SpeciesTag = RegularCustomerService.GetCustomerSpeciesTag(customer);
         SourceData = RegularCustomerService.GetCustomerData(customer);
@@ -67,10 +88,37 @@ public sealed class RegularCustomerRecord
             : recruitCapabilities;
     }
 
-    public int CustomerId { get; }
+    public RegularCustomerRecord(
+        string customerId,
+        string displayName,
+        string speciesTag,
+        CharacterSO sourceData,
+        int visitCount,
+        float averageSatisfaction,
+        bool isRegular,
+        bool isRecruitCandidate,
+        bool isRecruited,
+        RecruitCapability recruitCapabilities)
+    {
+        CustomerId = customerId;
+        DisplayName = string.IsNullOrWhiteSpace(displayName) ? $"Customer {customerId}" : displayName;
+        SpeciesTag = string.IsNullOrWhiteSpace(speciesTag) ? "Unknown" : speciesTag;
+        SourceData = sourceData;
+        VisitCount = Mathf.Max(0, visitCount);
+        satisfactionTotal = Mathf.Clamp(averageSatisfaction, 0f, 100f) * VisitCount;
+        IsRegular = isRegular || isRecruitCandidate || isRecruited;
+        IsRecruitCandidate = isRecruitCandidate || isRecruited;
+        IsRecruited = isRecruited;
+        RecruitCapabilities = recruitCapabilities == RecruitCapability.None
+            ? RecruitCapability.All
+            : recruitCapabilities;
+    }
+
+    public string CustomerId { get; }
     public string DisplayName { get; private set; }
     public string SpeciesTag { get; private set; }
     public CharacterSO SourceData { get; private set; }
+    public CharacterActor ActiveActor { get; private set; }
     public int VisitCount { get; private set; }
     public float AverageSatisfaction => VisitCount > 0 ? satisfactionTotal / VisitCount : 0f;
     public bool IsRegular { get; private set; }
@@ -90,8 +138,10 @@ public sealed class RegularCustomerRecord
 
     public void RecordVisit(CharacterActor customer, float satisfaction, RegularCustomerRules rules)
     {
+        customer = CharacterActorCollection.GetCanonical(customer);
         if (customer != null)
         {
+            ActiveActor = customer;
             DisplayName = RegularCustomerService.GetCustomerDisplayName(customer, CustomerId);
             SpeciesTag = RegularCustomerService.GetCustomerSpeciesTag(customer);
             SourceData = RegularCustomerService.GetCustomerData(customer) ?? SourceData;
@@ -124,18 +174,28 @@ public sealed class RegularCustomerRecord
         return true;
     }
 
+    public bool MarkRecruitCandidate()
+    {
+        if (IsRecruited || IsRecruitCandidate)
+        {
+            return false;
+        }
+
+        IsRegular = true;
+        IsRecruitCandidate = true;
+        return true;
+    }
+
     public RegularCustomerSnapshot ToSnapshot()
     {
-        return new RegularCustomerSnapshot
-        {
-            customerId = CustomerId,
-            displayName = DisplayName,
-            speciesTag = SpeciesTag,
-            visitCount = VisitCount,
-            averageSatisfaction = AverageSatisfaction,
-            status = Status,
-            recruitCapabilities = RecruitCapabilities
-        };
+        return new RegularCustomerSnapshot(
+            CustomerId,
+            DisplayName,
+            SpeciesTag,
+            VisitCount,
+            AverageSatisfaction,
+            Status,
+            RecruitCapabilities);
     }
 }
 
@@ -181,11 +241,20 @@ public readonly struct RegularCustomerRecruitResult
 
 public sealed class RegularCustomerState
 {
-    private readonly Dictionary<int, RegularCustomerRecord> records = new Dictionary<int, RegularCustomerRecord>();
+    private readonly Dictionary<string, RegularCustomerRecord> records =
+        new Dictionary<string, RegularCustomerRecord>(StringComparer.Ordinal);
     private readonly List<RegularCustomerRecruitResult> recruitedCharacters = new List<RegularCustomerRecruitResult>();
+    private readonly IReadOnlyCollection<RegularCustomerRecord> recordsView;
+    private readonly IReadOnlyList<RegularCustomerRecruitResult> recruitedCharactersView;
 
-    public IReadOnlyCollection<RegularCustomerRecord> Records => records.Values;
-    public IReadOnlyList<RegularCustomerRecruitResult> RecruitedCharacters => recruitedCharacters;
+    public RegularCustomerState()
+    {
+        recordsView = ReadOnlyView.Collection(records.Values);
+        recruitedCharactersView = ReadOnlyView.List(recruitedCharacters);
+    }
+
+    public IReadOnlyCollection<RegularCustomerRecord> Records => recordsView;
+    public IReadOnlyList<RegularCustomerRecruitResult> RecruitedCharacters => recruitedCharactersView;
 
     public RegularCustomerVisitResult RecordVisit(CharacterActor customer, RegularCustomerRules rules)
     {
@@ -195,7 +264,7 @@ public sealed class RegularCustomerState
             return new RegularCustomerVisitResult(false, null, false, false, "추적 가능한 손님이 아닙니다");
         }
 
-        int customerId = RegularCustomerService.GetCustomerId(customer);
+        string customerId = RegularCustomerService.GetCustomerId(customer);
         RegularCustomerRecord record = GetOrCreate(customerId, customer, rules);
         if (record.IsRecruited)
         {
@@ -211,17 +280,17 @@ public sealed class RegularCustomerState
         return new RegularCustomerVisitResult(true, record, becameRegular, becameRecruitCandidate, "방문 기록 갱신");
     }
 
-    public bool TryGetRecord(int customerId, out RegularCustomerRecord record)
+    public bool TryGetRecord(string customerId, out RegularCustomerRecord record)
     {
         return records.TryGetValue(customerId, out record);
     }
 
-    public bool IsRecruited(int customerId)
+    public bool IsRecruited(string customerId)
     {
         return records.TryGetValue(customerId, out RegularCustomerRecord record) && record.IsRecruited;
     }
 
-    public bool TryRecruit(int customerId, out RegularCustomerRecruitResult result)
+    public bool TryRecruit(string customerId, out RegularCustomerRecruitResult result)
     {
         if (!records.TryGetValue(customerId, out RegularCustomerRecord record))
         {
@@ -252,7 +321,59 @@ public sealed class RegularCustomerState
         return true;
     }
 
-    private RegularCustomerRecord GetOrCreate(int customerId, CharacterActor customer, RegularCustomerRules rules)
+    public IReadOnlyList<RegularCustomerRecord> PromoteBestVisitorsToRecruitCandidates(int amount)
+    {
+        int safeAmount = Mathf.Max(0, amount);
+        if (safeAmount <= 0)
+        {
+            return Array.Empty<RegularCustomerRecord>();
+        }
+
+        List<RegularCustomerRecord> promoted = new List<RegularCustomerRecord>(safeAmount);
+        foreach (RegularCustomerRecord record in records.Values
+            .Where(record => record != null
+                && !record.IsRecruited
+                && !record.IsRecruitCandidate)
+            .OrderByDescending(record => record.AverageSatisfaction)
+            .ThenByDescending(record => record.VisitCount)
+            .ThenBy(record => record.CustomerId, StringComparer.Ordinal))
+        {
+            if (!record.MarkRecruitCandidate())
+            {
+                continue;
+            }
+
+            promoted.Add(record);
+            if (promoted.Count >= safeAmount)
+            {
+                break;
+            }
+        }
+
+        return promoted;
+    }
+
+    public void Restore(IEnumerable<RegularCustomerRecord> savedRecords)
+    {
+        records.Clear();
+        recruitedCharacters.Clear();
+
+        foreach (RegularCustomerRecord record in savedRecords ?? Array.Empty<RegularCustomerRecord>())
+        {
+            if (record == null || string.IsNullOrWhiteSpace(record.CustomerId))
+            {
+                continue;
+            }
+
+            records[record.CustomerId] = record;
+            if (record.IsRecruited)
+            {
+                recruitedCharacters.Add(new RegularCustomerRecruitResult(true, record, "Restored"));
+            }
+        }
+    }
+
+    private RegularCustomerRecord GetOrCreate(string customerId, CharacterActor customer, RegularCustomerRules rules)
     {
         if (!records.TryGetValue(customerId, out RegularCustomerRecord record))
         {
@@ -266,18 +387,16 @@ public sealed class RegularCustomerState
 
 public struct RegularCustomerUpdatedEvent
 {
-    public RegularCustomerVisitResult result;
+    public RegularCustomerVisitEventSnapshot result;
 
     public RegularCustomerUpdatedEvent(RegularCustomerVisitResult result)
     {
-        this.result = result;
+        this.result = new RegularCustomerVisitEventSnapshot(result);
     }
-
-    private static RegularCustomerUpdatedEvent e;
 
     public static void Trigger(RegularCustomerVisitResult result)
     {
-        e.result = result;
+        RegularCustomerUpdatedEvent e = new RegularCustomerUpdatedEvent(result);
         EventObserver.TriggerEvent(e);
     }
 }
@@ -291,10 +410,9 @@ public struct RegularCustomerBecameRegularEvent
         this.snapshot = snapshot;
     }
 
-    private static RegularCustomerBecameRegularEvent e;
-
     public static void Trigger(RegularCustomerSnapshot snapshot)
     {
+        RegularCustomerBecameRegularEvent e = new RegularCustomerBecameRegularEvent();
         e.snapshot = snapshot;
         EventObserver.TriggerEvent(e);
     }
@@ -309,10 +427,9 @@ public struct RecruitCandidateDiscoveredEvent
         this.snapshot = snapshot;
     }
 
-    private static RecruitCandidateDiscoveredEvent e;
-
     public static void Trigger(RegularCustomerSnapshot snapshot)
     {
+        RecruitCandidateDiscoveredEvent e = new RecruitCandidateDiscoveredEvent();
         e.snapshot = snapshot;
         EventObserver.TriggerEvent(e);
     }
@@ -320,20 +437,56 @@ public struct RecruitCandidateDiscoveredEvent
 
 public struct CustomerRecruitedEvent
 {
-    public RegularCustomerRecruitResult result;
+    public RegularCustomerRecruitEventSnapshot result;
 
     public CustomerRecruitedEvent(RegularCustomerRecruitResult result)
     {
-        this.result = result;
+        this.result = new RegularCustomerRecruitEventSnapshot(result);
     }
-
-    private static CustomerRecruitedEvent e;
 
     public static void Trigger(RegularCustomerRecruitResult result)
     {
-        e.result = result;
+        CustomerRecruitedEvent e = new CustomerRecruitedEvent(result);
         EventObserver.TriggerEvent(e);
     }
+}
+
+public readonly struct RegularCustomerVisitEventSnapshot
+{
+    public RegularCustomerVisitEventSnapshot(RegularCustomerVisitResult result)
+    {
+        success = result.Success;
+        customer = result.Record?.ToSnapshot();
+        becameRegular = result.BecameRegular;
+        becameRecruitCandidate = result.BecameRecruitCandidate;
+        message = result.Message ?? string.Empty;
+    }
+
+    public bool success { get; }
+    public RegularCustomerSnapshot customer { get; }
+    public bool becameRegular { get; }
+    public bool becameRecruitCandidate { get; }
+    public string message { get; }
+}
+
+public readonly struct RegularCustomerRecruitEventSnapshot
+{
+    public RegularCustomerRecruitEventSnapshot(RegularCustomerRecruitResult result)
+    {
+        success = result.Success;
+        customer = result.Record?.ToSnapshot();
+        sourceData = result.SourceData;
+        resultType = result.ResultType;
+        capabilities = result.Capabilities;
+        message = result.Message ?? string.Empty;
+    }
+
+    public bool success { get; }
+    public RegularCustomerSnapshot customer { get; }
+    public CharacterSO sourceData { get; }
+    public CharacterType resultType { get; }
+    public RecruitCapability capabilities { get; }
+    public string message { get; }
 }
 
 public static class RegularCustomerService
@@ -347,18 +500,18 @@ public static class RegularCustomerService
             && identity.Data != null;
     }
 
-    public static int GetCustomerId(CharacterActor customer)
+    public static string GetCustomerId(CharacterActor customer)
     {
         if (customer == null)
         {
-            return -1;
+            return string.Empty;
         }
 
         CharacterIdentity identity = GetIdentity(customer);
-        return identity != null ? identity.StableId : customer.GetInstanceID();
+        return identity != null ? identity.PersistentId : string.Empty;
     }
 
-    public static string GetCustomerDisplayName(CharacterActor customer, int customerId)
+    public static string GetCustomerDisplayName(CharacterActor customer, string customerId)
     {
         CharacterIdentity identity = GetIdentity(customer);
         if (!string.IsNullOrWhiteSpace(identity != null ? identity.DisplayName : null))
@@ -366,7 +519,7 @@ public static class RegularCustomerService
             return identity.DisplayName;
         }
 
-        if (!string.IsNullOrWhiteSpace(customer?.name))
+        if (customer != null && !string.IsNullOrWhiteSpace(customer.name))
         {
             return customer.name;
         }
@@ -437,7 +590,8 @@ public static class RegularCustomerService
             return true;
         }
 
-        return !state.IsRecruited(data.id);
+        // Recruitment belongs to a persistent person, never to the shared character template.
+        return true;
     }
 
     public static string FormatCapabilities(RecruitCapability capabilities)
@@ -450,14 +604,25 @@ public static class RegularCustomerService
     }
 }
 
-public class RegularCustomerRuntime : MonoBehaviour, UtilEventListener<FacilityVisitEvent>
+public class RegularCustomerRuntime : MonoBehaviour,
+    UtilEventListener<FacilityVisitEvent>,
+    UtilEventListener<OffenseRewardGrantedEvent>
 {
     [SerializeField] private RegularCustomerRules rules = RegularCustomerRules.CreateDefault();
 
     private readonly RegularCustomerState state = new RegularCustomerState();
+    private IRecruitedCharacterActivationService characterActivationService;
 
     public RegularCustomerState State => state;
     public RegularCustomerRules Rules => rules;
+
+    [Inject]
+    public void ConstructRecruitmentRuntime(
+        IRecruitedCharacterActivationService characterActivationService)
+    {
+        this.characterActivationService = characterActivationService
+            ?? throw new ArgumentNullException(nameof(characterActivationService));
+    }
 
     public void OnTriggerEvent(FacilityVisitEvent eventType)
     {
@@ -492,8 +657,29 @@ public class RegularCustomerRuntime : MonoBehaviour, UtilEventListener<FacilityV
         }
     }
 
-    public bool TryRecruit(int customerId, out RegularCustomerRecruitResult result)
+    public bool TryRecruit(string customerId, out RegularCustomerRecruitResult result)
     {
+        if (state.TryGetRecord(customerId, out RegularCustomerRecord candidate)
+            && candidate.IsRecruitCandidate
+            && !candidate.IsRecruited)
+        {
+            IRecruitedCharacterActivationService activationService = ResolveCharacterActivationService();
+            if (activationService == null)
+            {
+                result = new RegularCustomerRecruitResult(
+                    false,
+                    candidate,
+                    "영입 캐릭터 활성화 서비스가 연결되지 않았습니다.");
+                return false;
+            }
+
+            if (!activationService.TryActivate(candidate, out _, out string activationMessage))
+            {
+                result = new RegularCustomerRecruitResult(false, candidate, activationMessage);
+                return false;
+            }
+        }
+
         bool recruited = state.TryRecruit(customerId, out result);
         if (!recruited)
         {
@@ -509,13 +695,66 @@ public class RegularCustomerRuntime : MonoBehaviour, UtilEventListener<FacilityV
         return true;
     }
 
+    private IRecruitedCharacterActivationService ResolveCharacterActivationService()
+    {
+        if (characterActivationService != null)
+        {
+            return characterActivationService;
+        }
+
+        DungeonRuntimeLifetimeScope scope = FindFirstObjectByType<DungeonRuntimeLifetimeScope>();
+        if (scope == null || scope.Container == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            characterActivationService = scope.Container.Resolve<IRecruitedCharacterActivationService>();
+        }
+        catch (Exception)
+        {
+            characterActivationService = null;
+        }
+
+        return characterActivationService;
+    }
+
+    public void OnTriggerEvent(OffenseRewardGrantedEvent eventType)
+    {
+        int rewardCandidates = eventType.grantResults?
+            .Where(result => result != null
+                && result.success
+                && result.category == OffenseRewardCategory.RecruitCandidate)
+            .Sum(result => Mathf.Max(0, result.grantedAmount)) ?? 0;
+        if (rewardCandidates <= 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<RegularCustomerRecord> promoted =
+            state.PromoteBestVisitorsToRecruitCandidates(rewardCandidates);
+        foreach (RegularCustomerRecord record in promoted)
+        {
+            RegularCustomerSnapshot snapshot = record.ToSnapshot();
+            RecruitCandidateDiscoveredEvent.Trigger(snapshot);
+            EventAlertService.Raise(
+                "?먯젙 ?꾨낫",
+                $"{snapshot.displayName}???먯젙 蹂댁긽?쇰줈 ?곸엯 ?꾨낫媛 ?섏뿀?듬땲??\n媛????븷: {RegularCustomerService.FormatCapabilities(snapshot.recruitCapabilities)}",
+                EventAlertImportance.Medium,
+                "?곸엯");
+        }
+    }
+
     private void OnEnable()
     {
         this.EventStartListening<FacilityVisitEvent>();
+        this.EventStartListening<OffenseRewardGrantedEvent>();
     }
 
     private void OnDisable()
     {
         this.EventStopListening<FacilityVisitEvent>();
+        this.EventStopListening<OffenseRewardGrantedEvent>();
     }
 }

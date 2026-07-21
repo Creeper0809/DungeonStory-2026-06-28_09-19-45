@@ -5,7 +5,27 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Facility Role", order = 0)]
 public class AIFacilityRoleAction : AIActionSet
 {
+    private static readonly CharacterAiActionDescriptor ToiletDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.Toilet,
+        "용변",
+        CharacterAiActionTags.SelfCare);
+    private static readonly CharacterAiActionDescriptor HygieneDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.Hygiene,
+        "위생",
+        CharacterAiActionTags.SelfCare);
+    private static readonly CharacterAiActionDescriptor GenericDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.LeisureVisit,
+        "시설 이용",
+        CharacterAiActionTags.SelfCare);
+
     [SerializeField] private FacilityRole role;
+
+    public override CharacterAiActionDescriptor Descriptor => role switch
+    {
+        FacilityRole.Toilet => ToiletDescriptor,
+        FacilityRole.Hygiene => HygieneDescriptor,
+        _ => GenericDescriptor
+    };
 
     public FacilityRole Role
     {
@@ -50,11 +70,11 @@ public class AIFacilityRoleAction : AIActionSet
             FacilityScoringContext.RequireFromActor(actor));
     }
 
-    public override bool TryResolveDestination(
+    public override bool TryResolveDestinationWithFailure(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
-        out string failureReason)
+        out AIActionFailure failure)
     {
         if (FacilityCandidateScorer.TrySelectBest(
             actor,
@@ -63,11 +83,11 @@ public class AIFacilityRoleAction : AIActionSet
             FacilityScoringContext.RequireFromActor(actor),
             out destination))
         {
-            failureReason = string.Empty;
+            failure = AIActionFailure.None;
             return true;
         }
 
-        failureReason = "No destination";
+        failure = AIActionFailure.Create(AIActionFailureKind.NoDestination);
         return false;
     }
 
@@ -87,9 +107,9 @@ public class AIFacilityRoleAction : AIActionSet
             return true;
         }
 
-        failure = AIActionFailure.FromReason(
-            failureReason,
+        failure = AIActionFailure.Create(
             AIActionFailureKind.DestinationOccupied,
+            failureReason,
             destination);
         return false;
     }
@@ -104,7 +124,7 @@ public class AIFacilityRoleAction : AIActionSet
         destination?.ReleaseVisitReservation(actor);
     }
 
-    private static bool CanUseVisitorAction(CharacterActor actor)
+    private bool CanUseVisitorAction(CharacterActor actor)
     {
         if (actor == null)
         {
@@ -118,9 +138,26 @@ public class AIFacilityRoleAction : AIActionSet
 
         if (CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work))
         {
-            return work.IsOffDuty;
+            return work.IsOffDuty || CanUseOnDutySelfCare(actor, role);
         }
 
         return true;
+    }
+
+    private static bool CanUseOnDutySelfCare(CharacterActor actor, FacilityRole role)
+    {
+        if ((role & FacilityRole.Hygiene) != 0
+            && FacilityCandidateScorer.GetNeedScore(actor, FacilityRole.Hygiene) >= 0.1f)
+        {
+            return true;
+        }
+
+        if ((role & FacilityRole.Toilet) != 0
+            && FacilityCandidateScorer.GetNeedScore(actor, FacilityRole.Toilet) >= 0.1f)
+        {
+            return true;
+        }
+
+        return false;
     }
 }

@@ -1,13 +1,13 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "DungeonStory/Building/StockInfo", order = 0)]
 public class StockInfo : DataScriptableObject
 {
-    public Shop.Type type;
     public int shopId;
     public List<Tuple<SaleItem,int>> stocks;
     public float multifly;
@@ -48,16 +48,36 @@ public class WarehouseInventory
     {
         int capacity = Mathf.Max(0, totalStock);
         WarehouseInventory inventory = new WarehouseInventory(capacity);
-        int food = Mathf.RoundToInt(capacity * 0.4f);
-        int general = Mathf.RoundToInt(capacity * 0.25f);
-        int weapon = Mathf.RoundToInt(capacity * 0.25f);
-        int mana = Mathf.Max(0, capacity - food - general - weapon);
+        StockCategoryDefinition[] definitions = StockCategoryCatalog.All
+            .Where((definition) => definition.SeedWeight > 0f)
+            .ToArray();
+        float totalWeight = definitions.Sum((definition) => definition.SeedWeight);
+        int remaining = capacity;
+        for (int i = 0; i < definitions.Length; i++)
+        {
+            StockCategoryDefinition definition = definitions[i];
+            int amount = i == definitions.Length - 1
+                ? remaining
+                : Mathf.Clamp(
+                    Mathf.RoundToInt(capacity * definition.SeedWeight / Mathf.Max(0.0001f, totalWeight)),
+                    0,
+                    remaining);
+            inventory.AddStock(definition.Category, amount);
+            remaining -= amount;
+        }
 
-        inventory.AddStock(StockCategory.Food, food);
-        inventory.AddStock(StockCategory.General, general);
-        inventory.AddStock(StockCategory.Weapon, weapon);
-        inventory.AddStock(StockCategory.Mana, mana);
         return inventory;
+    }
+
+    public IReadOnlyList<KeyValuePair<StockCategory, int>> EnumerateStock()
+    {
+        return stockByCategory
+            .Where((pair) => pair.Value > 0)
+            .OrderBy((pair) => StockCategoryCatalog.TryGet(pair.Key, out StockCategoryDefinition definition)
+                ? definition.SortOrder
+                : int.MaxValue)
+            .ThenBy((pair) => Convert.ToInt32(pair.Key, CultureInfo.InvariantCulture))
+            .ToArray();
     }
 
     public int GetStock(StockCategory category)
@@ -123,36 +143,115 @@ public class WarehouseInventory
     {
         return new WarehouseInventorySnapshot
         {
+            version = WarehouseInventorySnapshot.CurrentVersion,
             maxCapacity = maxCapacity,
             restrictCategory = restrictCategory,
-            acceptedCategory = acceptedCategory,
-            food = GetStock(StockCategory.Food),
-            general = GetStock(StockCategory.General),
-            weapon = GetStock(StockCategory.Weapon),
-            mana = GetStock(StockCategory.Mana)
+            acceptedCategoryId = StockCategoryPersistenceId.ToId(acceptedCategory),
+            stocks = EnumerateStock()
+                .Select(pair => new StockAmountSnapshot
+                {
+                    categoryId = StockCategoryPersistenceId.ToId(pair.Key),
+                    amount = pair.Value
+                })
+                .ToList()
         };
     }
 
     public void ApplySnapshot(WarehouseInventorySnapshot snapshot)
     {
-        stockByCategory.Clear();
+        if (!TryApplySnapshot(snapshot, out string error))
+        {
+            throw new InvalidOperationException(error);
+        }
+    }
+
+    public bool TryApplySnapshot(WarehouseInventorySnapshot snapshot, out string error)
+    {
         if (snapshot == null)
         {
-            return;
+            error = "Warehouse inventory snapshot is null.";
+            return false;
         }
 
+        if (snapshot.version != WarehouseInventorySnapshot.CurrentVersion)
+        {
+            error = $"Unsupported warehouse inventory snapshot version {snapshot.version}.";
+            return false;
+        }
+
+        if (!StockCategoryPersistenceId.TryParse(snapshot.acceptedCategoryId, out StockCategory restoredAcceptedCategory))
+        {
+            error = $"Unknown accepted stock category id '{snapshot.acceptedCategoryId}'.";
+            return false;
+        }
+
+        Dictionary<StockCategory, int> restoredStock = new Dictionary<StockCategory, int>();
+        foreach (StockAmountSnapshot entry in snapshot.stocks ?? new List<StockAmountSnapshot>())
+        {
+            if (entry == null)
+            {
+                error = "Warehouse inventory snapshot contains a null stock entry.";
+                return false;
+            }
+
+            if (!StockCategoryPersistenceId.TryParse(entry.categoryId, out StockCategory category))
+            {
+                error = $"Unknown stock category id '{entry.categoryId}'.";
+                return false;
+            }
+
+            int amount = Mathf.Max(0, entry.amount);
+            long combined = (long)(restoredStock.TryGetValue(category, out int current) ? current : 0) + amount;
+            restoredStock[category] = combined >= int.MaxValue ? int.MaxValue : (int)combined;
+        }
+
+        stockByCategory.Clear();
         maxCapacity = Mathf.Max(0, snapshot.maxCapacity);
         restrictCategory = snapshot.restrictCategory;
-        acceptedCategory = snapshot.acceptedCategory;
-        AddStock(StockCategory.Food, snapshot.food);
-        AddStock(StockCategory.General, snapshot.general);
-        AddStock(StockCategory.Weapon, snapshot.weapon);
-        AddStock(StockCategory.Mana, snapshot.mana);
+        acceptedCategory = restoredAcceptedCategory;
+        foreach (KeyValuePair<StockCategory, int> pair in restoredStock)
+        {
+            stockByCategory[pair.Key] = pair.Value;
+        }
+
+        error = string.Empty;
+        return true;
     }
 }
 
 [Serializable]
 public sealed class WarehouseInventorySnapshot
+{
+    public const int CurrentVersion = 2;
+
+    public int version = CurrentVersion;
+    public int maxCapacity;
+    public bool restrictCategory;
+    public string acceptedCategoryId = StockCategoryPersistenceId.ToId(StockCategory.General);
+    public List<StockAmountSnapshot> stocks = new List<StockAmountSnapshot>();
+
+    public static WarehouseInventorySnapshot FromLegacy(WarehouseInventorySnapshotV1 legacy)
+    {
+        legacy ??= new WarehouseInventorySnapshotV1();
+        return new WarehouseInventorySnapshot
+        {
+            version = CurrentVersion,
+            maxCapacity = legacy.maxCapacity,
+            restrictCategory = legacy.restrictCategory,
+            acceptedCategoryId = StockCategoryPersistenceId.ToId(legacy.acceptedCategory),
+            stocks = new List<StockAmountSnapshot>
+            {
+                StockAmountSnapshot.From(StockCategory.Food, legacy.food),
+                StockAmountSnapshot.From(StockCategory.General, legacy.general),
+                StockAmountSnapshot.From(StockCategory.Weapon, legacy.weapon),
+                StockAmountSnapshot.From(StockCategory.Mana, legacy.mana)
+            }.Where(entry => entry.amount > 0).ToList()
+        };
+    }
+}
+
+[Serializable]
+public sealed class WarehouseInventorySnapshotV1
 {
     public int maxCapacity;
     public bool restrictCategory;
@@ -161,6 +260,65 @@ public sealed class WarehouseInventorySnapshot
     public int general;
     public int weapon;
     public int mana;
+}
+
+[Serializable]
+public sealed class StockAmountSnapshot
+{
+    public string categoryId;
+    public int amount;
+
+    public static StockAmountSnapshot From(StockCategory category, int amount)
+    {
+        return new StockAmountSnapshot
+        {
+            categoryId = StockCategoryPersistenceId.ToId(category),
+            amount = Mathf.Max(0, amount)
+        };
+    }
+}
+
+public static class StockCategoryPersistenceId
+{
+    private const string Prefix = "stock:";
+
+    public static string ToId(StockCategory category)
+    {
+        if (StockCategoryCatalog.TryGet(category, out StockCategoryDefinition definition))
+        {
+            return definition.Id;
+        }
+
+        return Prefix + Convert.ToInt32(category, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture);
+    }
+
+    public static bool TryParse(string categoryId, out StockCategory category)
+    {
+        string value = categoryId?.Trim();
+        if (StockCategoryCatalog.TryGet(value, out StockCategoryDefinition definition))
+        {
+            category = definition.Category;
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(value)
+            && value.StartsWith(Prefix, StringComparison.Ordinal)
+            && int.TryParse(value.Substring(Prefix.Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out int numericId))
+        {
+            category = (StockCategory)numericId;
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(value)
+            && Enum.TryParse(value, true, out StockCategory namedCategory))
+        {
+            category = namedCategory;
+            return true;
+        }
+
+        category = default;
+        return false;
+    }
 }
 
 [Serializable]
@@ -248,10 +406,9 @@ public struct StockSupplyEvent
         this.result = result;
     }
 
-    private static StockSupplyEvent e;
-
     public static void Trigger(StockSupplyResult result)
     {
+        StockSupplyEvent e = new StockSupplyEvent();
         e.result = result;
         EventObserver.TriggerEvent(e);
     }
@@ -283,18 +440,15 @@ public static class StockSupplyService
         int safeDay = Mathf.Max(1, day);
         int smallGrowth = Mathf.Min(12, safeDay / 3);
 
-        StockDeliveryOffer CreateOffer(StockCategory category, int amount, int unitCost, string sourceLabel)
-        {
-            return StockSupplyService.CreateOffer(category, amount, unitCost, sourceLabel, stockCostMultiplier);
-        }
-
-        return new List<StockDeliveryOffer>
-        {
-            CreateOffer(StockCategory.Food, 20 + smallGrowth, 4, "운영일 납품"),
-            CreateOffer(StockCategory.General, 14 + smallGrowth, 6, "운영일 납품"),
-            CreateOffer(StockCategory.Weapon, 8 + Mathf.Max(0, smallGrowth / 2), 10, "운영일 납품"),
-            CreateOffer(StockCategory.Mana, 10 + Mathf.Max(0, smallGrowth / 2), 9, "운영일 납품")
-        };
+        return StockCategoryCatalog.All
+            .Where((definition) => definition.DailyBaseAmount > 0)
+            .Select((definition) => StockSupplyService.CreateOffer(
+                definition.Category,
+                definition.GetDailyAmount(smallGrowth),
+                definition.DailyUnitCost,
+                "운영일 납품",
+                stockCostMultiplier))
+            .ToList();
     }
 
     public static bool TryPurchaseDelivery(
@@ -322,6 +476,27 @@ public static class StockSupplyService
             result = Fail(offer.category, offer.amount, offer.cost, offer.sourceLabel, "자금 부족");
             StockSupplyEvent.Trigger(result);
             return false;
+        }
+
+        if (WorldItemStackRuntime.TrySpawnStockDelivery(
+                offer.category,
+                offer.amount,
+                offer.sourceLabel,
+                out int spawned,
+                out _))
+        {
+            gameData.holdingMoney.Value -= offer.cost;
+            bool stackSuccess = spawned == offer.amount;
+            result = new StockSupplyResult(
+                stackSuccess,
+                offer.category,
+                offer.amount,
+                spawned,
+                offer.cost,
+                offer.sourceLabel,
+                stackSuccess ? string.Empty : "physical delivery interrupted");
+            StockSupplyEvent.Trigger(result);
+            return stackSuccess;
         }
 
         if (!CanDepositAll(warehouses, offer.amount))
@@ -359,6 +534,26 @@ public static class StockSupplyService
             result = Fail(category, safeAmount, 0, sourceLabel, "보상 수량이 없습니다");
             StockSupplyEvent.Trigger(result);
             return false;
+        }
+
+        if (WorldItemStackRuntime.TrySpawnStockDelivery(
+                category,
+                safeAmount,
+                sourceLabel,
+                out int spawned,
+                out _))
+        {
+            bool stackSuccess = spawned == safeAmount;
+            result = new StockSupplyResult(
+                stackSuccess,
+                category,
+                safeAmount,
+                spawned,
+                0,
+                sourceLabel,
+                stackSuccess ? string.Empty : "physical reward interrupted");
+            StockSupplyEvent.Trigger(result);
+            return stackSuccess;
         }
 
         if (!CanDepositAll(warehouses, safeAmount))

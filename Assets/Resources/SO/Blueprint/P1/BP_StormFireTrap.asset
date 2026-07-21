@@ -22,13 +22,19 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   id: 6193
-  blueprintName: "\uD3ED\uB8B0 \uBD84\uC0AC\uAD6C \uC124\uACC4\uB3C4"
-  description: "\uD654\uC5FC\uACFC \uCD95\uC804 \uBC29\uC5B4 \uC2DC\uC124\uC744 \uC787\uB294
-    \uD2B9\uC218 \uC870\uD569\uC2DD \uD78C\uD2B8."
+  blueprintName: "\uBE44\uC804 \uACF5\uBA85 \uC124\uACC4\uB3C4"
+  description: "\uB8EC \uC548\uC815\uACFC \uC758\uC2DD \uC870\uBA85\uC744 \uACB0\uD569\uD574
+    \uC758\uC2DD\uCD08\uC810\uC11D\uC744 \uC870\uC728\uD558\uB294 \uD76C\uADC0 \uC870\uD569\uC2DD\uC774\uB2E4."
   rarity: 1
   defaultCost: 340
   researchWorkRequired: 60
-  unlockBuildingIds: 
-  unlockBasicPurchaseBuildingIds: 
-  unlockRecipeIds:
-  - recipe_trap_chain_3
+  unlocks:
+    items:
+    - rid: 7302563078173904437
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302563078173904437
+      type: {class: BlueprintRecipeUnlock, ns: , asm: Assembly-CSharp}
+      data:
+        recipeId: recipe_arcane_ritual_2

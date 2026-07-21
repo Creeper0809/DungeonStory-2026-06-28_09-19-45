@@ -36,7 +36,6 @@ public sealed class RoomInstance
         }
 
         FacilityRoles = BuildFacilityRoles(Furniture);
-        Roles = RoomRoleUtility.FromFacilityRoles(FacilityRoles);
         Bounds = CalculateBounds(Cells);
     }
 
@@ -48,7 +47,7 @@ public sealed class RoomInstance
     public int SolidBoundaryCount { get; }
     public int OpenBoundaryCount { get; }
     public FacilityRole FacilityRoles { get; }
-    public RoomRole Roles { get; }
+    public FacilityRole Roles => FacilityRoles;
     public RectInt Bounds { get; }
     public bool IsSelfContained { get; }
 

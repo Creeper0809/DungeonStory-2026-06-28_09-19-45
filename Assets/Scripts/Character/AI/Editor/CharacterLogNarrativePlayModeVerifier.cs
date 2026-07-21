@@ -70,7 +70,10 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLog successLog = CreateProbeLog("asd", successService);
         CharacterLogEntry successEntry = default;
         successLog.OnLogAdded += entry => successEntry = entry;
-        successLog.AddLog(StartEvent);
+        successLog.AddActivity(CreateWorkActivity(
+            StartEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Started));
 
         Check(successEntry.EntryId > 0, "INTERNAL_EVENT_IMMEDIATE", successEntry.OriginalMessage);
         Check(successLog.Entries.Count == 0,
@@ -94,7 +97,10 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService failureService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(failureRuntime));
         CharacterLog failureLog = CreateProbeLog("asd", failureService);
-        failureLog.AddLog(EndEvent);
+        failureLog.AddActivity(CreateWorkActivity(
+            EndEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Completed));
         bool failurePendingHidden = failureLog.Entries.Count == 0;
         failureRuntime.CompleteNext(LocalLlmRequestStatus.Failed, string.Empty, "forced failure");
         Check(failurePendingHidden
@@ -111,7 +117,10 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService rejectedService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(rejectedRuntime));
         CharacterLog rejectedLog = CreateProbeLog("asd", rejectedService);
-        rejectedLog.AddLog(AlternateStartEvent);
+        rejectedLog.AddActivity(CreateWorkActivity(
+            AlternateStartEvent,
+            "work:weapon-sales",
+            CharacterActivityOutcomes.Started));
         Check(rejectedLog.Entries.Count == 1
             && !rejectedLog.Entries[0].Contains(AlternateStartEvent)
             && rejectedService.ControlledFallbackCount == 1,
@@ -122,10 +131,22 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService saturatedService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(saturatedRuntime));
         CharacterLog saturatedLog = CreateProbeLog("asd", saturatedService);
-        saturatedLog.AddLog(StartEvent);
-        saturatedLog.AddLog(AlternateStartEvent);
-        saturatedLog.AddLog("작업 시작 · 청소 · 식당");
-        saturatedLog.AddLog(EndEvent);
+        saturatedLog.AddActivity(CreateWorkActivity(
+            StartEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Started));
+        saturatedLog.AddActivity(CreateWorkActivity(
+            AlternateStartEvent,
+            "work:weapon-sales",
+            CharacterActivityOutcomes.Started));
+        saturatedLog.AddActivity(CreateWorkActivity(
+            "작업 시작 · 청소 · 식당",
+            "work:cleaning",
+            CharacterActivityOutcomes.Started));
+        saturatedLog.AddActivity(CreateWorkActivity(
+            EndEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Completed));
         Check(saturatedRuntime.PendingRecordCount == 3
             && saturatedLog.Entries.Count == 1
             && !saturatedLog.Entries[0].Contains(EndEvent)
@@ -137,9 +158,15 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService repeatedService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(repeatedRuntime));
         CharacterLog repeatedLog = CreateProbeLog("asd", repeatedService);
-        repeatedLog.AddLog(StartEvent);
+        repeatedLog.AddActivity(CreateWorkActivity(
+            StartEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Started));
         bool firstRepeatPendingHidden = repeatedLog.Entries.Count == 0;
-        repeatedLog.AddLog(StartEvent);
+        repeatedLog.AddActivity(CreateWorkActivity(
+            StartEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Started));
         Check(firstRepeatPendingHidden
             && repeatedLog.Entries.Count == 1
             && !repeatedLog.Entries[0].Contains(StartEvent)
@@ -218,9 +245,18 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
             }
         };
         actor.LogComponent.OnLogAdded += captureTargetEntry;
-        actor.AddLog(StartEvent);
-        actor.AddLog(AlternateStartEvent);
-        actor.AddLog(EndEvent);
+        actor.AddActivity(CreateWorkActivity(
+            StartEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Started));
+        actor.AddActivity(CreateWorkActivity(
+            AlternateStartEvent,
+            "work:weapon-sales",
+            CharacterActivityOutcomes.Started));
+        actor.AddActivity(CreateWorkActivity(
+            EndEvent,
+            "work:alchemy-research",
+            CharacterActivityOutcomes.Completed));
         actor.LogComponent.OnLogAdded -= captureTargetEntry;
         PressButton(recordsTab);
 
@@ -360,6 +396,19 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         File.WriteAllBytes(CharacterLogNarrativePlayModeVerifier.CapturePath, capture.EncodeToPNG());
         Destroy(capture);
         report.Add($"capture={CharacterLogNarrativePlayModeVerifier.CapturePath}");
+    }
+
+    private static CharacterActivityEvent CreateWorkActivity(
+        string factText,
+        string actionId,
+        string outcomeId)
+    {
+        return CharacterActivityEvent.Create(
+            CharacterActivityKinds.Work,
+            outcomeId,
+            factText,
+            actionId: actionId,
+            narrativeEligible: true);
     }
 
     private static void PressButton(Button button)
@@ -510,6 +559,7 @@ internal sealed class DeferredCharacterRecordRuntime : ILocalLlmRuntime
     }
 
     public bool GeneratePersonaAsync(string prompt, Action<LocalLlmResult> callback) => false;
+    public bool GenerateCharacterSkillAsync(string prompt, Action<LocalLlmResult> callback) => false;
     public bool GenerateMacroGoalAsync(string prompt, Action<LocalLlmResult> callback) => false;
     public bool GenerateMoodImpulseAsync(string prompt, Action<LocalLlmResult> callback) => false;
     public bool GenerateSocialRumorAsync(string prompt, Action<LocalLlmResult> callback) => false;

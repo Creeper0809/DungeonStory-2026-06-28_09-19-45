@@ -24,6 +24,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         List<string> errors = new List<string>();
 
         RunScenario("AI action score edge cases", VerifyActionScoreEdgeCases, errors);
+        RunScenario("AI action plan invariants", VerifyActionPlanInvariants, errors);
         RunScenario("AI selects next action after failed high-score destination", VerifyBrainSelectsNextActionAfterDestinationFailure, errors);
         RunScenario("AI tie keeps action order", VerifyBrainTieKeepsActionOrder, errors);
         RunScenario("Off priority excludes urgent automatic work", VerifyOffPriorityExcludesUrgentAutomaticWork, errors);
@@ -68,6 +69,59 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         }
 
         errors.Add(name);
+    }
+
+    private static bool VerifyActionPlanInvariants()
+    {
+        GameObject targetObject = new GameObject("AI Action Plan Target");
+        try
+        {
+            BuildableObject target = targetObject.AddComponent<BuildableObject>();
+            Queue<GridMoveStep> sourcePath = new Queue<GridMoveStep>();
+            sourcePath.Enqueue(new GridMoveStep(
+                Vector2Int.zero,
+                Vector2Int.right,
+                null,
+                null,
+                GridMoveType.Walk));
+
+            AIActionPlan movePlan = AIActionPlan.MoveTo(target, sourcePath);
+            sourcePath.Clear();
+
+            bool emptyMoveRejected = false;
+            try
+            {
+                AIActionPlan.MoveTo(target, Array.Empty<GridMoveStep>());
+            }
+            catch (ArgumentException)
+            {
+                emptyMoveRejected = true;
+            }
+
+            bool missingDestinationRejected = false;
+            try
+            {
+                AIActionPlan.AtDestination(null);
+            }
+            catch (ArgumentException)
+            {
+                missingDestinationRejected = true;
+            }
+
+            return movePlan.Kind == AIActionPlanKind.MovePath
+                && movePlan.Destination == target
+                && movePlan.PathSteps.Count == 1
+                && movePlan.PathSteps is not IList<GridMoveStep>
+                && emptyMoveRejected
+                && missingDestinationRejected
+                && !typeof(AIAction).GetProperty(nameof(AIAction.destination)).CanWrite
+                && !typeof(AIAction).GetProperty(nameof(AIAction.pathSteps)).CanWrite
+                && !typeof(AIAction).GetProperty(nameof(AIAction.planKind)).CanWrite;
+        }
+        finally
+        {
+            Object.DestroyImmediate(targetObject);
+        }
     }
 
     private static bool VerifyActionScoreEdgeCases()
@@ -357,7 +411,7 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
             && rejected
             && candidate.Building == shop
             && candidate.FailureKind == AIActionFailureKind.DestinationOccupied
-            && AIActionFailure.ClassifyKind(candidate.FailureReason) == AIActionFailureKind.DestinationOccupied;
+            && !string.IsNullOrWhiteSpace(candidate.FailureReason);
     }
 
     private static bool VerifyWorkAndWaitScoresPreferRealWork()
@@ -550,14 +604,14 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
         {
         }
 
-        public override bool TryResolveDestination(
+        public override bool TryResolveDestinationWithFailure(
             CharacterActor actor,
             GridPathSearchResult searchResult,
             out BuildableObject destination,
-            out string failureReason)
+            out AIActionFailure failure)
         {
             destination = null;
-            failureReason = string.Empty;
+            failure = AIActionFailure.None;
             if (!RequireDestination)
             {
                 return true;
@@ -565,11 +619,15 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
 
             if (!ResolveDestination)
             {
-                failureReason = "forced destination failure";
+                failure = AIActionFailure.Create(
+                    AIActionFailureKind.DestinationSelectionFailed,
+                    "forced destination failure");
                 return false;
             }
 
-            failureReason = "test destination not configured";
+            failure = AIActionFailure.Create(
+                AIActionFailureKind.NoDestination,
+                "test destination not configured");
             return false;
         }
 

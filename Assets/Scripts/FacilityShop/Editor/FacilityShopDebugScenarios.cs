@@ -27,8 +27,13 @@ public static class FacilityShopDebugScenarios
         RunScenario("기본 구매 해금", VerifyBasicPurchaseUnlocksLowStarsOnly, errors);
         RunScenario("시설 구매", VerifyBuildingPurchaseUsesMoneyAndUnlocksBuilding, errors);
         RunScenario("설계도 구매", VerifyBlueprintPurchaseUsesMoneyAndRecordsBlueprint, errors);
+        RunScenario("표시 이름과 시설 등급 분리", VerifyBuildingStarUsesQualityAbility, errors);
+        RunScenario("새 상품 타입 다형 구매", VerifyCustomOfferPurchasesWithoutServiceBranch, errors);
         RunScenario("운영일 후 상점 갱신", VerifyRuntimeRefreshesAfterOperatingDay, errors);
         RunScenario("정산 보고서 시설 상점 항목", VerifySettlementReportIncludesFacilityShop, errors);
+
+        RunScenario("Day 1 strategy blueprint candidate", VerifyStartingBlueprintCandidateIsGuaranteed, errors);
+        RunScenario("Run start refreshes Day 1 strategy offer", VerifyRunStartRefreshesStrategyOffer, errors);
 
         if (errors.Count > 0)
         {
@@ -67,10 +72,39 @@ public static class FacilityShopDebugScenarios
         IReadOnlyList<FacilityShopOffer> offers = CreateDailyOffersForScenario(1);
 
         return offers.Count >= 4
-            && offers.Any((offer) => offer.Type == FacilityShopOfferType.Building && offer.Building != null)
-            && offers.Any((offer) => offer.Type == FacilityShopOfferType.Blueprint && offer.Blueprint != null)
+            && offers.OfType<FacilityBuildingOffer>().Any((offer) => offer.Building != null)
+            && offers.OfType<FacilityBlueprintOffer>().Any((offer) => offer.Blueprint != null)
             && offers.All((offer) => offer.IsValid && offer.Cost > 0)
-            && offers.All((offer) => offer.Type != FacilityShopOfferType.Building || offer.Star <= 2);
+            && offers.All((offer) => offer is not FacilityBuildingOffer || offer.Star <= 2);
+    }
+
+    private static bool VerifyStartingBlueprintCandidateIsGuaranteed()
+    {
+        int[] strategyBlueprintIds =
+        {
+            RunStrategyBlueprintIds.CommerceBasics,
+            RunStrategyBlueprintIds.FortressBasics,
+            RunStrategyBlueprintIds.ArcaneBasics
+        };
+
+        foreach (int strategyBlueprintId in strategyBlueprintIds)
+        {
+            IReadOnlyList<FacilityShopOffer> offers = FacilityShopService.CreateDailyOffers(
+                1,
+                LoadAllBuildings(),
+                LoadAllBlueprints(),
+                0,
+                DefaultBuildingCostMultiplier,
+                DefaultBlueprintCostMultiplier,
+                new[] { strategyBlueprintId });
+            if (!offers.OfType<FacilityBlueprintOffer>()
+                .Any((offer) => offer.Blueprint != null && offer.Blueprint.id == strategyBlueprintId))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool VerifyRareOffersAppearRandomly()
@@ -109,10 +143,10 @@ public static class FacilityShopDebugScenarios
         bool valid = oneUnlocked
             && twoUnlocked
             && threeRejected
-            && offers.Any((offer) => offer.Building == oneStar && offer.IsBasicPurchase)
-            && offers.Any((offer) => offer.Building != null && offer.Building.id == 9202 && offer.IsBasicPurchase)
+            && offers.OfType<FacilityBuildingOffer>().Any((offer) => offer.Building == oneStar && offer.IsBasicPurchase)
+            && offers.OfType<FacilityBuildingOffer>().Any((offer) => offer.Building.id == 9202 && offer.IsBasicPurchase)
             && offers.All((offer) => offer.Star <= 2)
-            && offers.All((offer) => offer.Building == null || offer.Building.id != 9203);
+            && offers.OfType<FacilityBuildingOffer>().All((offer) => offer.Building.id != 9203);
 
         Object.DestroyImmediate(twoStar);
         Object.DestroyImmediate(threeStar);
@@ -127,7 +161,7 @@ public static class FacilityShopDebugScenarios
         building.unlocked = false;
         GameData gameData = CreateGameData(500);
         FacilityShopUnlockState state = new FacilityShopUnlockState();
-        FacilityShopOffer offer = new FacilityShopOffer(
+        FacilityShopOffer offer = new FacilityBuildingOffer(
             building,
             120,
             FacilityShopRarity.Common,
@@ -138,6 +172,8 @@ public static class FacilityShopDebugScenarios
 
         bool valid = success
             && result.success
+            && result.TryGetBuilding(out BuildingSO purchasedBuilding)
+            && purchasedBuilding == building
             && building.unlocked
             && gameData.holdingMoney.Value == 380
             && result.message.Contains("구매 완료");
@@ -152,7 +188,7 @@ public static class FacilityShopDebugScenarios
         FacilityBlueprintSO blueprint = LoadBlueprint("BP_CommercialBasics");
         GameData gameData = CreateGameData(500);
         FacilityShopUnlockState state = new FacilityShopUnlockState();
-        FacilityShopOffer offer = new FacilityShopOffer(
+        FacilityShopOffer offer = new FacilityBlueprintOffer(
             blueprint,
             100,
             blueprint.rarity,
@@ -162,6 +198,8 @@ public static class FacilityShopDebugScenarios
         bool success = FacilityShopService.TryPurchaseOffer(gameData, offer, state, out FacilityShopPurchaseResult result);
         bool valid = success
             && result.success
+            && result.TryGetBlueprint(out FacilityBlueprintSO purchasedBlueprint)
+            && purchasedBlueprint == blueprint
             && gameData.holdingMoney.Value == 400
             && state.IsBlueprintAcquired(blueprint)
             && alerts.Requests.Any((request) => request.Title == "설계도 획득");
@@ -171,10 +209,68 @@ public static class FacilityShopDebugScenarios
         return valid;
     }
 
+    private static bool VerifyBuildingStarUsesQualityAbility()
+    {
+        BuildingSO building = ScriptableObject.CreateInstance<BuildingSO>();
+        building.objectName = "5성처럼 보이는 일반 시설";
+        building.ReplaceAbilities(new BuildingAbilityCollection());
+
+        int defaultStar = FacilityShopService.GetBuildingStar(building);
+        building.AbilityModules.Add(new BuildingQualityAbility { star = 3 });
+        int configuredStar = FacilityShopService.GetBuildingStar(building);
+
+        Object.DestroyImmediate(building);
+        return defaultStar == 1 && configuredStar == 3;
+    }
+
+    private static bool VerifyCustomOfferPurchasesWithoutServiceBranch()
+    {
+        GameData gameData = CreateGameData(100);
+        DebugFacilityShopOffer offer = new DebugFacilityShopOffer(35);
+
+        bool success = FacilityShopService.TryPurchaseOffer(
+            gameData,
+            offer,
+            new FacilityShopUnlockState(),
+            out FacilityShopPurchaseResult result);
+
+        bool valid = success
+            && result.success
+            && offer.ApplyCount == 1
+            && result.offerTypeId == DebugFacilityShopOffer.TypeId
+            && gameData.holdingMoney.Value == 65;
+
+        Object.DestroyImmediate(gameData);
+        return valid;
+    }
+
+    private static bool VerifyRunStartRefreshesStrategyOffer()
+    {
+        GameObject runtimeObject = new GameObject("DailyFacilityShopRuntime_StrategyStart_Test");
+        DailyFacilityShopRuntime runtime = runtimeObject.AddComponent<DailyFacilityShopRuntime>();
+        runtime.ConstructDailyFacilityShopRuntime(
+            new EditorFacilityShopCatalog(),
+            new FixedBlueprintCandidateRunVariableReader(RunStrategyBlueprintIds.CommerceBasics),
+            new NeutralMetaProgressionReader());
+
+        runtime.OnTriggerEvent(new RunStartVariablesSelectedEvent(null));
+        bool valid = runtime.CurrentOfferDay == 1
+            && runtime.CurrentDailyOffers.OfType<FacilityBlueprintOffer>()
+                .Any((offer) => offer.Blueprint != null
+                    && offer.Blueprint.id == RunStrategyBlueprintIds.CommerceBasics);
+
+        Object.DestroyImmediate(runtimeObject);
+        return valid;
+    }
+
     private static bool VerifyRuntimeRefreshesAfterOperatingDay()
     {
         GameObject runtimeObject = new GameObject("DailyFacilityShopRuntime_Test");
         DailyFacilityShopRuntime runtime = runtimeObject.AddComponent<DailyFacilityShopRuntime>();
+        runtime.ConstructDailyFacilityShopRuntime(
+            new EditorFacilityShopCatalog(),
+            new NeutralRunVariableReader(),
+            new NeutralMetaProgressionReader());
         CountingFacilityShopRefreshedListener listener = new CountingFacilityShopRefreshedListener();
 
         runtime.OnTriggerEvent(new OperatingDayEndedEvent(2));
@@ -192,13 +288,17 @@ public static class FacilityShopDebugScenarios
     {
         GameObject settlementObject = new GameObject("Settlement_FacilityShop_Test");
         OperatingDaySettlementRuntime settlement = settlementObject.AddComponent<OperatingDaySettlementRuntime>();
+        settlement.Construct(
+            new EmptyDungeonSceneComponentQuery(),
+            new EditorFacilityShopCatalog(),
+            new NeutralRunVariableReader());
 
         settlement.OnTriggerEvent(new OperatingDayEndedEvent(1));
         OperatingDayReport report = settlement.LatestReport;
         bool valid = report != null
             && report.refreshedFacilityShopOffers.Count > 0
-            && report.refreshedFacilityShopOffers.Any((offer) => offer.type == FacilityShopOfferType.Building)
-            && report.refreshedFacilityShopOffers.Any((offer) => offer.type == FacilityShopOfferType.Blueprint)
+            && report.refreshedFacilityShopOffers.Any((offer) => offer.offerTypeId == FacilityShopOfferTypeIds.Building)
+            && report.refreshedFacilityShopOffers.Any((offer) => offer.offerTypeId == FacilityShopOfferTypeIds.Blueprint)
             && report.ToDetailText().Contains("시설 상점 갱신");
 
         Object.DestroyImmediate(settlementObject);
@@ -264,7 +364,7 @@ public static class FacilityShopDebugScenarios
         building.layer = GridLayer.Building;
         building.category = BuildingCategory.Special;
         building.type = typeof(DefenseFacility);
-        building.defense = new DefenseFacilityData
+        building.Defense = new DefenseFacilityData
         {
             enabled = true,
             concept = DefenseAttackConcept.Physical,
@@ -303,6 +403,97 @@ public static class FacilityShopDebugScenarios
         {
             this.EventStopListening<FacilityShopRefreshedEvent>();
         }
+    }
+
+    private sealed class DebugFacilityShopOffer : FacilityShopOffer
+    {
+        public const string TypeId = "facility-shop.offer.debug";
+
+        public DebugFacilityShopOffer(int cost)
+            : base(cost, FacilityShopRarity.Special, false, true)
+        {
+        }
+
+        public int ApplyCount { get; private set; }
+        public override string OfferTypeId => TypeId;
+        public override string TypeDisplayName => "테스트";
+        public override bool IsValid => true;
+        public override int Star => 0;
+        public override int DataId => 1;
+        public override string DisplayName => "확장 상품";
+
+        protected override string ApplyPurchase(FacilityShopUnlockState unlockState)
+        {
+            ApplyCount++;
+            return "확장 상품 구매 완료";
+        }
+    }
+
+    private sealed class EditorFacilityShopCatalog : IFacilityShopCatalog
+    {
+        public IReadOnlyCollection<BuildingSO> Buildings => LoadAllBuildings();
+        public IReadOnlyCollection<FacilityBlueprintSO> Blueprints => LoadAllBlueprints();
+
+        public BuildingSO FindBuildingById(int buildingId)
+        {
+            return Buildings.FirstOrDefault(building => building != null && building.id == buildingId);
+        }
+    }
+
+    private sealed class NeutralRunVariableReader : IRunVariableRuntimeReader
+    {
+        public int GetInitialShopSeed() => 0;
+        public IReadOnlyList<int> GetStartingBlueprintCandidateIds() => System.Array.Empty<int>();
+        public float GetGuestDemandMultiplier(string speciesTag) => 1f;
+        public float GetStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFacilityShopCostMultiplier(BuildingSO building) => 1f;
+        public float GetBlueprintCostMultiplier(FacilityBlueprintSO blueprint) => 1f;
+        public float GetThreatRiseMultiplier() => 1f;
+        public float GetWarningThresholdMultiplier() => 1f;
+        public InvasionIntruderSettings ApplyInvasionSettings(InvasionIntruderSettings source) => source;
+    }
+
+    private sealed class NeutralMetaProgressionReader : IMetaProgressionRuntimeReader
+    {
+        public int GetStartingFacilityCandidateBonus() => 0;
+        public int GetStartingOwnerTraitCandidateBonus() => 0;
+        public float GetOwnerMaxHealthMultiplier() => 1f;
+        public float GetInvasionWarningThresholdMultiplier() => 1f;
+        public float GetCommerceStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFortressFacilityCostMultiplier(BuildingSO building) => 1f;
+        public float GetArcaneResearchWorkMultiplier() => 1f;
+        public bool IsRecipePreserved(string recipeId) => false;
+
+        public IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(IEnumerable<BuildingSO> buildings)
+        {
+            return Array.Empty<int>();
+        }
+    }
+
+    private sealed class FixedBlueprintCandidateRunVariableReader : IRunVariableRuntimeReader
+    {
+        private readonly int blueprintId;
+
+        public FixedBlueprintCandidateRunVariableReader(int blueprintId)
+        {
+            this.blueprintId = blueprintId;
+        }
+
+        public int GetInitialShopSeed() => 0;
+        public IReadOnlyList<int> GetStartingBlueprintCandidateIds() => new[] { blueprintId };
+        public float GetGuestDemandMultiplier(string speciesTag) => 1f;
+        public float GetStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFacilityShopCostMultiplier(BuildingSO building) => 1f;
+        public float GetBlueprintCostMultiplier(FacilityBlueprintSO blueprint) => 1f;
+        public float GetThreatRiseMultiplier() => 1f;
+        public float GetWarningThresholdMultiplier() => 1f;
+        public InvasionIntruderSettings ApplyInvasionSettings(InvasionIntruderSettings source) => source;
+    }
+
+    private sealed class EmptyDungeonSceneComponentQuery : IDungeonSceneComponentQuery
+    {
+        public T First<T>(bool includeInactive = false) where T : Component => null;
+        public IReadOnlyList<T> All<T>(bool includeInactive = false) where T : Component => Array.Empty<T>();
     }
 
     private sealed class CountingEventAlertRequestListener : UtilEventListener<EventAlertRequestedEvent>, IDisposable

@@ -110,7 +110,7 @@
 | G01 | 경비 초소 책상 | 2x1 바닥 | 핵심 | 경비 업무와 집결점, `Guard`, `Defense`, `Security` | 1차 |
 | G02 | 경보 종 | 1x1 벽걸이 | 핵심 | 침입 경보와 대응 속도, `Defense`, `Security` | 1차 |
 | G03 | 순찰 상황판 | 1x1 벽걸이 | 보조 | 순찰 효율, `Security`, `Service` | 2차 |
-| G04 | 전술 지도 탁자 | 2x1 바닥 | 보조 | 병영과 전투 지휘, `Combat`, `Defense`, `Service` | 2차 |
+| G04 | 전술 지도 탁자 | 2x1 바닥 | 핵심 | 경비 운영과 전투 지휘, `Security`, `Combat`, `Defense`, `Service` | 2차 |
 | G05 | 전투 깃발 | 1x1 벽걸이 | 보조 | 전투 문화와 사기, `Combat`, `Brutal` | 2차 |
 | G06 | 전리품 거치대 | 1x1 벽걸이 | 보조 | 전투 역사, `Combat`, `Luxury`, `Fear` | 3차 |
 

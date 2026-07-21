@@ -30,6 +30,7 @@ public sealed class InvasionIntruderContext : IInvasionIntruderContext
 {
     private readonly IDungeonSceneComponentQuery sceneQuery;
     private readonly IGridSystemProvider gridSystemProvider;
+    private readonly IWorldDropZoneQuery worldDropZoneQuery;
     private readonly IRunVariableRuntimeReader runVariableReader;
     private CharacterSpawner spawner;
     private OwnerRunManager ownerRunManager;
@@ -37,12 +38,15 @@ public sealed class InvasionIntruderContext : IInvasionIntruderContext
     public InvasionIntruderContext(
         IDungeonSceneComponentQuery sceneQuery,
         IGridSystemProvider gridSystemProvider,
+        IWorldDropZoneQuery worldDropZoneQuery,
         IRunVariableRuntimeReader runVariableReader)
     {
         this.sceneQuery = sceneQuery
             ?? throw new ArgumentNullException(nameof(sceneQuery));
         this.gridSystemProvider = gridSystemProvider
             ?? throw new ArgumentNullException(nameof(gridSystemProvider));
+        this.worldDropZoneQuery = worldDropZoneQuery
+            ?? throw new ArgumentNullException(nameof(worldDropZoneQuery));
         this.runVariableReader = runVariableReader
             ?? throw new ArgumentNullException(nameof(runVariableReader));
     }
@@ -63,15 +67,32 @@ public sealed class InvasionIntruderContext : IInvasionIntruderContext
 
     public bool TryGetOwner(out CharacterActor owner)
     {
-        ownerRunManager ??= sceneQuery.First<OwnerRunManager>(includeInactive: true);
+        if (ownerRunManager == null)
+        {
+            ownerRunManager = sceneQuery.First<OwnerRunManager>(includeInactive: true);
+        }
+
         owner = ownerRunManager != null ? ownerRunManager.CurrentOwnerActor : null;
         return owner != null;
     }
 
     public bool TryResolveEntry(out InvasionIntruderEntry entry)
     {
+        if (worldDropZoneQuery.TryGetVisitorEntryPoint(out WorldGridEntryPoint entryPoint))
+        {
+            entry = new InvasionIntruderEntry(
+                entryPoint.GridPosition,
+                entryPoint.OutsidePosition,
+                entryPoint.DoorPosition);
+            return true;
+        }
+
         TryGetGrid(out Grid grid);
-        spawner ??= sceneQuery.First<CharacterSpawner>(includeInactive: true);
+        if (spawner == null)
+        {
+            spawner = sceneQuery.First<CharacterSpawner>(includeInactive: true);
+        }
+
         return InvasionIntruderEntryResolver.TryResolve(spawner, grid, out entry);
     }
 

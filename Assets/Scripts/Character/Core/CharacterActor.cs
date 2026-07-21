@@ -10,6 +10,7 @@ using VContainer;
 [DrawWithUnity]
 [DisallowMultipleComponent]
 [RequireComponent(typeof(CharacterIdentity))]
+[RequireComponent(typeof(CharacterProgression))]
 [RequireComponent(typeof(CharacterAbilityCache))]
 [RequireComponent(typeof(CharacterStats))]
 [RequireComponent(typeof(CharacterVisual))]
@@ -28,6 +29,9 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     [SerializeField]
     [ReadOnly]
     private CharacterIdentity identity;
+    [SerializeField]
+    [ReadOnly]
+    private CharacterProgression progression;
     [SerializeField]
     [ReadOnly]
     private CharacterAbilityCache abilityCache;
@@ -64,6 +68,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     private ICharacterSocialMemoryFactory socialMemoryFactory;
     private ICharacterFeedbackBubbleFactory feedbackBubbleFactory;
     private bool registeredWithAiScheduler;
+    private bool persistentRestorePrepared;
 
     public CharacterDecisionState State { get; private set; }
     public CharacterDecisionState state
@@ -74,6 +79,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     public AIBrain Brain => brain;
     public AIBrain ai => brain;
     public CharacterIdentity Identity => identity;
+    public CharacterProgression Progression => progression;
     public CharacterStats Stats => characterStats;
     public CharacterAbilityCache AbilityCache => abilityCache;
     public CharacterLifecycle Lifecycle => lifecycle;
@@ -83,7 +89,9 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     public CharacterDialogueRuntime DialogueRuntime => dialogueRuntime;
     public CharacterSocialMemory SocialMemory => socialMemory;
     public BehaviorTree BehaviorTree => behaviorTree;
-    public CharacterRuntimeProfile profile => identity != null ? identity.Profile : null;
+    public CharacterRuntimeProfile profile => progression != null
+        ? progression.GetEffectiveRuntimeProfile()
+        : identity != null ? identity.Profile : null;
     public CharacterRole Role => identity != null ? identity.Role : CharacterRole.Regular;
     public bool IsOwner => identity != null && identity.IsOwner;
     public bool CanLeaveByDissatisfaction => !IsOwner;
@@ -98,7 +106,8 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     public bool CanRunAi => identity != null
         && identity.Data != null
         && lifecycle != null
-        && lifecycle.CurrentState == CharacterLifecycleState.Active;
+        && lifecycle.CurrentState == CharacterLifecycleState.Active
+        && !lifecycle.IsAiPaused;
     public bool IsAiDecisionPending => CanRunAi && brain != null && brain.isBestActionEnd;
     public float InjurySeverity => characterStats != null ? characterStats.InjurySeverity : 0f;
     public CharacterMoodSnapshot Mood => characterStats != null
@@ -143,7 +152,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         RegisterWithAiSchedulerIfReady();
     }
 
-    public event Action<Dictionary<CharacterCondition, float>> OnStatChange
+    public event Action<IReadOnlyDictionary<CharacterCondition, float>> OnStatChange
     {
         add
         {
@@ -180,7 +189,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         }
     }
 
-    public Dictionary<CharacterCondition, float> stats
+    public IDictionary<CharacterCondition, float> stats
     {
         get
         {
@@ -241,17 +250,26 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         EnsureRuntimeState();
         RegisterWithAiSchedulerRequired();
         State = CharacterDecisionState.DECIDE;
+        bool isPersistentRestore = persistentRestorePrepared;
         if (identity != null && identity.Data != null)
         {
-            Initialize(identity.Data);
+            if (!isPersistentRestore)
+            {
+                Initialize(identity.Data);
+            }
+
             if (lifecycle != null && lifecycle.CurrentState == CharacterLifecycleState.None)
             {
                 lifecycle.SetLifecycleState(CharacterLifecycleState.Active);
             }
 
-            StartCoroutine(lifecycle != null ? lifecycle.SnapToWalkableGridWhenReady() : EmptyRoutine());
+            if (!isPersistentRestore)
+            {
+                StartCoroutine(lifecycle != null ? lifecycle.SnapToWalkableGridWhenReady() : EmptyRoutine());
+            }
         }
 
+        persistentRestorePrepared = false;
         StartCoroutine(characterStats != null ? characterStats.ChangeStatByTick() : EmptyRoutine());
     }
 
@@ -271,11 +289,6 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         UnregisterFromAiScheduler();
     }
 
-    private void OnMouseDown()
-    {
-        RequireWorldInfoClickSelector().TryHandleWorldInfoClick();
-    }
-
     public void Initialize(CharacterSO data)
     {
         EnsureRuntimeState();
@@ -285,6 +298,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         }
 
         identity.SetData(data);
+        progression.Bind(this);
         if (identity.Data != null)
         {
             visual.SetCharacterSprite(identity.Data.characterSprite);
@@ -298,6 +312,11 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         }
 
         personaRuntime.RequestPersonaIfNeeded(logIfMissingQueue: false);
+    }
+
+    public void PrepareForPersistentRestore()
+    {
+        persistentRestorePrepared = true;
     }
 
     public bool TryExecuteSelectedAiAction()
@@ -357,6 +376,13 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         }
 
         identity = GetComponent<CharacterIdentity>();
+        progression = GetComponent<CharacterProgression>();
+        if (progression == null && Application.isPlaying)
+        {
+            progression = gameObject.AddComponent<CharacterProgression>();
+        }
+        CharacterCarryInventory.Ensure(this);
+        AbilityHaul.Ensure(this);
         abilityCache = GetComponent<CharacterAbilityCache>();
         characterStats = GetComponent<CharacterStats>();
         visual = GetComponent<CharacterVisual>();
@@ -380,6 +406,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         }
 
         identity.Bind(this);
+        progression.Bind(this);
         characterStats.Bind(this);
         lifecycle.Bind(this);
         blackboard.Bind(this);
@@ -389,11 +416,6 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         visual.Bind();
         characterLog.Bind();
         EnsureFeedbackBubbleIfInjected();
-    }
-
-    public InfoFeedEvent.Type GetInfoType()
-    {
-        return InfoFeedEvent.Type.CHARACTER;
     }
 
     public T GetAbility<T>() where T : CharacterAbility
@@ -426,10 +448,34 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         characterLog?.AddLog(message);
     }
 
+    public void AddActivity(CharacterActivityEvent activity)
+    {
+        EnsureRuntimeState();
+        characterLog?.AddActivity(activity);
+        if (activity != null
+            && activity.NarrativeEligible
+            && !string.Equals(activity.OutcomeId, CharacterActivityOutcomes.Started, StringComparison.Ordinal)
+            && !string.Equals(activity.OutcomeId, CharacterActivityOutcomes.Progress, StringComparison.Ordinal))
+        {
+            progression?.RecordNarrative(
+                CharacterNarrativeDomainUtility.FromActivity(activity),
+                !string.IsNullOrWhiteSpace(activity.ActionId) ? activity.ActionId : activity.KindId,
+                !string.IsNullOrWhiteSpace(activity.TargetId) ? activity.TargetId : activity.PlaceId,
+                activity.OutcomeId,
+                !Mathf.Approximately(activity.Value, 0f) ? activity.Value : activity.Quantity);
+        }
+    }
+
     public float GetMoveSpeed()
     {
         EnsureRuntimeState();
-        return characterStats != null ? characterStats.GetMoveSpeed() : identity != null && identity.Data != null ? identity.Data.moveSpeed : 1f;
+        float baseSpeed = characterStats != null
+            ? characterStats.GetMoveSpeed()
+            : identity != null && identity.Data != null
+                ? identity.Data.moveSpeed
+                : 1f;
+        CharacterCarryInventory carry = GetComponent<CharacterCarryInventory>();
+        return baseSpeed * (carry != null ? carry.GetMoveSpeedMultiplier() : 1f);
     }
 
     public float GetConsumptionMultiplier()
@@ -478,6 +524,12 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     {
         EnsureRuntimeState();
         return characterStats != null ? characterStats.GetIncidentType() : CharacterSpeciesIncidentType.None;
+    }
+
+    public float GetCrimeRiskMultiplier()
+    {
+        EnsureRuntimeState();
+        return characterStats != null ? characterStats.GetCrimeRiskMultiplier() : 1f;
     }
 
     public float GetCombatPowerMultiplier()
@@ -562,6 +614,12 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         return characterStats != null ? characterStats.GetCharacterStat(statType) : 5;
     }
 
+    public int GetCharacterStat(string statId)
+    {
+        EnsureRuntimeState();
+        return characterStats != null ? characterStats.GetCharacterStat(statId) : 0;
+    }
+
     public void ApplyDamage(float amount, string reason = "")
     {
         EnsureRuntimeState();
@@ -572,6 +630,12 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     {
         EnsureRuntimeState();
         characterStats?.Heal(amount);
+    }
+
+    public void ScaleMaxHealth(float multiplier)
+    {
+        EnsureRuntimeState();
+        characterStats?.ScaleMaxHealth(multiplier);
     }
 
     public void SetInjurySeverity(float value)
@@ -660,7 +724,8 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
 
     public bool IsAiPaused()
     {
-        return !CanRunAi;
+        EnsureRuntimeState();
+        return lifecycle != null && lifecycle.IsAiPaused;
     }
 
     public string GetSpeciesShortDescription()
@@ -675,6 +740,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     }
 
     private bool HasRuntimeComponents => identity != null
+        && progression != null
         && abilityCache != null
         && characterStats != null
         && visual != null

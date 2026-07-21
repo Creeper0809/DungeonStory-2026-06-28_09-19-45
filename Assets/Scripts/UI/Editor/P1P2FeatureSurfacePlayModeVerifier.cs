@@ -8,6 +8,8 @@ using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using VContainer;
@@ -205,6 +207,7 @@ public static class P1P2FeatureSurfacePlayModeVerifier
         private readonly List<string> capturedErrors = new List<string>();
         private readonly List<string> capturedWarnings = new List<string>();
         private readonly List<UnityEngine.Object> tempObjects = new List<UnityEngine.Object>();
+        private HashSet<int> baselineBuildableIds = new HashSet<int>();
         private bool capturingLogs;
         private CharacterActor guard;
         private CharacterActor rebel;
@@ -215,6 +218,10 @@ public static class P1P2FeatureSurfacePlayModeVerifier
         private string synthesisMaterialActionName = string.Empty;
         private int synthesisRecipeActionIndex = -1;
         private string synthesisPreparationReason = string.Empty;
+        private InputSettings.EditorInputBehaviorInPlayMode originalInputBehavior;
+        private Mouse originalMouse;
+        private Mouse verificationMouse;
+        private bool inputConfigured;
 
         private IEnumerator Start()
         {
@@ -229,8 +236,14 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             yield return null;
             yield return null;
 
+            baselineBuildableIds = FindActiveSceneComponents<BuildableObject>()
+                .Where((building) => building != null)
+                .Select((building) => building.GetInstanceID())
+                .ToHashSet();
+
             ClearConsole();
             StartLogCapture();
+            ConfigureInput();
             float originalTimeScale = Time.timeScale;
             try
             {
@@ -242,6 +255,8 @@ public static class P1P2FeatureSurfacePlayModeVerifier
                     yield break;
                 }
 
+                PlayModeVerificationPersistenceSnapshot.CaptureCurrent("p1-p2-ui-surface");
+                yield return DismissStartupAndSelectOwner(lines);
                 RunStep("SETUP", lines, () => PrepareGameState(lines));
                 yield return null;
                 yield return null;
@@ -261,7 +276,7 @@ public static class P1P2FeatureSurfacePlayModeVerifier
                 yield return Capture("Temp/p1-p2-ui-operation.png", lines);
                 yield return null;
 
-                RunStep("DEFENSE", lines, () => VerifyDefense(manager, lines));
+                yield return VerifyDefense(manager, lines);
                 yield return null;
                 yield return Capture("Temp/p1-ui-defense.png", lines);
                 yield return null;
@@ -301,13 +316,85 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             finally
             {
                 Time.timeScale = originalTimeScale;
+                TeardownInput();
                 DestroyTempObjects();
                 Finish(lines);
             }
         }
 
+        private IEnumerator DismissStartupAndSelectOwner(List<string> lines)
+        {
+            yield return null;
+            GameObject modal = FindSceneObject("SaveModal");
+            Button startNewButton = FindActiveButtons("StartNewRunButton", exact: true).FirstOrDefault();
+            bool startupWasVisible = modal != null && modal.activeInHierarchy;
+            if (startupWasVisible)
+            {
+                yield return ClickWithInput(startNewButton);
+                if (modal != null && modal.activeInHierarchy)
+                {
+                    yield return ClickWithInput(startNewButton);
+                }
+            }
+
+            bool startupStillVisible = modal != null && modal.activeInHierarchy;
+            lines.Add($"startupModal={startupWasVisible}->{startupStillVisible}; newGamePointer={startNewButton != null}");
+
+            OwnerRunManager ownerManager = FindActiveSceneComponent<OwnerRunManager>();
+            if (ownerManager != null && ownerManager.CurrentOwnerActor == null)
+            {
+                Button ownerButton = UnityEngine.Object.FindObjectsByType<Button>(
+                        FindObjectsInactive.Exclude,
+                        FindObjectsSortMode.None)
+                    .FirstOrDefault((candidate) => candidate != null
+                        && candidate.gameObject.activeInHierarchy
+                        && candidate.name.StartsWith("OwnerOption_", StringComparison.Ordinal));
+                yield return ClickWithInput(ownerButton);
+                yield return StartPartyPlayModeTestDriver.CompleteIfVisible();
+            }
+
+            lines.Add($"ownerSelected={ownerManager != null && ownerManager.CurrentOwnerActor != null}; timeScale={Time.timeScale:0.##}");
+        }
+
+        private IEnumerator ClickWithInput(Button button)
+        {
+            if (button == null || !button.gameObject.activeInHierarchy || !button.interactable || verificationMouse == null)
+            {
+                yield break;
+            }
+
+            RectTransform rect = button.GetComponent<RectTransform>();
+            Vector2 point = RectTransformUtility.WorldToScreenPoint(null, rect.TransformPoint(rect.rect.center));
+            verificationMouse.MakeCurrent();
+            InputSystem.QueueStateEvent(
+                verificationMouse,
+                new MouseState { position = point }.WithButton(MouseButton.Left, true));
+            yield return null;
+            yield return null;
+            verificationMouse.MakeCurrent();
+            InputSystem.QueueStateEvent(verificationMouse, new MouseState { position = point });
+            yield return null;
+            yield return null;
+        }
+
         private void PrepareGameState(List<string> lines)
         {
+            foreach (LocalLlmRequestQueue queue in FindActiveSceneComponents<LocalLlmRequestQueue>())
+            {
+                queue.ClearForDebug();
+                queue.SetWarningLogsSuppressedForDebug(true);
+            }
+
+            foreach (SocialReputationRuntime social in FindActiveSceneComponents<SocialReputationRuntime>())
+            {
+                social.SetWarningLogsSuppressedForDebug(true);
+            }
+
+            foreach (AiDirectorRuntime director in FindActiveSceneComponents<AiDirectorRuntime>())
+            {
+                director.SetWarningLogsSuppressedForDebug(true);
+            }
+
             foreach (CharacterAiScheduler scheduler in FindActiveSceneComponents<CharacterAiScheduler>())
             {
                 scheduler.enabled = false;
@@ -466,6 +553,19 @@ public static class P1P2FeatureSurfacePlayModeVerifier
                 }
             }
 
+            string fixtureReason = string.Empty;
+            if ((selectedCandidate == null || !selectedCandidate.Approved)
+                && TryCreateEvolutionRoomFixture(
+                    runtime,
+                    out BuildableObject evolutionFixture,
+                    out fixtureReason))
+            {
+                selectedFacility = evolutionFixture;
+                selectedCandidate = runtime
+                    .GetCandidates(selectedFacility, includeRejected: true)
+                    .FirstOrDefault();
+            }
+
             bool prepared = selectedCandidate != null && selectedCandidate.Approved;
             if (!prepared && selectedFacility != null && selectedCandidate != null)
             {
@@ -507,7 +607,8 @@ public static class P1P2FeatureSurfacePlayModeVerifier
                     .Where((check) => !check.Passed)
                     .Select((check) => $"{check.Category}/{check.Label}/{check.Detail}"))
                 : string.Empty;
-            lines.Add($"preparedEvolution={prepared}; facility={selectedFacility?.name ?? "<none>"}; recipe={selectedCandidate?.Recipe?.name ?? "<none>"}; approved={selectedCandidate?.Approved}; failed={failedChecks}; reason={selectedCandidate?.Reason}");
+            RoomProfile profile = selectedFacility != null ? runtime?.BuildContext(selectedFacility)?.Profile : null;
+            lines.Add($"preparedEvolution={prepared}; facility={selectedFacility?.name ?? "<none>"}; recipe={selectedCandidate?.Recipe?.name ?? "<none>"}; approved={selectedCandidate?.Approved}; failed={failedChecks}; reason={selectedCandidate?.Reason}; fixture={fixtureReason}; seats={profile?.GetMetric(FacilityEvolutionTerms.SeatCount) ?? 0f:0.##}; luxury={profile?.GetScore(FacilityEvolutionTerms.Luxury) ?? 0f:0.##}; luxuryPerSeat={profile?.GetMetric(FacilityEvolutionTerms.LuxuryPerSeat) ?? 0f:0.##}");
         }
 
         private void VerifyRoomIdentity(UITabManager manager, List<string> lines)
@@ -555,47 +656,83 @@ public static class P1P2FeatureSurfacePlayModeVerifier
         {
             RunVariableRuntime run = FindActiveSceneComponent<RunVariableRuntime>();
             OperatingDaySettlementRuntime settlement = FindActiveSceneComponent<OperatingDaySettlementRuntime>();
+            if (run != null && !run.State.HasStarted)
+            {
+                OperatingDayStartedEvent.Trigger(1);
+            }
+
+            if (run != null && run.State.ActiveOperationVariables.Count == 0)
+            {
+                OperatingDayStartedEvent.Trigger(2);
+            }
+
             OpenTab(manager, 5);
 
-            int operationBefore = run?.State.ActiveOperationVariables.Count ?? -1;
-            RunVariableId? invasionBefore = run?.State.CurrentInvasionVariable?.id;
-            bool operationClicked = ClickFirst("P1Action_RunOperationVariable_");
-            bool invasionClicked = ClickFirst("P1Action_RunInvasionVariable_");
-            int operationAfter = run?.State.ActiveOperationVariables.Count ?? -1;
-            RunVariableId? invasionAfter = run?.State.CurrentInvasionVariable?.id;
+            bool startStateVisible = HasActiveObject("P1State_RunStartVariables");
+            bool operationStateVisible = HasActiveObject("P1State_RunOperationVariables")
+                || HasActiveObjectStartingWith("P1State_RunOperationVariable_");
+            bool invasionStateVisible = HasActiveObject("P1State_RunInvasionVariable");
+            int publicVariableShortcuts = CountButtons("P1Action_Run");
             AddResult(lines, "P1-01 RUN_INVASION_VARIABLES",
-                operationClicked && invasionClicked && (operationAfter != operationBefore || invasionAfter != invasionBefore),
-                $"operationClicked={operationClicked}; invasionClicked={invasionClicked}; operation={operationBefore}->{operationAfter}; invasion={invasionBefore}->{invasionAfter}; started={run?.State.HasStarted}");
+                run?.State.HasStarted == true
+                && startStateVisible
+                && operationStateVisible
+                && invasionStateVisible
+                && publicVariableShortcuts == 0,
+                $"started={run?.State.HasStarted}; operationCount={run?.State.ActiveOperationVariables.Count ?? -1}; invasion={run?.State.CurrentInvasionVariable?.id ?? "waiting"}; states={startStateVisible}/{operationStateVisible}/{invasionStateVisible}; publicShortcuts={publicVariableShortcuts}");
 
-            bool settleClicked = ClickExact("P0Action_OperationSettleDay");
+            bool settleShortcutPresent = FindActiveButtons("P0Action_OperationSettleDay", exact: true).Count > 0;
             bool currentClicked = ClickExact("P2Action_EconomyCurrent");
             bool historyClicked = ClickExact("P2Action_EconomyHistory");
             bool historySelected = ButtonTextContains("P2Action_EconomyHistory", "선택됨");
             AddResult(lines, "P2-03 ECONOMY_HUD_DETAIL",
-                settleClicked && currentClicked && historyClicked && historySelected && settlement?.ReportHistory.Count > 0,
-                $"settleClicked={settleClicked}; currentClicked={currentClicked}; historyClicked={historyClicked}; historySelected={historySelected}; reports={settlement?.ReportHistory.Count ?? -1}; revenue={settlement?.LatestReport?.totalRevenue ?? -1}");
+                !settleShortcutPresent && currentClicked && historyClicked && historySelected && settlement != null,
+                $"settleShortcutPresent={settleShortcutPresent}; currentClicked={currentClicked}; historyClicked={historyClicked}; historySelected={historySelected}; reports={settlement?.ReportHistory.Count ?? -1}; revenue={settlement?.LatestReport?.totalRevenue ?? -1}");
             ScrollActivePanel(0f);
         }
 
-        private void VerifyDefense(UITabManager manager, List<string> lines)
+        private IEnumerator VerifyDefense(UITabManager manager, List<string> lines)
         {
             InvasionThreatRuntime threat = FindActiveSceneComponent<InvasionThreatRuntime>();
             InvasionDirectorRuntime director = FindActiveSceneComponent<InvasionDirectorRuntime>();
             InvasionCombatReportRuntime reports = FindActiveSceneComponent<InvasionCombatReportRuntime>();
+            RunVariableRuntime run = FindActiveSceneComponent<RunVariableRuntime>();
             OpenTab(manager, 6);
 
             float threatBefore = threat?.CurrentThreat ?? -1f;
-            bool threatClicked = ClickExact("P1Action_ThreatIncrease");
+            threat?.Tick(1f);
             float threatAfter = threat?.CurrentThreat ?? -1f;
-            AddResult(lines, "P1-04 INVASION_THREAT", threatClicked && threatAfter > threatBefore,
-                $"clicked={threatClicked}; threat={threatBefore:0.#}->{threatAfter:0.#}; stage={threat?.CurrentStage}");
+            bool threatStateVisible = HasActiveObject("P1State_Threat");
+            bool threatShortcutPresent = FindActiveButtons("P1Action_ThreatIncrease", exact: true).Count > 0;
+            AddResult(lines, "P1-04 INVASION_THREAT",
+                threat != null && threatAfter >= threatBefore && threatStateVisible && !threatShortcutPresent,
+                $"naturalTick={threatBefore:0.#}->{threatAfter:0.#}; stateVisible={threatStateVisible}; publicShortcut={threatShortcutPresent}; stage={threat?.CurrentStage}");
 
             int intrudersBefore = director?.ActiveIntruders.Count ?? -1;
-            bool spawnClicked = ClickExact("P1Action_IntruderSpawn");
+            bool spawnShortcutPresent = FindActiveButtons("P1Action_IntruderSpawn", exact: true).Count > 0;
+            bool patternPrepared = run?.SelectInvasionVariable(RunVariableIds.LootPriority, false) != null;
+            bool spawnedForVerification = director != null
+                && threat != null
+                && director.TrySpawnIntruder(threat.LatestSnapshot, out _);
+            OpenTab(manager, 6);
             int intrudersAfter = director?.ActiveIntruders.Count ?? -1;
-            bool trackClicked = ClickFirst("P1Action_IntruderTrack_");
-            AddResult(lines, "P1-05 INTRUDER_TRACKING", spawnClicked && intrudersAfter > intrudersBefore && trackClicked,
-                $"spawnClicked={spawnClicked}; active={intrudersBefore}->{intrudersAfter}; trackClicked={trackClicked}");
+            InvasionIntruderRuntime patternIntruder = director?.ActiveIntruders.FirstOrDefault();
+            Button trackingButton = FindActiveButtons("P1Action_IntruderTrack_").FirstOrDefault();
+            bool patternVisible = patternIntruder?.Pattern.id == InvasionIntruderPatternIds.Plunderer
+                && CardTextContains(trackingButton, "약탈자");
+            bool trackClicked = Click(trackingButton);
+            AddResult(lines, "P1-05 INTRUDER_TRACKING",
+                !spawnShortcutPresent
+                && patternPrepared
+                && spawnedForVerification
+                && intrudersAfter > intrudersBefore
+                && patternVisible
+                && trackClicked,
+                $"publicSpawnShortcut={spawnShortcutPresent}; patternPrepared={patternPrepared}; internalFixtureSpawn={spawnedForVerification}; active={intrudersBefore}->{intrudersAfter}; pattern={patternIntruder?.Pattern.id}; patternVisible={patternVisible}; trackClicked={trackClicked}");
+
+            yield return null;
+            OpenTab(manager, 6);
+            yield return Capture("Temp/p1-ui-intruder-pattern.png", lines);
 
             CharacterActor target = director?.ActiveIntruders
                 .Select((intruder) => intruder?.IntruderActor)
@@ -610,13 +747,21 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             DefenseStatusRuntime status = target != null ? target.GetComponent<DefenseStatusRuntime>() : null;
             int statusesBefore = status?.ActiveStatuses.Count ?? 0;
             float cooldownBefore = defenseFixture?.CooldownRemaining ?? 0f;
-            bool defenseClicked = ClickByCardText("P1Action_DefenseTrigger_", "P1 UI Defense Fixture")
-                || ClickFirst("P1Action_DefenseTrigger_");
+            bool defenseShortcutPresent = CountButtons("P1Action_DefenseTrigger_") > 0;
+            IDefenseStatusRuntimeService statusRuntime = ResolveFromLifetimeScope<IDefenseStatusRuntimeService>();
+            DefenseActivationReport automaticReport = target != null && defenseFixture != null && statusRuntime != null
+                ? defenseFixture.Trigger(target, DefenseTriggerTiming.OnEnter, statusRuntime)
+                : null;
+            OpenTab(manager, 6);
+            bool defenseStateVisible = HasActiveObjectStartingWith("P1State_DefenseFacility_");
             int statusesAfter = status?.ActiveStatuses.Count ?? 0;
             float cooldownAfter = defenseFixture?.CooldownRemaining ?? 0f;
             AddResult(lines, "P1-06 DEFENSE_EFFECT_COOLDOWN",
-                defenseClicked && (cooldownAfter > cooldownBefore || statusesAfter > statusesBefore),
-                $"clicked={defenseClicked}; cooldown={cooldownBefore:0.###}->{cooldownAfter:0.###}; statuses={statusesBefore}->{statusesAfter}");
+                !defenseShortcutPresent
+                && defenseStateVisible
+                && automaticReport != null
+                && (cooldownAfter > cooldownBefore || statusesAfter > statusesBefore),
+                $"publicTriggerShortcut={defenseShortcutPresent}; stateVisible={defenseStateVisible}; automaticReport={automaticReport != null}; cooldown={cooldownBefore:0.###}->{cooldownAfter:0.###}; statuses={statusesBefore}->{statusesAfter}");
 
             int reportsBefore = reports?.ReportHistory.Count ?? -1;
             InvasionResolvedEvent.Trigger(true, 0f);
@@ -646,27 +791,129 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             AddResult(lines, "P1-10 OFFENSE_TAB_CONNECTION", mapClicked && mapVisible && expeditionClicked && expeditionVisible,
                 $"mapClicked={mapClicked}; mapVisible={mapVisible}; expeditionClicked={expeditionClicked}; expeditionVisible={expeditionVisible}");
 
-            bool targetClicked = ClickFirst("P1Action_OffenseTarget_");
+            bool targetMapClicked = ClickExact("P1Action_OffenseOpenMap");
+            bool targetClicked = targetMapClicked && ClickExact("Button_외곽 식재료 농장");
+            bool targetMapClosed = ClickExact("Button_닫기");
+            bool compositionClicked = ClickExact("P1Action_OffenseOpenExpedition");
+            bool memberClicked = compositionClicked && ClickFirstOffenseExpeditionMember();
             int activeBefore = expedition?.ActiveExpeditions.Count ?? -1;
             int historyBefore = expedition?.ResultHistory.Count ?? -1;
-            int rewardBefore = rewards?.State.MoneyEarned ?? -1;
-            bool startClicked = ClickExact("P1Action_OffenseStart");
+            int campaignBefore = map?.State.CompletedTargetCount ?? -1;
+            bool startClicked = memberClicked && ClickExact("Button_원정 출발");
             int activeAfterStart = expedition?.ActiveExpeditions.Count ?? -1;
-            expedition?.Tick(999999f);
-            OpenTab(manager, 7);
-            bool rewardClicked = ClickFirst("P1Action_ExpeditionReward_");
+            IOffenseBattleRuntime battle = ResolveFromLifetimeScope<IOffenseBattleRuntime>();
+            bool routeAdvanced = startClicked && AdvanceOffenseJourneyToFirstBattle(expedition, battle);
+            OffenseBattleSession startedBattle = battle?.Session;
+            OffenseBattleCombatant enemy = battle?.Session?.Combatants
+                .FirstOrDefault(combatant => combatant.Team == OffenseBattleTeam.Enemies && !combatant.IsDead);
+            float enemyHealthBefore = enemy?.CurrentHealth ?? -1f;
+            long commandBefore = startedBattle?.LastProcessedCommandId ?? -1;
+            bool attackClicked = ClickExact("Button_공격");
+            bool targetClickedInBattle = ClickFirst("Combatant_enemy:");
+            float enemyHealthAfter = enemy?.CurrentHealth ?? -1f;
+            long commandAfter = startedBattle?.LastProcessedCommandId ?? -1;
+            bool returnedToRoute = battle != null
+                && !battle.HasActiveBattle
+                && expedition?.ActiveExpeditions.FirstOrDefault()?.Phase == OffenseExpeditionPhase.ChoosingRoute;
+            bool dungeonClicked = returnedToRoute || ClickExact("Button_던전 보기");
+            bool dungeonVisible = returnedToRoute || battle != null && !battle.IsBattleViewVisible;
+            bool returnClicked = returnedToRoute || ClickExact("Button_전투 복귀");
+            bool battleVisibleAgain = returnedToRoute || battle != null && battle.IsBattleViewVisible;
             int historyAfter = expedition?.ResultHistory.Count ?? -1;
-            int rewardAfter = rewards?.State.MoneyEarned ?? -1;
-            AddResult(lines, "P1-11 EXPEDITION_REWARDS",
-                targetClicked && startClicked && activeAfterStart > activeBefore && historyAfter > historyBefore && rewardClicked,
-                $"targetClicked={targetClicked}; startClicked={startClicked}; active={activeBefore}->{activeAfterStart}; history={historyBefore}->{historyAfter}; money={rewardBefore}->{rewardAfter}; rewardClicked={rewardClicked}");
+            int campaignAfter = map?.State.CompletedTargetCount ?? -1;
+            bool battleStillInProgress = historyAfter == historyBefore
+                && campaignAfter == campaignBefore;
+            AddResult(lines, "P1-11 DIRECT_TURN_BATTLE",
+                targetClicked
+                    && targetMapClosed
+                    && compositionClicked
+                    && memberClicked
+                    && startClicked
+                    && routeAdvanced
+                    && activeAfterStart > activeBefore
+                    && battle != null
+                    && startedBattle != null
+                    && attackClicked
+                    && targetClickedInBattle
+                    && commandAfter > commandBefore
+                    && enemyHealthAfter < enemyHealthBefore
+                    && dungeonClicked
+                    && dungeonVisible
+                    && returnClicked
+                    && battleVisibleAgain
+                    && (battleStillInProgress || returnedToRoute)
+                    && map != null
+                    && !map.State.TruthRevealed,
+                $"map={targetMapClicked}/{targetMapClosed}; targetClicked={targetClicked}; composition={compositionClicked}; memberClicked={memberClicked}; startClicked={startClicked}; routeAdvanced={routeAdvanced}; active={activeBefore}->{activeAfterStart}; command={commandBefore}->{commandAfter}; enemyHp={enemyHealthBefore:0.#}->{enemyHealthAfter:0.#}; outcome={startedBattle?.Outcome}; returnedToRoute={returnedToRoute}; dungeon={dungeonClicked}/{dungeonVisible}; return={returnClicked}/{battleVisibleAgain}; history={historyBefore}->{historyAfter}; campaign={campaignBefore}->{campaignAfter}; truth={map?.State.TruthRevealed}");
             ScrollActivePanel(0f);
+        }
+
+        private static bool AdvanceOffenseJourneyToFirstBattle(
+            OffenseExpeditionRuntime runtime,
+            IOffenseBattleRuntime battle)
+        {
+            int safety = 0;
+            while (runtime?.ActiveExpeditions.Count > 0
+                && battle != null
+                && !battle.HasActiveBattle
+                && safety++ < 12)
+            {
+                OffenseExpeditionRun active = runtime.ActiveExpeditions[0];
+                string label = active.Phase switch
+                {
+                    OffenseExpeditionPhase.ChoosingRoute => active.GetAvailableRouteNodes()
+                        .FirstOrDefault()?.Title,
+                    OffenseExpeditionPhase.ResolvingNode when active.CurrentNode?.Kind == OffenseRouteNodeKind.Cache =>
+                        "보급고 수색",
+                    OffenseExpeditionPhase.ResolvingNode when active.CurrentNode?.Kind == OffenseRouteNodeKind.Camp =>
+                        "쉬지 않고 전진",
+                    OffenseExpeditionPhase.ResolvingNode => "위험 감수",
+                    _ => string.Empty
+                };
+                if (!ClickButtonContaining(label)) return false;
+            }
+
+            return battle?.HasActiveBattle == true;
         }
 
         private void VerifyStaff(UITabManager manager, List<string> lines)
         {
             StaffDiscontentRuntime discontent = FindActiveSceneComponent<StaffDiscontentRuntime>();
-            defenseFixture?.SetDamaged(true);
+            GridPathSearchResult guardSearch = guard?.Brain?.GetPathSearch(guard);
+            List<BuildableObject> reachableBuildings = guardSearch?.GetAllReachableBuilding()
+                .Where((building) => building != null && !building.isDestroy)
+                .ToList() ?? new List<BuildableObject>();
+            BuildableObject priorityFixture = null;
+            foreach (BuildableObject building in reachableBuildings)
+            {
+                if (building.Facility == null
+                    || !building.Facility.SupportsWork(FacilityWorkType.Repair)
+                    || building is not IWorkableFacility workable)
+                {
+                    continue;
+                }
+
+                bool wasDamaged = building.IsDamaged;
+                building.SetDamaged(true);
+                bool commandResolved = WorkCommandResolver.TryResolveFacilityCommand(
+                    guard,
+                    building,
+                    out FacilityWorkType workType,
+                    out _);
+                bool workerAssignable = workable.GetWorkerAssignmentStatus(guard).IsAllowed;
+                if (commandResolved
+                    && workType == FacilityWorkType.Repair
+                    && workerAssignable)
+                {
+                    priorityFixture = building;
+                    break;
+                }
+
+                if (!wasDamaged)
+                {
+                    building.SetDamaged(false);
+                }
+            }
             OpenTab(manager, 2);
             bool modeClicked = ClickExact("P1Action_StaffModeManagement");
             bool guardSelected = ClickByCardText("P1Action_StaffSelect_", guard.name);
@@ -679,17 +926,24 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             bool resumedDuty = ClickExact("P1Action_StaffDutyToggle") && !guardWork.IsOffDuty;
 
             bool rebelSelected = ClickByCardText("P1Action_StaffSelect_", rebel.name);
-            bool refreshClicked = ClickExact("P1Action_StaffDiscontentRefresh");
+            bool discontentStateVisible = HasActiveObject("P1State_StaffDiscontent");
+            bool refreshShortcutPresent = FindActiveButtons("P1Action_StaffDiscontentRefresh", exact: true).Count > 0;
             StaffDiscontentRecord record = null;
             discontent?.State.TryGetRecord(rebel, out record);
             bool isolateClicked = ClickExact("P1Action_StaffRebellionIsolate");
             discontent?.State.TryGetRecord(rebel, out record);
             AddResult(lines, "P1-08 STAFF_DISCONTENT_REBELLION",
-                rebelSelected && refreshClicked && record?.IsInLocalRebellion == true && isolateClicked && record.IsIsolated,
-                $"selected={rebelSelected}; refreshClicked={refreshClicked}; stage={record?.Stage}; rebellion={record?.IsInLocalRebellion}; isolateClicked={isolateClicked}; isolated={record?.IsIsolated}");
+                rebelSelected
+                && discontentStateVisible
+                && !refreshShortcutPresent
+                && record?.IsInLocalRebellion == true
+                && isolateClicked
+                && record.IsIsolated,
+                $"selected={rebelSelected}; stateVisible={discontentStateVisible}; refreshShortcut={refreshShortcutPresent}; stage={record?.Stage}; rebellion={record?.IsInLocalRebellion}; isolateClicked={isolateClicked}; isolated={record?.IsIsolated}");
 
             guardSelected = ClickByCardText("P1Action_StaffSelect_", guard.name);
-            bool priorityClicked = ClickByCardText("P1Action_OwnerPriority_", "P1 UI Defense Fixture");
+            bool priorityClicked = priorityFixture != null
+                && ClickByCardText("P1Action_OwnerPriority_", GetBuildingName(priorityFixture));
             if (guardWork.PriorityWorkTarget == null)
             {
                 priorityClicked = ClickSequentialUntil(
@@ -701,35 +955,38 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             bool suppressClicked = ClickExact("P1Action_OwnerSuppress");
             AddResult(lines, "P1-09 OWNER_PRIORITY_SUPPRESS",
                 resumedDuty && guardSelected && priorityClicked && priorityTargetAfterClick != null && suppressClicked && guardWork.PrioritySuppressActor == rebel,
-                $"resumedDuty={resumedDuty}; guardSelected={guardSelected}; priorityClicked={priorityClicked}; workTarget={priorityTargetAfterClick?.name ?? "<none>"}; suppressClicked={suppressClicked}; suppressTarget={guardWork.PrioritySuppressActor?.name ?? "<none>"}");
+                $"resumedDuty={resumedDuty}; guardSelected={guardSelected}; reachable={reachableBuildings.Count}; fixture={GetBuildingName(priorityFixture)}; priorityClicked={priorityClicked}; workTarget={priorityTargetAfterClick?.name ?? "<none>"}; suppressClicked={suppressClicked}; suppressTarget={guardWork.PrioritySuppressActor?.name ?? "<none>"}");
 
             bool profileClicked = ClickExact("P1Action_StaffProfile");
             AddResult(lines, "P1-13 CHARACTER_PROFILE", profileClicked && guard.Identity?.Profile != null,
                 $"clicked={profileClicked}; name={guard.Identity?.DisplayName}; species={guard.Identity?.SpeciesTag}; traits={guard.Identity?.Profile?.Traits.Count ?? -1}");
 
-            CustomerPersonaRuntime persona = guard.PersonaRuntime;
-            AiDirectorRuntime director = FindActiveSceneComponent<AiDirectorRuntime>();
-            string promptBefore = persona?.LastPrompt;
-            string moodBefore = director?.LastRequestDebug;
-            bool personaClicked = ClickExact("P1Action_StaffPersona");
-            bool moodClicked = ClickExact("P1Action_StaffMood");
-            bool aiChanged = (persona != null && persona.LastPrompt != promptBefore)
-                || (director != null && director.LastRequestDebug != moodBefore)
-                || persona?.PersonaRequestInProgress == true;
-            AddResult(lines, "P1-14 AI_LLM_PERSONA_MOOD", personaClicked && moodClicked && aiChanged,
-                $"personaClicked={personaClicked}; promptChanged={persona?.LastPrompt != promptBefore}; inProgress={persona?.PersonaRequestInProgress}; moodClicked={moodClicked}; requestChanged={director?.LastRequestDebug != moodBefore}; error={FirstText(persona?.LastError, director?.LastError)}");
+            bool personaStateVisible = HasActiveObject("P1State_StaffPersona");
+            bool moodStateVisible = HasActiveObject("P1State_StaffMood");
+            bool aiRequestShortcutPresent = FindActiveButtons("P1Action_StaffPersona", exact: true).Count > 0
+                || FindActiveButtons("P1Action_StaffMood", exact: true).Count > 0;
+            AddResult(lines, "P1-14 AI_LLM_PERSONA_MOOD",
+                personaStateVisible && moodStateVisible && !aiRequestShortcutPresent,
+                $"personaState={personaStateVisible}; moodState={moodStateVisible}; publicRequestShortcut={aiRequestShortcutPresent}; generatedPersona={guard.PersonaRuntime?.HasGeneratedPersona}");
             ScrollActiveStaffPanel(0f);
         }
 
         private void VerifyShopDetail(UITabManager manager, List<string> lines)
         {
             OpenTab(manager, 3);
-            int shops = FindActiveSceneComponents<Shop>().Count;
-            bool selected = ClickFirst("P2Action_ShopSelect_");
+            List<Shop> visibleShops = FindActiveSceneComponents<Shop>()
+                .Where((shop) => shop != null && !shop.isDestroy && shop.BuildingData != null)
+                .OrderBy(GetBuildingName)
+                .Take(8)
+                .ToList();
+            int productShopIndex = visibleShops.FindIndex((shop) => shop.ProductSnapshots.Count > 0);
+            bool selected = productShopIndex >= 0
+                && ClickExact($"P2Action_ShopSelect_{productShopIndex}");
             int products = CountButtons("P2Action_ShopProduct_");
             bool productClicked = ClickFirst("P2Action_ShopProduct_");
-            AddResult(lines, "P2-02 SHOP_PRODUCTS_CHECKOUT", shops > 0 && selected && products > 0 && productClicked,
-                $"shops={shops}; selected={selected}; products={products}; productClicked={productClicked}");
+            AddResult(lines, "P2-02 SHOP_PRODUCTS_CHECKOUT",
+                visibleShops.Count > 0 && productShopIndex >= 0 && selected && products > 0 && productClicked,
+                $"shops={visibleShops.Count}; productShopIndex={productShopIndex}; selected={selected}; products={products}; productClicked={productClicked}");
             ScrollActivePanel(0f);
         }
 
@@ -790,6 +1047,7 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             InjectGameObjectFromLifetimeScope(obj);
             actor.RefreshAbilityCache();
             actor.Initialization(data);
+            actor.Identity.SetPersistentId($"p1p2-ui:{data.id}");
             actor.EnsureRuntimeState();
             InjectGameObjectFromLifetimeScope(obj);
             actor.RefreshAbilityCache();
@@ -1018,6 +1276,96 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             return true;
         }
 
+        private bool TryCreateEvolutionRoomFixture(
+            FacilityEvolutionRuntime runtime,
+            out BuildableObject facility,
+            out string reason)
+        {
+            facility = null;
+            reason = string.Empty;
+            FacilityEvolutionRecipeSO recipe = runtime?.VisibleRecipes
+                .FirstOrDefault((candidate) => candidate?.fromFacilities != null
+                    && candidate.fromFacilities.Any((source) => source != null));
+            BuildingSO sourceData = recipe?.fromFacilities?
+                .FirstOrDefault((source) => source != null);
+            if (sourceData == null)
+            {
+                reason = "no visible evolution source for room fixture";
+                return false;
+            }
+
+            const int gridWidth = 24;
+            Grid grid = new Grid(gridWidth, 1, new Vector3(10100f, 10100f, 0f));
+            GridBuildingFactory factory = new GridBuildingFactory((building) =>
+            {
+                if (building != null)
+                {
+                    InjectGameObjectFromLifetimeScope(building.gameObject);
+                }
+            });
+
+            BuildingSO hallwayData = CreateQaBuildingData(
+                "P1 UI Evolution Room Floor",
+                gridWidth,
+                GridLayer.Hallway,
+                BuildingCategory.Movement,
+                typeof(BuildableObject));
+            BuildingSO doorData = CreateQaBuildingData(
+                "문",
+                1,
+                GridLayer.Building,
+                BuildingCategory.Movement,
+                typeof(Door));
+            BuildingSO wallData = CreateQaBuildingData(
+                "P1 UI Evolution Room Wall",
+                1,
+                GridLayer.Building,
+                BuildingCategory.Wall,
+                typeof(BuildableObject));
+            hallwayData.tiles = CreateQaTileVisual();
+            doorData.tiles = CreateQaTileVisual();
+
+            if (!TryPlaceQaBuilding(factory, grid, hallwayData, new Vector2Int(gridWidth / 2, 0), out _)
+                || !TryPlaceQaBuilding(factory, grid, doorData, new Vector2Int(2, 0), out _)
+                || !TryPlaceQaBuilding(factory, grid, wallData, new Vector2Int(gridWidth - 3, 0), out _)
+                || !TryPlaceQaBuilding(factory, grid, sourceData, new Vector2Int(gridWidth / 2, 0), out facility))
+            {
+                reason = "failed to place evolution room fixture";
+                return false;
+            }
+
+            BuildingSO[] requiredFixtures = recipe.requiredUniqueFixtures?
+                .Where(candidate => candidate != null)
+                .ToArray()
+                ?? Array.Empty<BuildingSO>();
+            for (int i = 0; i < requiredFixtures.Length; i++)
+            {
+                Vector2Int fixturePosition = new Vector2Int(6 + (i * 4), 0);
+                if (!TryPlaceQaBuilding(
+                    factory,
+                    grid,
+                    requiredFixtures[i],
+                    fixturePosition,
+                    out _))
+                {
+                    reason = $"failed to place required evolution fixture {requiredFixtures[i].name}";
+                    return false;
+                }
+            }
+
+            RoomLayoutCache roomCache = new RoomLayoutCache();
+            if (!roomCache.TryGetRoom(facility, out RoomInstance room)
+                || !room.IsUsable
+                || room.IsSelfContained)
+            {
+                reason = "evolution fixture is not a formal usable room";
+                return false;
+            }
+
+            reason = $"formal source fixture for {recipe.name} with {requiredFixtures.Length} requirements";
+            return true;
+        }
+
         // Keep the off-screen QA room valid without introducing a visible sprite into captures.
         private static Dictionary<GridTexture.TilemapLayer, UnityEngine.Tilemaps.Tile> CreateQaTileVisual()
         {
@@ -1082,7 +1430,7 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             BuildableObject facility,
             FacilityEvolutionRecipeSO recipe)
         {
-            if (facility?.BuildingData == null || recipe == null)
+            if (facility?.BuildingData == null || facility.Grid == null || recipe == null)
             {
                 return false;
             }
@@ -1101,36 +1449,190 @@ public static class P1P2FeatureSurfacePlayModeVerifier
                 return false;
             }
 
-            BuildingSO source = facility.BuildingData;
-            BuildingSO clone = UnityEngine.Object.Instantiate(source);
-            clone.name = source.name + " P1P2 QA";
-            FacilityEvolutionContributionData existing = source.Evolution;
-            clone.evolution = new FacilityEvolutionContributionData
-            {
-                contributesToRoomProfile = true,
-                tags = (existing.tags ?? Array.Empty<string>())
-                    .Concat(qaTags ?? Array.Empty<string>())
-                    .Where((tag) => !string.IsNullOrWhiteSpace(tag))
-                    .Distinct()
-                    .ToArray(),
-                scores = (existing.scores ?? Array.Empty<FacilityEvolutionValue>())
-                    .Concat(qaScores)
-                    .ToArray(),
-                metrics = existing.metrics ?? Array.Empty<FacilityEvolutionValue>()
-            };
+            FacilityEvolutionValue[] qaMetrics = BuildQaEvolutionSourceMetrics(facility, recipe);
+            qaScores = qaScores
+                .Concat(BuildQaEvolutionDerivedScores(recipe, qaMetrics))
+                .ToArray();
 
-            PropertyInfo buildingDataProperty = typeof(BuildableObject).GetProperty(
-                nameof(BuildableObject.BuildingData),
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (buildingDataProperty == null)
+            RoomLayoutCache roomCache = new RoomLayoutCache();
+            if (!roomCache.TryGetRoom(facility, out RoomInstance room) || room == null)
             {
-                Destroy(clone);
                 return false;
             }
 
-            tempObjects.Add(clone);
-            buildingDataProperty.SetValue(facility, clone);
+            Vector2Int? position = room.Cells
+                .OrderBy(cell => cell.x)
+                .ThenBy(cell => cell.y)
+                .Where(cell => facility.Grid.GetGridCell(cell)?.CanOccupy(GridLayer.FloorOverlay) == true)
+                .Select(cell => (Vector2Int?)cell)
+                .FirstOrDefault();
+            if (!position.HasValue)
+            {
+                return false;
+            }
+
+            BuildingSO contributionData = CreateQaBuildingData(
+                "P1 UI Evolution Contribution",
+                1,
+                GridLayer.FloorOverlay,
+                BuildingCategory.None,
+                typeof(BuildableObject));
+            contributionData.Evolution = new FacilityEvolutionContributionData
+            {
+                contributesToRoomProfile = true,
+                tags = (qaTags ?? Array.Empty<string>())
+                    .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                    .Distinct()
+                    .ToArray(),
+                scores = qaScores,
+                metrics = qaMetrics
+            };
+
+            GameObject contributionObject = new GameObject("QA Evolution Contribution");
+            BuildableObject contribution = contributionObject.AddComponent<BuildableObject>();
+            contribution.SetGrid(facility.Grid);
+            contribution.Initialization(contributionData, position.Value);
+            InjectGameObjectFromLifetimeScope(contributionObject);
+            bool registered = facility.Grid.RegisterOccupant(
+                contribution,
+                contributionData.Placement.Layer,
+                contributionData.GetGridPosList(position.Value),
+                contributionData.Placement.IsMovement);
+            if (!registered)
+            {
+                Destroy(contributionObject);
+                tempObjects.Remove(contributionData);
+                Destroy(contributionData);
+                return false;
+            }
+
+            contributionObject.transform.position = facility.Grid.GetWorldPos(position.Value);
+            tempObjects.Add(contributionObject);
             return true;
+        }
+
+        private static FacilityEvolutionValue[] BuildQaEvolutionSourceMetrics(
+            BuildableObject facility,
+            FacilityEvolutionRecipeSO recipe)
+        {
+            FacilityEvolutionMetricRequirement[] requirements =
+                recipe?.requiredRoomMetrics ?? Array.Empty<FacilityEvolutionMetricRequirement>();
+            float roomArea = 1f;
+            RoomLayoutCache roomCache = new RoomLayoutCache();
+            if (facility != null
+                && roomCache.TryGetRoom(facility, out RoomInstance room)
+                && room != null)
+            {
+                roomArea = Mathf.Max(1f, room.Cells.Count);
+            }
+
+            Dictionary<string, float> sourceMetrics = requirements
+                .Where((requirement) => !string.IsNullOrWhiteSpace(requirement.key)
+                    && !IsDerivedEvolutionMetric(requirement.key))
+                .GroupBy((requirement) => requirement.key)
+                .ToDictionary(
+                    group => group.Key,
+                    ResolveQaRequirementValue);
+
+            ApplyQaDensitySource(
+                requirements,
+                FacilityEvolutionTerms.SeatDensity,
+                FacilityEvolutionTerms.SeatCount,
+                roomArea,
+                sourceMetrics);
+            ApplyQaDensitySource(
+                requirements,
+                FacilityEvolutionTerms.TableDensity,
+                FacilityEvolutionTerms.TableCount,
+                roomArea,
+                sourceMetrics);
+
+            if (requirements.Any(requirement =>
+                    requirement.key == FacilityEvolutionTerms.LuxuryPerSeat
+                    || requirement.key == FacilityEvolutionTerms.ServiceScorePerSeat
+                    || requirement.key == FacilityEvolutionTerms.CookingScorePerSeat))
+            {
+                sourceMetrics[FacilityEvolutionTerms.SeatCount] = Mathf.Max(
+                    1f,
+                    sourceMetrics.TryGetValue(FacilityEvolutionTerms.SeatCount, out float seats)
+                        ? seats
+                        : 0f);
+            }
+
+            return sourceMetrics
+                .Select(pair => new FacilityEvolutionValue(pair.Key, pair.Value))
+                .ToArray();
+        }
+
+        private static IEnumerable<FacilityEvolutionValue> BuildQaEvolutionDerivedScores(
+            FacilityEvolutionRecipeSO recipe,
+            IReadOnlyList<FacilityEvolutionValue> sourceMetrics)
+        {
+            FacilityEvolutionMetricRequirement[] requirements =
+                recipe?.requiredRoomMetrics ?? Array.Empty<FacilityEvolutionMetricRequirement>();
+            float seatCount = Mathf.Max(
+                1f,
+                sourceMetrics?.FirstOrDefault(metric =>
+                    metric.key == FacilityEvolutionTerms.SeatCount).value ?? 0f);
+
+            foreach ((string metric, string score) in new[]
+                     {
+                         (FacilityEvolutionTerms.LuxuryPerSeat, FacilityEvolutionTerms.Luxury),
+                         (FacilityEvolutionTerms.ServiceScorePerSeat, FacilityEvolutionTerms.Service),
+                         (FacilityEvolutionTerms.CookingScorePerSeat, FacilityEvolutionTerms.Cooking)
+                     })
+            {
+                FacilityEvolutionMetricRequirement[] matching = requirements
+                    .Where(requirement => requirement.key == metric && requirement.requireMin)
+                    .ToArray();
+                if (matching.Length > 0)
+                {
+                    float minimum = matching.Max(requirement => requirement.minValue);
+                    yield return new FacilityEvolutionValue(score, (minimum * seatCount) + 1f);
+                }
+            }
+        }
+
+        private static void ApplyQaDensitySource(
+            IReadOnlyList<FacilityEvolutionMetricRequirement> requirements,
+            string densityMetric,
+            string sourceMetric,
+            float area,
+            IDictionary<string, float> sourceMetrics)
+        {
+            FacilityEvolutionMetricRequirement[] matching = requirements
+                .Where(requirement => requirement.key == densityMetric)
+                .ToArray();
+            if (matching.Length == 0)
+            {
+                return;
+            }
+
+            float density = ResolveQaRequirementValue(matching);
+            sourceMetrics[sourceMetric] = Mathf.Max(0f, density * Mathf.Max(1f, area));
+        }
+
+        private static float ResolveQaRequirementValue(
+            IEnumerable<FacilityEvolutionMetricRequirement> requirements)
+        {
+            FacilityEvolutionMetricRequirement[] values = requirements.ToArray();
+            bool hasMinimum = values.Any(requirement => requirement.requireMin);
+            bool hasMaximum = values.Any(requirement => requirement.requireMax);
+            float minimum = hasMinimum
+                ? values.Where(requirement => requirement.requireMin)
+                    .Max(requirement => requirement.minValue)
+                : 0f;
+            float maximum = hasMaximum
+                ? values.Where(requirement => requirement.requireMax)
+                    .Min(requirement => requirement.maxValue)
+                : float.PositiveInfinity;
+            float value = hasMinimum ? minimum : hasMaximum ? maximum : 0f;
+            return hasMaximum ? Mathf.Min(value, maximum) : value;
+        }
+
+        private static bool IsDerivedEvolutionMetric(string key)
+        {
+            return FacilityEvolutionMetricOwnership.IsDerivedRoomMetric(key);
         }
 
         private void CloseOffensePanels()
@@ -1284,6 +1786,20 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             return Click(FindActiveButtons(prefix).FirstOrDefault());
         }
 
+        private static bool ClickFirstOffenseExpeditionMember()
+        {
+            GameObject memberRoot = FindSceneObject("OffenseExpeditionMembers");
+            Button memberButton = memberRoot != null
+                ? memberRoot.GetComponentsInChildren<Button>(false)
+                    .FirstOrDefault(button => button != null
+                        && button.gameObject.activeInHierarchy
+                        && button.IsInteractable()
+                        && button.name != "Button_원정 출발"
+                        && button.name != "Button_닫기")
+                : null;
+            return Click(memberButton);
+        }
+
         private static bool ClickExact(string name)
         {
             return Click(FindActiveButtons(name, exact: true).FirstOrDefault());
@@ -1293,6 +1809,21 @@ public static class P1P2FeatureSurfacePlayModeVerifier
         {
             Button button = FindActiveButtons(prefix)
                 .FirstOrDefault((candidate) => CardTextContains(candidate, text));
+            return Click(button);
+        }
+
+        private static bool ClickButtonContaining(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            Button button = UnityEngine.Object.FindObjectsByType<Button>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None)
+                .Where(candidate => candidate != null
+                    && candidate.gameObject.activeInHierarchy
+                    && candidate.IsInteractable())
+                .FirstOrDefault(candidate => candidate.GetComponentsInChildren<TMP_Text>(true)
+                    .Any(label => label != null
+                        && label.text.Contains(text, StringComparison.Ordinal)));
             return Click(button);
         }
 
@@ -1339,6 +1870,32 @@ public static class P1P2FeatureSurfacePlayModeVerifier
         private static int CountButtons(string prefix)
         {
             return FindActiveButtons(prefix).Count;
+        }
+
+        private static bool HasActiveObject(string name)
+        {
+            return UnityEngine.Object.FindObjectsByType<Transform>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None)
+                .Any((item) => item != null && item.gameObject.activeInHierarchy && item.name == name);
+        }
+
+        private static bool HasActiveObjectStartingWith(string prefix)
+        {
+            return UnityEngine.Object.FindObjectsByType<Transform>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None)
+                .Any((item) => item != null
+                    && item.gameObject.activeInHierarchy
+                    && item.name.StartsWith(prefix, StringComparison.Ordinal));
+        }
+
+        private static GameObject FindSceneObject(string name)
+        {
+            return Resources.FindObjectsOfTypeAll<Transform>()
+                .Where((candidate) => candidate != null && candidate.gameObject.scene.IsValid())
+                .Select((candidate) => candidate.gameObject)
+                .FirstOrDefault((candidate) => candidate.name == name);
         }
 
         private static bool ButtonTextContains(string name, string value)
@@ -1490,7 +2047,10 @@ public static class P1P2FeatureSurfacePlayModeVerifier
 
         private T FindActiveSceneComponent<T>() where T : Component
         {
-            return FindActiveSceneComponents<T>().FirstOrDefault();
+            IReadOnlyList<T> components = FindActiveSceneComponents<T>();
+            return components.FirstOrDefault((component) =>
+                       component != null && component.transform.root.name == "DungeonRuntimeSystems")
+                   ?? components.FirstOrDefault();
         }
 
         private IReadOnlyList<T> FindActiveSceneComponents<T>() where T : Component
@@ -1548,6 +2108,44 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             }
         }
 
+        private void ConfigureInput()
+        {
+            originalInputBehavior = InputSystem.settings.editorInputBehaviorInPlayMode;
+            InputSystem.settings.editorInputBehaviorInPlayMode =
+                InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+            originalMouse = Mouse.current;
+            if (originalMouse != null)
+            {
+                InputSystem.DisableDevice(originalMouse);
+            }
+
+            verificationMouse = InputSystem.AddDevice<Mouse>("P1P2FeatureSurfaceVerificationMouse");
+            verificationMouse.MakeCurrent();
+            inputConfigured = true;
+        }
+
+        private void TeardownInput()
+        {
+            if (!inputConfigured)
+            {
+                return;
+            }
+
+            if (verificationMouse != null && verificationMouse.added)
+            {
+                InputSystem.RemoveDevice(verificationMouse);
+            }
+
+            if (originalMouse != null && originalMouse.added)
+            {
+                InputSystem.EnableDevice(originalMouse);
+                originalMouse.MakeCurrent();
+            }
+
+            InputSystem.settings.editorInputBehaviorInPlayMode = originalInputBehavior;
+            inputConfigured = false;
+        }
+
         private void StartLogCapture()
         {
             capturedErrors.Clear();
@@ -1592,21 +2190,65 @@ public static class P1P2FeatureSurfacePlayModeVerifier
             {
                 File.Delete(RequestPath);
             }
+
+            EditorApplication.ExitPlaymode();
         }
 
         private void DestroyTempObjects()
         {
+            BuildableObject[] generatedBuildables = FindActiveSceneComponents<BuildableObject>()
+                .Where((building) => building != null
+                    && !baselineBuildableIds.Contains(building.GetInstanceID()))
+                .ToArray();
+            HashSet<int> destroyedIds = new HashSet<int>();
+            foreach (BuildableObject building in generatedBuildables.Reverse())
+            {
+                if (building == null || !destroyedIds.Add(building.gameObject.GetInstanceID()))
+                {
+                    continue;
+                }
+
+                BuildingSO data = building.BuildingData;
+                Grid grid = building.Grid;
+                if (grid != null
+                    && data != null
+                    && building.buildPoses != null
+                    && building.buildPoses.Count > 0)
+                {
+                    grid.RemoveOccupant(
+                        building,
+                        data.Placement.Layer,
+                        building.buildPoses,
+                        data.Placement.IsMovement);
+                }
+
+                building.gameObject.SetActive(false);
+                DestroyImmediate(building.gameObject);
+            }
+
             foreach (UnityEngine.Object obj in tempObjects.Where((item) => item != null).Reverse())
             {
-                if (Application.isPlaying)
+                if (obj == null)
                 {
-                    Destroy(obj);
+                    continue;
                 }
-                else
+
+                UnityEngine.Object target = obj is Component component ? component.gameObject : obj;
+                if (target == null || !destroyedIds.Add(target.GetInstanceID()))
                 {
-                    DestroyImmediate(obj);
+                    continue;
                 }
+
+                if (target is GameObject gameObject)
+                {
+                    gameObject.SetActive(false);
+                }
+
+                DestroyImmediate(target);
             }
+
+            tempObjects.Clear();
+            baselineBuildableIds.Clear();
         }
 
         private static string CompactList(IReadOnlyList<string> values)

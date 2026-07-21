@@ -118,6 +118,7 @@ public static class OwnerDebugScenarios
         CharacterSO ownerData = LoadOwner("Owner_Vampire");
         GameObject managerObject = new GameObject("Owner Death Scenario Manager");
         OwnerRunManager manager = managerObject.AddComponent<OwnerRunManager>();
+        CharacterAiEditorTestDependencies.Inject(manager);
         manager.SelectOwner(ownerData);
 
         CharacterActor owner = manager.CurrentOwnerActor;
@@ -153,6 +154,7 @@ public static class OwnerDebugScenarios
             "Assets/Resources/SO/Building/P1/P1_ResearchLab.asset");
         GameObject labObject = new GameObject("Research Lab Priority Target");
         Facility lab = labObject.AddComponent<Facility>();
+        CharacterAiEditorTestDependencies.Inject(lab);
         lab.Initialization(labData, Vector2Int.zero);
 
         bool valid = character.TryGetAbility(out AbilityWork work)
@@ -175,6 +177,7 @@ public static class OwnerDebugScenarios
         obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityWork>();
         obj.AddComponent<AIBrain>();
+        CharacterAiEditorTestDependencies.Inject(obj);
         return obj;
     }
 

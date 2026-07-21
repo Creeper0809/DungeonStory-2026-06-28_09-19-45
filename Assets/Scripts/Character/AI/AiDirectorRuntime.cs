@@ -1,6 +1,7 @@
 using System;
-using System.Text;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using Sirenix.OdinInspector;
 using UnityEngine;
 using VContainer;
@@ -73,6 +74,11 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
 
     private void Update()
     {
+        if (contextSceneQuery == null || aiSchedulingService == null || facilityLookup == null)
+        {
+            return;
+        }
+
         if (Time.time < nextEvaluationTime)
         {
             return;
@@ -84,15 +90,15 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
 
     public void EvaluateOneActor()
     {
-        CharacterActor[] actors = RequireContextSceneQuery().Capture().Actors;
-        if (actors.Length == 0)
+        IReadOnlyList<CharacterActor> actors = RequireContextSceneQuery().Capture().Actors;
+        if (actors.Count == 0)
         {
             return;
         }
 
-        for (int i = 0; i < actors.Length; i++)
+        for (int i = 0; i < actors.Count; i++)
         {
-            roundRobinIndex %= actors.Length;
+            roundRobinIndex %= actors.Count;
             CharacterActor actor = actors[roundRobinIndex++];
             if (ShouldRequestMoodImpulse(actor) && RequestMoodImpulse(actor))
             {
@@ -186,11 +192,9 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
         }
 
         return GetMood(actor) <= routineMoodThreshold
-            || GetCondition(actor, CharacterCondition.HUNGER) <= routineNeedThreshold
-            || GetCondition(actor, CharacterCondition.SLEEP) <= routineNeedThreshold
-            || GetCondition(actor, CharacterCondition.FUN) <= routineNeedThreshold
-            || GetCondition(actor, CharacterCondition.EXCRETION) <= routineNeedThreshold
-            || GetCondition(actor, CharacterCondition.HYGIENE) <= routineNeedThreshold;
+            || CharacterNeedCatalog.All.Any((definition) =>
+                definition.HasTag(CharacterNeedTag.DirectorRoutine)
+                && GetCondition(actor, definition.Condition) <= routineNeedThreshold);
     }
 
     private float GetNextRoutineMacroGoalTime(CharacterActor actor)
@@ -254,7 +258,7 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
         if (!queue.GenerateMoodImpulseAsync(prompt, (result) => OnMoodImpulseResult(actor, result)))
         {
             lastError = "Mood impulse request was not accepted by LocalLlmRequestQueue.";
-            LogWarningIfAllowed(lastError);
+            ScheduleNextMoodImpulse(actor);
             return false;
         }
 
@@ -280,7 +284,7 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
         if (!queue.GenerateMacroGoalAsync(prompt, (result) => OnMacroGoalResult(actor, result)))
         {
             lastError = "Macro goal request was not accepted by LocalLlmRequestQueue.";
-            LogWarningIfAllowed(lastError);
+            ScheduleNextRoutineMacroGoal(actor);
             return false;
         }
 
@@ -293,6 +297,12 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
     {
         if (actor == null || actor.Blackboard == null)
         {
+            return;
+        }
+
+        if (result.IsCancelled)
+        {
+            lastError = string.Empty;
             return;
         }
 
@@ -324,6 +334,12 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
     {
         if (actor == null || actor.Blackboard == null)
         {
+            return;
+        }
+
+        if (result.IsCancelled)
+        {
+            lastError = string.Empty;
             return;
         }
 
@@ -605,6 +621,6 @@ public sealed class AiDirectorRuntime : SerializedMonoBehaviour
             return;
         }
 
-        Debug.LogWarning($"{name}: {message}", this);
+        Debug.Log($"{name}: {message}", this);
     }
 }

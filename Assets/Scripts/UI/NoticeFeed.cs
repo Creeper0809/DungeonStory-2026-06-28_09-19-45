@@ -92,11 +92,9 @@ public struct NoticeFeedEvent
         this.notice = notice;
         this.grade = grade;
     }
-    static NoticeFeedEvent e;
+
     public static void Trigger(string notice, Grade grade)
     {
-        e.notice = notice;
-        e.grade = grade;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new NoticeFeedEvent(notice, grade));
     }
 }

@@ -9,12 +9,10 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 85198d4daa4dfb28ab223af0b037f1b6, type: 3}
+  m_Script: {fileID: 11500000, guid: 6d96742e2aa1eab4b8c2d81f5e104583, type: 3}
   m_Name: P1_PoisonPool_2_Corrosion
-  m_EditorClassIdentifier: Assembly-CSharp::DefenseEffectSO
-  effect:
-    kind: 1
-    amount: 0.25
-    duration: 8
-    stacks: 1
-    logTag: "\uBD80\uC2DD"
+  m_EditorClassIdentifier: Assembly-CSharp::DefenseCorrosionEffectSO
+  amount: 0.25
+  duration: 8
+  stacks: 1
+  logTag: "\uBD80\uC2DD"

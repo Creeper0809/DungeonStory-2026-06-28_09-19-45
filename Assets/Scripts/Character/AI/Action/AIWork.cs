@@ -4,6 +4,12 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Work", order = 0)]
 public class AIWork : AIActionSet
 {
+    private static readonly CharacterAiActionDescriptor ActionDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.Work,
+        "작업",
+        CharacterAiActionTags.Work);
+
+    public override CharacterAiActionDescriptor Descriptor => ActionDescriptor;
     [SerializeField] private FacilityWorkType workType = FacilityWorkType.None;
     [SerializeField] private float minimumDuration = 1f;
     [SerializeField] private int workInterruptPriority = 50;
@@ -98,14 +104,14 @@ public class AIWork : AIActionSet
             return true;
         }
 
-        if (destination.TryReserveWorker(actor, out string failureReason))
+        if (destination.TryReserveWorker(actor, out FacilityAssignmentStatus status))
         {
             return true;
         }
 
-        failure = AIActionFailure.FromReason(
-            failureReason,
-            AIActionFailureKind.DestinationOccupied,
+        failure = AIActionFailure.Create(
+            status.FailureKind.ToAiActionFailureKind(),
+            status.Reason,
             destination);
         return false;
     }

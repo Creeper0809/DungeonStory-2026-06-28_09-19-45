@@ -52,30 +52,37 @@ public static class P1DefenseFacilityAssetBuilder
         building.icon = sprite;
         building.width = spec.width;
         building.height = 1;
-        building.layer = GridLayer.Building;
+        building.layer = spec.layer;
         building.category = BuildingCategory.Special;
         building.horizontalDraggable = false;
         building.verticalDraggable = false;
         building.type = typeof(DefenseFacility);
         building.tiles = null;
         building.movementAnchorOffset = Vector2.zero;
-        building.maintenance = 0;
-        building.facility = new FacilityData
+        BuildingEconomyAbility economy = building.GetAbility<BuildingEconomyAbility>();
+        if (economy == null)
+        {
+            economy = new BuildingEconomyAbility();
+            building.AbilityModules.Add(economy);
+        }
+
+        economy.constructionCost = spec.constructionCost;
+        economy.maintenance = spec.maintenance;
+        economy.unlockPhase = 1;
+        economy.demolitionRefundRate = 0.5f;
+        building.Facility = new FacilityData
         {
             roles = FacilityRole.None,
             capacity = 0,
             useDuration = 0f,
-            internalStockMax = 0,
-            restockRequestThreshold = 0,
             requiredWorkers = spec.requiredWorkers,
             supportedWorkTypes = spec.workTypes,
-            preferredSpeciesTags = Array.Empty<string>(),
-            dislikedSpeciesTags = Array.Empty<string>(),
-            disabledWhenDamaged = true,
-            requiresStock = false
+            disabledWhenDamaged = true
         };
-        DefenseEffectSO[] effectAssets = EnsureEffectAssets(spec);
-        building.defense = new DefenseFacilityData
+        DefenseEffectSO[] effectAssets = DefenseEffectAssetBuilder.EnsureEffects(
+            $"{EffectFolder}/{spec.assetName}",
+            spec.effectSpecs);
+        building.Defense = new DefenseFacilityData
         {
             enabled = true,
             concept = spec.concept,
@@ -86,42 +93,10 @@ public static class P1DefenseFacilityAssetBuilder
             range = 0,
             star = 1,
             combatLogText = spec.displayName,
-            effectAssets = effectAssets,
-            effects = spec.effects
+            effectAssets = effectAssets
         };
         building.unlocked = true;
         EditorUtility.SetDirty(building);
-    }
-
-    private static DefenseEffectSO[] EnsureEffectAssets(DefenseAssetSpec spec)
-    {
-        DefenseEffectSO[] result = new DefenseEffectSO[spec.effects.Length];
-        for (int i = 0; i < spec.effects.Length; i++)
-        {
-            DefenseEffectData effect = spec.effects[i];
-            string assetPath = $"{EffectFolder}/{spec.assetName}_{i + 1}_{effect.kind}.asset";
-            DefenseEffectSO effectAsset = AssetDatabase.LoadAssetAtPath<DefenseEffectSO>(assetPath);
-            if (effectAsset == null && System.IO.File.Exists(assetPath))
-            {
-                AssetDatabase.DeleteAsset(assetPath);
-            }
-
-            if (effectAsset == null)
-            {
-                effectAsset = ScriptableObject.CreateInstance<DefenseEffectSO>();
-                AssetDatabase.CreateAsset(effectAsset, assetPath);
-            }
-
-            effectAsset.Kind = effect.kind;
-            effectAsset.Amount = effect.amount;
-            effectAsset.Duration = effect.duration;
-            effectAsset.Stacks = effect.stacks;
-            effectAsset.LogTag = effect.logTag;
-            EditorUtility.SetDirty(effectAsset);
-            result[i] = effectAsset;
-        }
-
-        return result;
     }
 
     private static DefenseAssetSpec[] CreateSpecs()
@@ -134,6 +109,9 @@ public static class P1DefenseFacilityAssetBuilder
                 "1성 가시 함정",
                 "Assets/Images/Placeholders/Defense/defense_spike.png",
                 2,
+                GridLayer.FloorOverlay,
+                80,
+                2,
                 DefenseAttackConcept.Physical,
                 DefenseTriggerTiming.OnEnter,
                 DefenseTargetRule.EnteringIntruder,
@@ -141,13 +119,16 @@ public static class P1DefenseFacilityAssetBuilder
                 0f,
                 FacilityWorkType.Repair,
                 0,
-                new[] { Effect(DefenseEffectKind.Damage, 14f, 0f, 1, "피해") }),
+                new[] { Effect<DefenseDamageEffectSO>(14f, 0f, 1, "피해") }),
             new DefenseAssetSpec(
                 "P1_PoisonPool",
                 31,
                 "1성 독 웅덩이",
                 "Assets/Images/Placeholders/Defense/defense_poison.png",
                 2,
+                GridLayer.FloorOverlay,
+                110,
+                3,
                 DefenseAttackConcept.Poison,
                 DefenseTriggerTiming.OnEnter | DefenseTriggerTiming.Periodic,
                 DefenseTargetRule.EnteringIntruder,
@@ -157,8 +138,8 @@ public static class P1DefenseFacilityAssetBuilder
                 0,
                 new[]
                 {
-                    Effect(DefenseEffectKind.Damage, 6f, 0f, 1, "피해"),
-                    Effect(DefenseEffectKind.Corrosion, 0.25f, 8f, 1, "부식")
+                    Effect<DefenseDamageEffectSO>(6f, 0f, 1, "피해"),
+                    Effect<DefenseCorrosionEffectSO>(0.25f, 8f, 1, "부식")
                 }),
             new DefenseAssetSpec(
                 "P1_FireVent",
@@ -166,6 +147,9 @@ public static class P1DefenseFacilityAssetBuilder
                 "1성 화염 분사구",
                 "Assets/Images/Placeholders/Defense/defense_fire.png",
                 2,
+                GridLayer.FloorOverlay,
+                140,
+                4,
                 DefenseAttackConcept.Fire,
                 DefenseTriggerTiming.OnEnter | DefenseTriggerTiming.Cooldown,
                 DefenseTargetRule.AllIntrudersInRoom,
@@ -175,8 +159,8 @@ public static class P1DefenseFacilityAssetBuilder
                 0,
                 new[]
                 {
-                    Effect(DefenseEffectKind.Damage, 18f, 0f, 1, "피해"),
-                    Effect(DefenseEffectKind.Burn, 2f, 5f, 1, "연소")
+                    Effect<DefenseDamageEffectSO>(18f, 0f, 1, "피해"),
+                    Effect<DefenseBurnEffectSO>(2f, 5f, 1, "연소")
                 }),
             new DefenseAssetSpec(
                 "P1_LightningPillar",
@@ -184,6 +168,9 @@ public static class P1DefenseFacilityAssetBuilder
                 "1성 번개 기둥",
                 "Assets/Images/Placeholders/Defense/defense_lightning.png",
                 2,
+                GridLayer.FloorOverlay,
+                130,
+                4,
                 DefenseAttackConcept.Lightning,
                 DefenseTriggerTiming.OnEnter | DefenseTriggerTiming.Cooldown,
                 DefenseTargetRule.EnteringIntruder,
@@ -193,8 +180,8 @@ public static class P1DefenseFacilityAssetBuilder
                 0,
                 new[]
                 {
-                    Effect(DefenseEffectKind.Damage, 8f, 0f, 1, "피해"),
-                    Effect(DefenseEffectKind.Charge, 10f, 10f, 1, "축전")
+                    Effect<DefenseDamageEffectSO>(8f, 0f, 1, "피해"),
+                    Effect<DefenseChargeEffectSO>(10f, 10f, 1, "축전")
                 }),
             new DefenseAssetSpec(
                 "P1_IceVent",
@@ -202,6 +189,9 @@ public static class P1DefenseFacilityAssetBuilder
                 "1성 냉기 분사구",
                 "Assets/Images/Placeholders/Defense/defense_ice.png",
                 2,
+                GridLayer.FloorOverlay,
+                100,
+                3,
                 DefenseAttackConcept.Ice,
                 DefenseTriggerTiming.OnEnter | DefenseTriggerTiming.Periodic,
                 DefenseTargetRule.AllIntrudersInRoom,
@@ -211,8 +201,8 @@ public static class P1DefenseFacilityAssetBuilder
                 0,
                 new[]
                 {
-                    Effect(DefenseEffectKind.Damage, 5f, 0f, 1, "피해"),
-                    Effect(DefenseEffectKind.Slow, 0.7f, 4f, 1, "감속")
+                    Effect<DefenseDamageEffectSO>(5f, 0f, 1, "피해"),
+                    Effect<DefenseSlowEffectSO>(0.7f, 4f, 1, "감속")
                 }),
             new DefenseAssetSpec(
                 "P1_GuardRoom",
@@ -220,6 +210,9 @@ public static class P1DefenseFacilityAssetBuilder
                 "1성 경비실",
                 "Assets/Images/Placeholders/Defense/defense_guard_room.png",
                 3,
+                GridLayer.Building,
+                180,
+                6,
                 DefenseAttackConcept.Guard,
                 DefenseTriggerTiming.OnEnter | DefenseTriggerTiming.GuardResponse,
                 DefenseTargetRule.GuardTarget,
@@ -227,20 +220,14 @@ public static class P1DefenseFacilityAssetBuilder
                 0f,
                 FacilityWorkType.Repair | FacilityWorkType.Guard,
                 1,
-                new[] { Effect(DefenseEffectKind.GuardAttack, 10f, 0f, 1, "경비 교전") })
+                new[] { Effect<DefenseGuardAttackEffectSO>(10f, 0f, 1, "경비 교전") })
         };
     }
 
-    private static DefenseEffectData Effect(DefenseEffectKind kind, float amount, float duration, int stacks, string logTag)
+    private static DefenseEffectAssetSpec Effect<TEffect>(float amount, float duration, int stacks, string logTag)
+        where TEffect : DefenseEffectSO
     {
-        return new DefenseEffectData
-        {
-            kind = kind,
-            amount = amount,
-            duration = duration,
-            stacks = stacks,
-            logTag = logTag
-        };
+        return DefenseEffectAssetSpec.Create<TEffect>(amount, duration, stacks, logTag);
     }
 
     private static void EnsureSpriteImport(string path)
@@ -267,6 +254,9 @@ public static class P1DefenseFacilityAssetBuilder
             string displayName,
             string spritePath,
             int width,
+            GridLayer layer,
+            int constructionCost,
+            int maintenance,
             DefenseAttackConcept concept,
             DefenseTriggerTiming trigger,
             DefenseTargetRule target,
@@ -274,13 +264,16 @@ public static class P1DefenseFacilityAssetBuilder
             float period,
             FacilityWorkType workTypes,
             int requiredWorkers,
-            DefenseEffectData[] effects)
+            DefenseEffectAssetSpec[] effectSpecs)
         {
             this.assetName = assetName;
             this.id = id;
             this.displayName = displayName;
             this.spritePath = spritePath;
             this.width = width;
+            this.layer = layer;
+            this.constructionCost = Mathf.Max(1, constructionCost);
+            this.maintenance = Mathf.Max(0, maintenance);
             this.concept = concept;
             this.trigger = trigger;
             this.target = target;
@@ -288,7 +281,7 @@ public static class P1DefenseFacilityAssetBuilder
             this.period = period;
             this.workTypes = workTypes;
             this.requiredWorkers = requiredWorkers;
-            this.effects = effects;
+            this.effectSpecs = effectSpecs ?? Array.Empty<DefenseEffectAssetSpec>();
         }
 
         public readonly string assetName;
@@ -296,6 +289,9 @@ public static class P1DefenseFacilityAssetBuilder
         public readonly string displayName;
         public readonly string spritePath;
         public readonly int width;
+        public readonly GridLayer layer;
+        public readonly int constructionCost;
+        public readonly int maintenance;
         public readonly DefenseAttackConcept concept;
         public readonly DefenseTriggerTiming trigger;
         public readonly DefenseTargetRule target;
@@ -303,6 +299,6 @@ public static class P1DefenseFacilityAssetBuilder
         public readonly float period;
         public readonly FacilityWorkType workTypes;
         public readonly int requiredWorkers;
-        public readonly DefenseEffectData[] effects;
+        public readonly DefenseEffectAssetSpec[] effectSpecs;
     }
 }

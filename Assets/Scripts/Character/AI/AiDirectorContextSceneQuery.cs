@@ -1,16 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 public readonly struct AiDirectorContextSceneSnapshot
 {
-    public AiDirectorContextSceneSnapshot(CharacterActor[] actors, BuildableObject[] facilities)
+    public AiDirectorContextSceneSnapshot(
+        IReadOnlyList<CharacterActor> actors,
+        IReadOnlyList<BuildableObject> facilities)
     {
-        Actors = actors ?? Array.Empty<CharacterActor>();
-        Facilities = facilities ?? Array.Empty<BuildableObject>();
+        Actors = EventPayloadSnapshot.Copy(actors);
+        Facilities = EventPayloadSnapshot.Copy(facilities);
     }
 
-    public CharacterActor[] Actors { get; }
-    public BuildableObject[] Facilities { get; }
+    public IReadOnlyList<CharacterActor> Actors { get; }
+    public IReadOnlyList<BuildableObject> Facilities { get; }
 }
 
 public interface IAiDirectorContextSceneQuery

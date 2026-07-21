@@ -20,7 +20,7 @@ public class GridUIManager : MonoBehaviour
     public GameObject gridTextureCanvas;
     public UIBuildingInfo buildingInfoUI;
     public GameObject constructPanel;
-    public Action OnUiClose;
+    public event Action OnUiClose;
 
     [Header("Placement Grid")]
     [SerializeField] private Color buildableCellColor = new Color(1f, 1f, 1f, 0.82f);
@@ -30,6 +30,7 @@ public class GridUIManager : MonoBehaviour
     private TilemapRenderer gridOverlayRenderer;
     private TileBase gridOverlayTile;
     private bool subscribed;
+    private bool initialized;
 
     public int BuildableCellCount { get; private set; }
     public int BlockedCellCount { get; private set; }
@@ -53,55 +54,29 @@ public class GridUIManager : MonoBehaviour
             ?? throw new ArgumentNullException(nameof(uiPointerBlocker));
         this.worldInfoClickSelector = worldInfoClickSelector
             ?? throw new ArgumentNullException(nameof(worldInfoClickSelector));
-        SubscribeToRuntimeEventsIfReady();
+        InitializeRuntimeUiIfReady();
     }
 
     private void Start()
     {
-        ResolveRuntimeDependencies();
-        InitializeGridOverlay();
-        SubscribeToRuntimeEvents();
-        RefreshGridVisibility(gridSystemManager.Mode);
+        InitializeRuntimeUiIfReady();
     }
 
     private void Update()
     {
-        ResolveRuntimeDependencies();
+        if (!TryResolveRuntimeDependencies())
+        {
+            return;
+        }
 
         if (gridSystemManager.Mode != GridMode.None
-            && RequireInputReader().GetKeyDown(KeyCode.Escape))
+            && inputReader != null
+            && inputReader.GetKeyDown(KeyCode.Escape))
         {
             buildingController.SetGridModeNone();
             return;
         }
 
-        if (gridSystemManager.Mode == GridMode.None
-            && !buildingController.IsPlacementInputConsumedThisFrame
-            && RequireInputReader().GetMouseButtonDown(0))
-        {
-            TryDisplayBuildingInfoAtPointer();
-        }
-    }
-
-    private void TryDisplayBuildingInfoAtPointer()
-    {
-        if (IsPointerOverUi())
-        {
-            return;
-        }
-
-        if (RequireWorldInfoClickSelector().TryGetPreferredCharacterUnderPointer(out _))
-        {
-            return;
-        }
-
-        BuildableObject building = buildingController.GetBuildingByMousePos();
-        if (!building)
-        {
-            return;
-        }
-
-        buildingInfoUI.DisplayBuildingInfo(building);
     }
 
     private IWorldInfoClickSelector RequireWorldInfoClickSelector()
@@ -198,7 +173,7 @@ public class GridUIManager : MonoBehaviour
 
     private void OnEnable()
     {
-        SubscribeToRuntimeEventsIfReady();
+        InitializeRuntimeUiIfReady();
     }
 
     private void OnDisable()
@@ -269,7 +244,9 @@ public class GridUIManager : MonoBehaviour
         GridLayer layer = selectedBuilding != null
             ? selectedBuilding.Placement.Layer
             : GridLayer.Building;
-        return GridPlacementCellAvailability.CollectInstallableCells(grid, layer, sidePadding: 1);
+        return selectedBuilding != null
+            ? GridPlacementCellAvailability.CollectInstallableCells(grid, selectedBuilding, sidePadding: 1)
+            : GridPlacementCellAvailability.CollectInstallableCells(grid, layer, sidePadding: 1);
     }
 
     private static Vector3Int GetOverlayTilePosition(Vector2Int gridPosition, int subY)
@@ -343,7 +320,7 @@ public class GridUIManager : MonoBehaviour
 
     private void SubscribeToRuntimeEventsIfReady()
     {
-        if (gridSystemProvider != null && buildingControllerProvider != null && isActiveAndEnabled)
+        if (isActiveAndEnabled)
         {
             SubscribeToRuntimeEvents();
         }
@@ -351,7 +328,11 @@ public class GridUIManager : MonoBehaviour
 
     private void SubscribeToRuntimeEvents()
     {
-        ResolveRuntimeDependencies();
+        if (!TryResolveRuntimeDependencies())
+        {
+            return;
+        }
+
         if (subscribed)
         {
             return;
@@ -380,12 +361,51 @@ public class GridUIManager : MonoBehaviour
 
     private void ResolveRuntimeDependencies()
     {
-        gridSystemManager = RequireGridSystemProvider().Manager;
-        buildingController = RequireBuildingControllerProvider().Controller;
+        if (!TryResolveRuntimeDependencies())
+        {
+            throw new InvalidOperationException(
+                $"{nameof(GridUIManager)} requires injected grid, building, input, and canvas dependencies.");
+        }
+    }
+
+    private bool TryResolveRuntimeDependencies()
+    {
+        if (gridSystemProvider == null || buildingControllerProvider == null || inputReader == null)
+        {
+            return false;
+        }
+
+        gridSystemManager = gridSystemProvider.Manager;
+        buildingController = buildingControllerProvider.Controller;
+        if (gridSystemManager == null || buildingController == null)
+        {
+            return false;
+        }
+
         if (gridTextureCanvas == null)
         {
-            throw new InvalidOperationException($"{nameof(GridUIManager)} requires a grid texture canvas reference.");
+            return false;
         }
+
+        return true;
+    }
+
+    private bool InitializeRuntimeUiIfReady()
+    {
+        if (!TryResolveRuntimeDependencies())
+        {
+            return false;
+        }
+
+        InitializeGridOverlay();
+        SubscribeToRuntimeEventsIfReady();
+        if (!initialized)
+        {
+            RefreshGridVisibility(gridSystemManager.Mode);
+            initialized = true;
+        }
+
+        return true;
     }
 
     private IGridSystemProvider RequireGridSystemProvider()
@@ -447,6 +467,47 @@ public static class GridPlacementCellAvailability
 
     public static HashSet<Vector2Int> CollectInstallableCells(
         Grid grid,
+        BuildingSO buildingData,
+        int sidePadding)
+    {
+        HashSet<Vector2Int> cells = new HashSet<Vector2Int>();
+        if (grid == null || buildingData == null)
+        {
+            return cells;
+        }
+
+        int safePadding = Mathf.Max(0, sidePadding);
+        foreach (GridCell cell in grid.GetCells())
+        {
+            Vector2Int position = cell.Position;
+            if (position.x < safePadding || position.x >= grid.width - safePadding)
+            {
+                continue;
+            }
+
+            if (!cell.CanBuildInArea(buildingData)
+                || !cell.CanOccupy(buildingData.Placement.Layer))
+            {
+                continue;
+            }
+
+            if (position.y > 0)
+            {
+                GridCell supportCell = grid.GetGridCell(position + Vector2Int.down);
+                if (supportCell == null || !supportCell.HasPlacementSupport())
+                {
+                    continue;
+                }
+            }
+
+            cells.Add(position);
+        }
+
+        return cells;
+    }
+
+    public static HashSet<Vector2Int> CollectInstallableCells(
+        Grid grid,
         GridLayer layer,
         int sidePadding)
     {
@@ -465,7 +526,8 @@ public static class GridPlacementCellAvailability
                 continue;
             }
 
-            if (!cell.CanOccupy(layer))
+            if (!cell.CanOccupy(layer)
+                || (layer != GridLayer.Hallway && !cell.IsBuildableArea))
             {
                 continue;
             }

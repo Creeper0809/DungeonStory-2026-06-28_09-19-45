@@ -1,0 +1,70 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7be3e50469ab0014fb12b8050afa04d6, type: 3}
+  m_Name: EV_RitualFocus
+  m_EditorClassIdentifier: Assembly-CSharp::FacilityEvolutionRecipeSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 9106
+  evolutionId: evolve_mana_shelf_to_ritual_focus
+  displayName: "\uB9C8\uB825 \uC758\uC2DD \uC9C4\uD654"
+  description: "\uC2DC\uC57D\uACFC \uC758\uC2DD \uC870\uBA85\uC744 \uAC16\uCD98 \uB9C8\uB825\uC2E4\uC5D0\uC11C
+    \uC218\uC815\uC120\uBC18\uC744 \uC758\uC2DD\uCD08\uC810\uC11D\uC73C\uB85C \uC9C4\uD654\uC2DC\uD0A8\uB2E4."
+  resultBuilding: {fileID: 11400000, guid: 9bf5f02d88117e54184a799d8a678d6c, type: 2}
+  fromFacilities:
+  - {fileID: 11400000, guid: aa2bcf0e65f91c941b2265e643609040, type: 2}
+  fromLineageTags: []
+  requiredStarGrade: 1
+  resultStarGrade: 2
+  publicByDefault: 1
+  requiredResearchRecipeId: 
+  requireUsableRoom: 1
+  requiredRoomScores:
+  - key: Mana
+    requireMin: 1
+    minValue: 24
+    requireMax: 0
+    maxValue: 0
+  - key: Research
+    requireMin: 1
+    minValue: 2
+    requireMax: 0
+    maxValue: 0
+  - key: Luxury
+    requireMin: 1
+    minValue: 3
+    requireMax: 0
+    maxValue: 0
+  requiredRoomMetrics: []
+  requiredRoomTags: []
+  requiredUniqueFixtures:
+  - {fileID: 11400000, guid: 5e36a668290d02244bdff1251990132e, type: 2}
+  - {fileID: 11400000, guid: 21487cae0bab0da4fae1bf7d879992ef, type: 2}
+  requiredRecordTokens: []
+  requiredMaterials: []
+  allowedMutationTags:
+  - Mana
+  - Ritual
+  consumeRecordTokens: 0
+  identityPressureWeights:
+  - key: Ritual
+    value: 0.8
+  - key: Luxury
+    value: 0.2
+  minimumIdentityScore: 0.2

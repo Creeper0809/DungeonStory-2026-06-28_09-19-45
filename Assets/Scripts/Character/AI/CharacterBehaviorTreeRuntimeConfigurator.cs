@@ -1,3 +1,4 @@
+using System;
 using BehaviorDesigner.Runtime;
 using BehaviorDesigner.Runtime.Tasks;
 using UnityEngine;
@@ -11,19 +12,21 @@ public sealed class CharacterBehaviorTreeRuntimeConfigurator : ICharacterBehavio
 {
     public BehaviorTree Configure(CharacterActor actor, ExternalBehaviorTree externalBehavior)
     {
-        BehaviorTree behaviorTree = actor != null ? actor.GetComponent<BehaviorTree>() : null;
-        if (behaviorTree == null)
+        if (actor == null)
         {
-            behaviorTree = actor != null ? actor.gameObject.AddComponent<BehaviorTree>() : null;
-            if (behaviorTree == null)
-            {
-                return null;
-            }
+            throw new ArgumentNullException(nameof(actor));
         }
 
-        if (behaviorTree.ExternalBehavior == null && externalBehavior != null)
+        BehaviorTree behaviorTree = actor.GetComponent<BehaviorTree>();
+        if (behaviorTree == null)
+        {
+            behaviorTree = actor.gameObject.AddComponent<BehaviorTree>();
+        }
+
+        if (externalBehavior != null && behaviorTree.ExternalBehavior != externalBehavior)
         {
             behaviorTree.ExternalBehavior = externalBehavior;
+            behaviorTree.DungeonStoryReloadExternalBehaviorForRuntime();
         }
 
         behaviorTree.StartWhenEnabled = false;
@@ -32,8 +35,6 @@ public sealed class CharacterBehaviorTreeRuntimeConfigurator : ICharacterBehavio
             behaviorTree.enabled = true;
             if (behaviorTree.ExternalBehavior != null)
             {
-                behaviorTree.DungeonStoryRefreshVisualStatus(actor);
-
                 if (behaviorTree.ExecutionStatus != TaskStatus.Running)
                 {
                     behaviorTree.EnableBehavior();

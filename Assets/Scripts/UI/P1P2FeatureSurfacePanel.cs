@@ -36,7 +36,7 @@ public sealed partial class P0FeatureSurfacePanel
         public RoomEnvironmentSnapshot Environment;
     }
 
-    private void BuildFacilitiesManagement()
+    internal void BuildFacilitiesManagement()
     {
         BuildRoomIdentitySection();
         BuildSynthesisSection();
@@ -186,7 +186,10 @@ public sealed partial class P0FeatureSurfacePanel
         List<FacilityEvolutionUiCandidate> candidates = new List<FacilityEvolutionUiCandidate>();
         foreach (BuildableObject facility in FindPlacedFacilities())
         {
-            foreach (FacilityEvolutionCandidate candidate in runtime.GetCandidates(facility, includeRejected: true))
+            foreach (FacilityEvolutionCandidate candidate in runtime.GetCandidates(
+                facility,
+                includeRejected: true,
+                requestLlmProposal: false))
             {
                 candidates.Add(new FacilityEvolutionUiCandidate(facility, candidate));
             }
@@ -230,69 +233,49 @@ public sealed partial class P0FeatureSurfacePanel
             return;
         }
 
-        RunVariableState state = runtime.State;
+        IRunVariableStateView state = runtime.State;
         string startSummary = state.StartVariables != null
             ? state.StartVariables.ToSummaryText().Replace("\n", " / ")
             : "런 시작 변수 없음";
         AddSection(
             "런 시작 변수/침공 변수",
             $"시작 {(state.HasStarted ? "완료" : "대기")} / 운영 변수 {state.ActiveOperationVariables.Count}개 / 침공 {state.CurrentInvasionVariable?.title ?? "없음"}");
-        CreateButtonRow(
-            "P1Action_RunStartVariables",
-            state.HasStarted ? "시작 변수 확인" : "새 런 준비",
+        CreateStatusCard(
+            "P1State_RunStartVariables",
+            state.HasStarted ? "이번 런" : "런 시작 대기",
             startSummary,
-            () =>
+            CompactCardHeight);
+
+        if (state.ActiveOperationVariables.Count == 0)
+        {
+            CreateStatusCard(
+                "P1State_RunOperationVariables",
+                "운영 변수 없음",
+                GetCurrentDay() <= 1 ? "Day 2부터 하루 시작 시 운영 변수가 결정됩니다." : "오늘 적용 중인 운영 변수가 없습니다.",
+                CompactCardHeight);
+        }
+        else
+        {
+            for (int i = 0; i < Mathf.Min(state.ActiveOperationVariables.Count, MaxVisibleCardsPerSection); i++)
             {
-                if (!state.HasStarted)
-                {
-                    runtime.StartRun((GetCurrentDay() * 1000) + 17);
-                    SetFeedback("런 시작 변수를 생성했습니다.");
-                    return;
-                }
-
-                SetFeedback(state.StartVariables.ToSummaryText().Replace("\n", " / "));
-            });
-
-        IReadOnlyList<RunVariableDefinition> operationVariables = RunVariableCatalog.GetByCategory(RunVariableCategory.Operation);
-        for (int i = 0; i < Mathf.Min(operationVariables.Count, 3); i++)
-        {
-            RunVariableDefinition definition = operationVariables[i];
-            ActiveRunVariable active = state.ActiveOperationVariables.FirstOrDefault((item) => item.Definition.id == definition.id);
-            CreateDataCard(
-                $"P1Action_RunOperationVariable_{i}",
-                definition.title,
-                active != null ? $"활성 / 남은 {active.RemainingDays}일 / {definition.detail}" : definition.detail,
-                active != null ? "다시 적용" : "활성화",
-                () =>
-                {
-                    ActiveRunVariable activated = runtime.ActivateOperationVariable(definition.id);
-                    SetFeedback(activated != null
-                        ? $"운영 변수 활성화: {definition.title} / {activated.RemainingDays}일"
-                        : $"운영 변수 활성화 실패: {definition.title}");
-                },
-                CompactCardHeight);
+                ActiveRunVariable active = state.ActiveOperationVariables[i];
+                CreateStatusCard(
+                    $"P1State_RunOperationVariable_{i}",
+                    active.Definition.title,
+                    $"남은 {active.RemainingDays}일 / {active.Definition.detail}",
+                    CompactCardHeight);
+            }
         }
 
-        IReadOnlyList<RunVariableDefinition> invasionVariables = RunVariableCatalog.GetByCategory(RunVariableCategory.Invasion);
-        for (int i = 0; i < Mathf.Min(invasionVariables.Count, 3); i++)
-        {
-            RunVariableDefinition definition = invasionVariables[i];
-            bool selected = state.CurrentInvasionVariable?.id == definition.id;
-            CreateDataCard(
-                $"P1Action_RunInvasionVariable_{i}",
-                definition.title,
-                definition.detail,
-                selected ? "선택됨" : "침공 적용",
-                () =>
-                {
-                    RunVariableDefinition applied = runtime.SelectInvasionVariable(definition.id);
-                    SetFeedback(applied != null ? $"침공 변수 적용: {applied.title}" : "침공 변수 적용 실패");
-                },
-                CompactCardHeight);
-        }
+        RunVariableDefinition invasion = state.CurrentInvasionVariable;
+        CreateStatusCard(
+            "P1State_RunInvasionVariable",
+            invasion != null ? invasion.title : "침공 변수 대기",
+            invasion != null ? invasion.detail : "침공 후보가 발생하면 이번 침공 조건이 결정됩니다.",
+            CompactCardHeight);
     }
 
-    private void BuildDefenseOperations()
+    internal void BuildDefenseOperations()
     {
         InvasionThreatRuntime threat = sceneQuery.First<InvasionThreatRuntime>(includeInactive: true);
         InvasionDirectorRuntime director = sceneQuery.First<InvasionDirectorRuntime>(includeInactive: true);
@@ -307,16 +290,11 @@ public sealed partial class P0FeatureSurfacePanel
             AddSection(
                 "침공 위협도",
                 $"위협 {threat.CurrentThreat:0.#} / 단계 {threat.CurrentStage} / 안전 {threat.SafetyRemaining:0.#}초 / 후보 {(threat.IsCandidatePending ? "대기" : "없음")}");
-            CreateButtonRow(
-                "P1Action_ThreatIncrease",
-                "위협 +10",
+            CreateStatusCard(
+                "P1State_Threat",
+                $"{threat.CurrentStage} / {threat.CurrentThreat:0.#}",
                 $"현재 요인: {snapshot.factors}",
-                () =>
-                {
-                    float before = threat.CurrentThreat;
-                    threat.AddThreat(10f);
-                    SetFeedback($"위협도 변경: {before:0.#} -> {threat.CurrentThreat:0.#}");
-                });
+                CompactCardHeight);
         }
         else
         {
@@ -324,17 +302,13 @@ public sealed partial class P0FeatureSurfacePanel
         }
 
         AddSection("침입자 추적/상태", $"활성 침입자 {intruders.Count}명");
-        if (director != null && threat != null)
+        if (intruders.Count == 0)
         {
-            CreateButtonRow(
-                "P1Action_IntruderSpawn",
-                "침입자 투입",
-                "현재 위협 스냅샷으로 침입자 생성을 시도합니다.",
-                () =>
-                {
-                    bool success = director.TrySpawnIntruder(threat.LatestSnapshot, out CharacterActor actor);
-                    SetFeedback(success ? $"침입자 투입: {actor.name}" : "침입자 투입 조건을 충족하지 못했습니다.");
-                });
+            CreateStatusCard(
+                "P1State_Intruders",
+                "침입자 없음",
+                threat != null && threat.IsCandidatePending ? "침입 후보 접근 중" : "현재 던전 내부는 안전합니다.",
+                CompactCardHeight);
         }
 
         for (int i = 0; i < Mathf.Min(intruders.Count, MaxVisibleCardsPerSection); i++)
@@ -345,12 +319,16 @@ public sealed partial class P0FeatureSurfacePanel
             string statusText = status != null && status.ActiveStatuses.Count > 0
                 ? string.Join(", ", status.ActiveStatuses.Select(FormatDefenseStatus))
                 : "방어 상태 효과 없음";
+            InvasionIntruderPatternDefinition pattern = intruder.Pattern;
+            string targetText = intruder.CurrentPriorityTarget != null
+                ? GetBuildingName(intruder.CurrentPriorityTarget)
+                : FormatPatternTarget(pattern.targetPreference);
             CreateDataCard(
                 $"P1Action_IntruderTrack_{i}",
-                actor != null ? actor.name : "침입자",
-                $"상태 {intruder.State} / 집중 {intruder.Focus:0.#}\n{statusText}",
+                $"{pattern.title} · {(actor != null ? actor.name : "침입자")}",
+                $"상태 {FormatIntruderState(intruder.State)} / 집중 {intruder.Focus:0.#} / 목표 {targetText}\n{statusText}",
                 "추적",
-                () => SetFeedback($"추적 대상: {(actor != null ? actor.name : "침입자")} / {intruder.State}"),
+                () => SetFeedback($"{pattern.title}: {pattern.detail}"),
                 CardHeight);
         }
 
@@ -370,32 +348,26 @@ public sealed partial class P0FeatureSurfacePanel
         for (int i = 0; i < Mathf.Min(defenses.Count, MaxVisibleCardsPerSection); i++)
         {
             DefenseFacility facility = defenses[i];
-            DefenseTriggerTiming timing = ResolveDefenseTiming(facility);
             string effects = FormatDefenseEffects(facility.Defense);
-            CreateDataCard(
-                $"P1Action_DefenseTrigger_{i}",
+            string condition = CodexTextFormatter.FormatTriggerTimings(facility.Defense.triggerTimings);
+            string status = facility.IsDamaged
+                ? "파손"
+                : facility.CooldownRemaining > 0f
+                    ? $"재사용 {facility.CooldownRemaining:0.0}초"
+                    : "대기";
+            CreateStatusCard(
+                $"P1State_DefenseFacility_{i}",
                 GetBuildingName(facility),
-                $"{facility.Defense.concept} / 쿨다운 {facility.CooldownRemaining:0.0}초 / {effects}",
-                "방어 발동",
-                () =>
-                {
-                    CharacterActor target = intruders
-                        .Select((intruder) => intruder != null ? intruder.IntruderActor : null)
-                        .FirstOrDefault((actor) => actor != null && !actor.IsDead);
-                    DefenseActivationReport report = target != null && timing != DefenseTriggerTiming.None
-                        ? facility.Trigger(target, timing, defenseStatusRuntimeService)
-                        : null;
-                    SetFeedback(report != null ? report.FormatSummary() : "발동 가능한 침입자/타이밍/쿨다운을 확인하세요.");
-                },
+                $"{facility.Defense.concept} / {condition} / {status} / {effects}",
                 CardHeight);
         }
     }
 
     private void BuildInvasionReportSection(InvasionCombatReportRuntime runtime)
     {
-        IReadOnlyList<InvasionCombatReport> history = runtime != null
+        IReadOnlyList<InvasionCombatReportSnapshot> history = runtime != null
             ? runtime.ReportHistory
-            : Array.Empty<InvasionCombatReport>();
+            : Array.Empty<InvasionCombatReportSnapshot>();
         AddSection("침공 전투 리포트", $"완료 기록 {history.Count}건 / 현재 보고서 {(runtime?.CurrentReport != null ? "있음" : "없음")}");
         if (history.Count == 0 && runtime?.CurrentReport != null)
         {
@@ -405,7 +377,7 @@ public sealed partial class P0FeatureSurfacePanel
         for (int i = 0; i < Mathf.Min(history.Count, MaxVisibleCardsPerSection); i++)
         {
             int index = i;
-            InvasionCombatReport report = history[i];
+            InvasionCombatReportSnapshot report = history[i];
             string title = report.Defended ? "방어 성공" : "방어 실패";
             CreateDataCard(
                 $"P1Action_CombatReport_{i}",
@@ -423,7 +395,7 @@ public sealed partial class P0FeatureSurfacePanel
         }
     }
 
-    private void BuildOffenseOperations()
+    internal void BuildOffenseOperations()
     {
         OffenseWorldMapRuntime worldMap = sceneQuery.First<OffenseWorldMapRuntime>(includeInactive: true);
         OffenseExpeditionRuntime expeditions = sceneQuery.First<OffenseExpeditionRuntime>(includeInactive: true);
@@ -434,9 +406,20 @@ public sealed partial class P0FeatureSurfacePanel
             return;
         }
 
+        int completedTargets = worldMap.State.CompletedTargetCount;
+        int totalTargets = worldMap.CampaignTargetCount;
+        string campaignState = worldMap.State.TruthRevealed
+            ? "진실 공개 완료"
+            : $"진실 추적 {completedTargets}/{totalTargets}";
         AddSection(
-            "원정 탭 연결",
-            $"정찰 Lv.{worldMap.State.ReconLevel} / 범위 {worldMap.CurrentScanRange:0.#} / 발견 {worldMap.VisibleTargets.Count} / 진행 {expeditions.ActiveExpeditions.Count}");
+            "오펜스 승리 경로",
+            $"{campaignState} / 정찰 Lv.{worldMap.State.ReconLevel} / 출정 중 {expeditions.ActiveExpeditions.Count}");
+        AddLabel(
+            worldMap.State.TruthRevealed
+                ? OffenseWorldMapService.TruthRevealText
+                : "승리 조건: 오펜스 목표를 순서대로 완료하고 마지막 심장부에서 던전의 진실을 밝히세요.",
+            18f,
+            worldMap.State.TruthRevealed ? 86f : 52f);
         CreateButtonRow(
             "P1Action_OffenseOpenMap",
             "월드맵 열기",
@@ -462,33 +445,48 @@ public sealed partial class P0FeatureSurfacePanel
             () =>
             {
                 bool success = worldMap.TryUpgradeRecon(out string message);
+                Refresh();
                 SetFeedback($"정찰 {(success ? "성공" : "실패")}: {message}");
             });
 
         IReadOnlyList<OffenseTargetSnapshot> targets = worldMap.VisibleTargets;
-        for (int i = 0; i < Mathf.Min(targets.Count, MaxVisibleCardsPerSection); i++)
+        IReadOnlyList<OffenseTargetSnapshot> displayTargets = targets
+            .Where(target => !target.isCompleted)
+            .OrderBy(target => target.campaignOrder)
+            .Take(MaxVisibleCardsPerSection)
+            .ToList();
+        if (displayTargets.Count == 0)
         {
-            OffenseTargetSnapshot target = targets[i];
+            displayTargets = targets
+                .OrderByDescending(target => target.campaignOrder)
+                .Take(MaxVisibleCardsPerSection)
+                .ToList();
+        }
+
+        for (int i = 0; i < displayTargets.Count; i++)
+        {
+            OffenseTargetSnapshot target = displayTargets[i];
             bool selected = worldMap.State.SelectedTargetId == target.id;
             CreateDataCard(
                 $"P1Action_OffenseTarget_{i}",
-                target.title,
-                $"거리 {target.distance:0.#} / 위험 {target.danger:0.#} / 인원 {target.requiredMembers} / 권장 전투력 {target.requiredPower:0.#}",
-                selected ? "선택됨" : "대상 선택",
+                $"{target.campaignOrder}. {target.title}{(target.revealsTruth ? " [최종]" : string.Empty)}",
+                $"{target.statusMessage} / 위험 {target.danger:0.#} / 인원 {target.requiredMembers} / 적 {OffenseEncounterCatalog.GetEnemySummary(target.campaignOrder)}",
+                target.isCompleted ? "완료" : selected ? "선택됨" : target.isAvailable ? "대상 선택" : "잠김",
                 () =>
                 {
                     bool success = worldMap.TrySelectTarget(target.id, out _, out string message);
+                    Refresh();
                     SetFeedback($"대상 선택 {(success ? "성공" : "실패")}: {message}");
                 },
                 CompactCardHeight);
         }
 
         OffenseTargetSnapshot selectedTarget = targets.FirstOrDefault((target) => target.id == worldMap.State.SelectedTargetId);
-        if (selectedTarget != null)
+        if (selectedTarget != null && selectedTarget.isAvailable)
         {
             CreateButtonRow(
                 "P1Action_OffenseStart",
-                "선택 대상 원정 출발",
+                "선택 대상 전투 시작",
                 $"{selectedTarget.title} / 필요 {selectedTarget.requiredMembers}명",
                 () =>
                 {
@@ -496,6 +494,7 @@ public sealed partial class P0FeatureSurfacePanel
                         .Take(selectedTarget.requiredMembers)
                         .ToArray();
                     bool success = expeditions.TryStartExpedition(selectedTarget.id, party, out _, out string message);
+                    Refresh();
                     SetFeedback($"원정 출발 {(success ? "성공" : "실패")}: {message}");
                 });
         }
@@ -505,7 +504,7 @@ public sealed partial class P0FeatureSurfacePanel
 
     private void BuildOffenseRewardSection(OffenseExpeditionRuntime expeditions, OffenseRewardRuntime rewards)
     {
-        OffenseRewardState state = rewards != null ? rewards.State : null;
+        IOffenseRewardStateView state = rewards != null ? rewards.State : null;
         AddSection(
             "원정 보상",
             state != null
@@ -515,7 +514,7 @@ public sealed partial class P0FeatureSurfacePanel
         IReadOnlyList<OffenseExpeditionResult> history = expeditions.ResultHistory;
         if (history.Count == 0)
         {
-            AddLabel("완료된 원정이 없습니다. 보상은 원정 완료 시 자동 지급됩니다.", 18f, 44f);
+            AddLabel("완료된 전투가 없습니다. 승리 보상은 전투 종료 시 지급됩니다.", 18f, 44f);
         }
 
         for (int i = 0; i < Mathf.Min(history.Count, MaxVisibleCardsPerSection); i++)
@@ -523,7 +522,7 @@ public sealed partial class P0FeatureSurfacePanel
             int index = i;
             OffenseExpeditionResult result = history[i];
             bool selected = selectedExpeditionResultIndex == i;
-            string rewardText = result.rewardSummaries != null && result.rewardSummaries.Length > 0
+            string rewardText = result.rewardSummaries.Count > 0
                 ? string.Join(", ", result.rewardSummaries)
                 : "지급 보상 없음";
             CreateDataCard(
@@ -542,12 +541,13 @@ public sealed partial class P0FeatureSurfacePanel
 
     private void BuildShopOperationsDetail()
     {
-        List<Shop> shops = FindShops();
+        List<BuildableObject> shops = FindRetailFacilities();
         AddSection("상점 상품/가격/계산대", $"운영 상점 {shops.Count}개");
         for (int i = 0; i < Mathf.Min(shops.Count, MaxVisibleCardsPerSection); i++)
         {
-            Shop shop = shops[i];
-            bool selected = selectedShopId == shop.GetInstanceID();
+            BuildableObject building = shops[i];
+            IRetailFacility shop = (IRetailFacility)building;
+            bool selected = selectedShopId == building.GetInstanceID();
             string checkout = shop.RequiresStaffedCheckout
                 ? shop.HasServingWorker ? "직원 계산대 운영" : "직원 필요"
                 : "셀프 계산대";
@@ -558,7 +558,7 @@ public sealed partial class P0FeatureSurfacePanel
                 selected ? "선택됨" : "상품 보기",
                 () =>
                 {
-                    selectedShopId = shop.GetInstanceID();
+                    selectedShopId = building.GetInstanceID();
                     SetFeedback($"상점 선택: {GetBuildingName(shop)} / 상품 {shop.ProductSnapshots.Count}개");
                 },
                 CardHeight);
@@ -568,10 +568,10 @@ public sealed partial class P0FeatureSurfacePanel
                 continue;
             }
 
-            IReadOnlyList<ShopProductSnapshot> products = shop.ProductSnapshots;
+            IReadOnlyList<RetailProductSnapshot> products = shop.ProductSnapshots;
             for (int productIndex = 0; productIndex < Mathf.Min(products.Count, MaxVisibleCardsPerSection); productIndex++)
             {
-                ShopProductSnapshot product = products[productIndex];
+                RetailProductSnapshot product = products[productIndex];
                 CreateDataCard(
                     $"P2Action_ShopProduct_{i}_{productIndex}",
                     string.IsNullOrWhiteSpace(product.Name) ? $"상품 {product.Id}" : product.Name,
@@ -601,10 +601,11 @@ public sealed partial class P0FeatureSurfacePanel
 
         if (economyViewMode == EconomyViewMode.Current)
         {
+            OperatingCostForecast forecast = settlement.CurrentOperatingCostForecast;
             CreateDataCard(
                 "P2Action_EconomyCurrentDetail",
                 $"Day {settlement.CurrentDay} 진행 중",
-                $"매출 {settlement.CurrentRevenue} / 방문 {settlement.CurrentVisits} / 만족 {settlement.CurrentAverageSatisfaction:0.#} / 재고 소비 {settlement.CurrentConsumedStock} / 보충 실패 {settlement.CurrentRestockFailureCount} / 사건 {settlement.CurrentIncidentCount} / 이벤트 {settlement.CurrentEventCount}",
+                $"매출 {settlement.CurrentRevenue} / 방문 {settlement.CurrentVisits} / 만족 {settlement.CurrentAverageSatisfaction:0.#} / 유지비 {forecast.MaintenanceCost} / 급여 {forecast.PayrollCost} / 미납 {forecast.OutstandingDebt} / 총 예정 {forecast.TotalDue} / 부족 {forecast.ExpectedShortfall} / 재고 소비 {settlement.CurrentConsumedStock} / 사건 {settlement.CurrentIncidentCount}",
                 "새로고침",
                 () => SetFeedback("현재 운영 장부를 갱신했습니다."),
                 CardHeight);
@@ -629,14 +630,14 @@ public sealed partial class P0FeatureSurfacePanel
             CreateDataCard(
                 $"P2Action_EconomyReport_{report.day}",
                 $"Day {report.day}",
-                $"매출 {report.totalRevenue} / 방문 {report.totalVisits} / 만족 {report.averageSatisfaction:0.#} / 사건 {report.incidents.Count} / 재고 부족 {report.stockShortageFacilities.Count}",
+                $"매출 {report.totalRevenue} / 운영비 {report.paidOperatingCost}/{report.totalOperatingCost} / 미납 {report.unpaidOperatingCost} / 마감 {report.closingBalance} / 방문 {report.totalVisits} / 만족 {report.averageSatisfaction:0.#} / 사건 {report.incidents.Count}",
                 "상세",
                 () => SetFeedback(report.ToDetailText().Replace("\n", " / ")),
                 CardHeight);
         }
     }
 
-    private void BuildCodexAndHistory()
+    internal void BuildCodexAndHistory()
     {
         AddSection("도감/기록", "도감, 전투·운영 보고서, 이벤트 히스토리를 조회합니다.");
         AddArchiveModeButton(ArchiveViewMode.Codex, "도감", "P2Action_ArchiveCodex");
@@ -708,7 +709,7 @@ public sealed partial class P0FeatureSurfacePanel
         int operationCount = operation?.ReportHistory.Count ?? 0;
         AddSection("보고서 아카이브", $"침공 {invasionCount} / 원정 {offenseCount} / 운영 {operationCount}");
 
-        if (invasion?.ReportHistory.FirstOrDefault() is InvasionCombatReport invasionReport)
+        if (invasion?.ReportHistory.FirstOrDefault() is InvasionCombatReportSnapshot invasionReport)
         {
             CreateDataCard(
                 "P2Action_ArchiveInvasionReport",
@@ -851,24 +852,6 @@ public sealed partial class P0FeatureSurfacePanel
             .ToList();
     }
 
-    private static DefenseTriggerTiming ResolveDefenseTiming(DefenseFacility facility)
-    {
-        if (facility?.Defense == null)
-        {
-            return DefenseTriggerTiming.None;
-        }
-
-        foreach (DefenseTriggerTiming timing in Enum.GetValues(typeof(DefenseTriggerTiming)))
-        {
-            if (timing != DefenseTriggerTiming.None && facility.Defense.SupportsTrigger(timing))
-            {
-                return timing;
-            }
-        }
-
-        return DefenseTriggerTiming.None;
-    }
-
     private static string FormatDefenseEffects(DefenseFacilityData defense)
     {
         if (defense == null)
@@ -877,13 +860,37 @@ public sealed partial class P0FeatureSurfacePanel
         }
 
         int assetCount = defense.effectAssets?.Count((effect) => effect != null) ?? 0;
-        int dataCount = defense.effects?.Length ?? 0;
-        return $"효과 {assetCount + dataCount}개";
+        return $"효과 {assetCount}개";
     }
 
     private static string FormatDefenseStatus(DefenseStatusSnapshot status)
     {
         return $"{status.Kind} x{status.Stacks} ({status.RemainingSeconds:0.0}s)";
+    }
+
+    private static string FormatPatternTarget(InvasionIntruderTargetPreference preference)
+    {
+        return preference switch
+        {
+            InvasionIntruderTargetPreference.DefenseFacility => "방어 시설 탐색",
+            InvasionIntruderTargetPreference.ValuableFacility => "고가 운영 시설 탐색",
+            _ => "사장"
+        };
+    }
+
+    private static string FormatIntruderState(InvasionIntruderState state)
+    {
+        return state switch
+        {
+            InvasionIntruderState.Entering => "진입 중",
+            InvasionIntruderState.Searching => "탐색 중",
+            InvasionIntruderState.MovingToOwner => "사장 추적",
+            InvasionIntruderState.MovingToFacility => "시설 추적",
+            InvasionIntruderState.DamagingFacility => "시설 파괴",
+            InvasionIntruderState.FinalCombat => "최종 교전",
+            InvasionIntruderState.Finished => "종료",
+            _ => "대기"
+        };
     }
 
     private static string FormatRoomIdentity(RoomInstance room, RoomProfile profile)
@@ -899,7 +906,7 @@ public sealed partial class P0FeatureSurfacePanel
             }
         }
 
-        return FormatRoomRoles(room != null ? room.Roles : RoomRole.None);
+        return FormatRoomRoles(room != null ? room.Roles : FacilityRole.None);
     }
 
     private static string FormatTopRoomScores(RoomProfile profile)
@@ -915,25 +922,17 @@ public sealed partial class P0FeatureSurfacePanel
             .Select((pair) => $"{pair.Key} {pair.Value:0.#}"));
     }
 
-    private static string FormatRoomRoles(RoomRole roles)
+    private static string FormatRoomRoles(FacilityRole roles)
     {
-        if (roles == RoomRole.None)
+        if (roles == FacilityRole.None)
         {
             return "미정";
         }
 
-        List<string> labels = new List<string>();
-        if ((roles & RoomRole.Dining) != 0) labels.Add("식사");
-        if ((roles & RoomRole.Shop) != 0) labels.Add("상점");
-        if ((roles & RoomRole.Rest) != 0) labels.Add("휴식");
-        if ((roles & RoomRole.Training) != 0) labels.Add("훈련");
-        if ((roles & RoomRole.Research) != 0) labels.Add("연구");
-        if ((roles & RoomRole.Mana) != 0) labels.Add("마나");
-        if ((roles & RoomRole.Storage) != 0) labels.Add("보관");
-        if ((roles & RoomRole.Toilet) != 0) labels.Add("화장실");
-        if ((roles & RoomRole.Hygiene) != 0) labels.Add("위생");
-        if ((roles & RoomRole.Administration) != 0) labels.Add("집무");
-        if ((roles & RoomRole.Security) != 0) labels.Add("경비");
+        List<string> labels = FacilityRoleCatalog
+            .Enumerate(roles)
+            .Select((definition) => definition.RoomLabel)
+            .ToList();
         return labels.Count > 0 ? string.Join(" + ", labels) : "미정";
     }
 

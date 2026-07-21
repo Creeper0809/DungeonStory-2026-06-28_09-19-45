@@ -149,26 +149,12 @@ public partial class StaffWorkPriorityPanel
             record != null
                 ? $"{record.Stage} / 기분 {record.LastMood:0.#} / 저기분 {record.LowMoodDays}일 / 반란 {record.LocalRebellionDays}일"
                 : "아직 처리된 불만 기록이 없습니다.");
-        CreateManagementCard(
-            "P1Action_StaffDiscontentRefresh",
-            "불만 상태 갱신",
+        CreateManagementStatusCard(
+            "P1State_StaffDiscontent",
+            "불만 상태",
             record != null
                 ? $"이탈 {BoolText(record.IsDeparted)} / 반란 {BoolText(record.IsInLocalRebellion)} / 사장 위협 {BoolText(record.IsOwnerThreat)} / 격리 {BoolText(record.IsIsolated)} / 제압 {BoolText(record.IsSuppressed)}"
-                : "현재 기분과 누적 일수로 불만 단계를 다시 계산합니다.",
-            "상태 갱신",
-            () =>
-            {
-                if (discontent == null)
-                {
-                    return;
-                }
-
-                StaffDiscontentRecord updated = discontent.ProcessStaff(worker.Character, out StaffDiscontentOutcome outcome);
-                NoticeFeedEvent.Trigger(
-                    $"{worker.Name}: {updated?.Stage.ToString() ?? "기록 없음"} / {outcome}",
-                    NoticeFeedEvent.Grade.NONE);
-                Refresh();
-            },
+                : "일일 정산 후 기분과 누적 일수에 따라 기록됩니다.",
             82f);
 
         if (discontent != null && record != null && record.IsInLocalRebellion)
@@ -221,7 +207,7 @@ public partial class StaffWorkPriorityPanel
         AddManagementBanner(
             "사장 우선 명령/반란 제압 명령",
             controller != null
-                ? $"명령 직원 {controller.SelectedActor?.name ?? "미선택"} / 작업 대상 {worker.Work.PriorityWorkTarget?.name ?? "없음"} / 제압 대상 {worker.Work.PrioritySuppressActor?.name ?? "없음"}"
+                ? $"명령 직원 {GetObjectName(controller.SelectedActor, "미선택")} / 작업 대상 {GetObjectName(worker.Work.PriorityWorkTarget, "없음")} / 제압 대상 {GetObjectName(worker.Work.PrioritySuppressActor, "없음")}"
                 : "사장 명령 컨트롤러가 현재 씬에 없습니다.");
 
         if (controller == null)
@@ -274,6 +260,11 @@ public partial class StaffWorkPriorityPanel
             76f);
     }
 
+    private static string GetObjectName(UnityEngine.Object target, string fallback)
+    {
+        return target != null ? target.name : fallback;
+    }
+
     private void BuildCharacterProfile(StaffWorkPriorityRowModel worker)
     {
         CharacterIdentity identity = worker.Character.Identity;
@@ -282,10 +273,7 @@ public partial class StaffWorkPriorityPanel
             ? string.Join(", ", profile.Traits.Select((trait) => trait.traitName))
             : "특성 없음";
         CharacterStats stats = worker.Character.Stats;
-        string abilitySummary = stats != null
-            ? $"공격 {stats.GetCharacterStat(CharacterStatType.Attack)} · 판매 {stats.GetCharacterStat(CharacterStatType.Sales)} · 연구 {stats.GetCharacterStat(CharacterStatType.Research)} · 이동 {stats.GetCharacterStat(CharacterStatType.MoveSpeed)}\n"
-                + $"근력 {stats.GetCharacterStat(CharacterStatType.Strength)} · 맷집 {stats.GetCharacterStat(CharacterStatType.Toughness)} · 민첩 {stats.GetCharacterStat(CharacterStatType.Dexterity)} · 청소 {stats.GetCharacterStat(CharacterStatType.Cleaning)} · 지구력 {stats.GetCharacterStat(CharacterStatType.Endurance)}"
-            : "능력치 없음";
+        string abilitySummary = BuildCharacterStatSummary(stats);
         AddManagementBanner("캐릭터 프로필/종족/특성", $"{identity?.SpeciesTag ?? "미정"} · {traits}");
         CreateManagementCard(
             "P1Action_StaffProfile",
@@ -296,44 +284,40 @@ public partial class StaffWorkPriorityPanel
             156f);
     }
 
+    private static string BuildCharacterStatSummary(CharacterStats stats)
+    {
+        if (stats == null)
+        {
+            return "능력치 없음";
+        }
+
+        return string.Join(
+            "\n",
+            CharacterStatCatalog.All
+                .Select(definition =>
+                    $"{definition.DisplayName} {stats.GetCharacterStat(definition.Id)}")
+                .Select((text, index) => new { text, row = index / 4 })
+                .GroupBy(item => item.row)
+                .Select(row => string.Join(" · ", row.Select(item => item.text))));
+    }
+
     private void BuildCharacterAi(StaffWorkPriorityRowModel worker)
     {
         CustomerPersonaRuntime personaRuntime = worker.Character.PersonaRuntime;
         CustomerPersonaData persona = personaRuntime != null ? personaRuntime.Persona : null;
         AiDirectorRuntime director = sceneQuery.First<AiDirectorRuntime>(includeInactive: true);
-        LocalLlmRequestQueue queue = sceneQuery.First<LocalLlmRequestQueue>(includeInactive: true);
         AddManagementBanner(
-            "AI/LLM/페르소나/무드",
-            queue != null
-                ? $"엔드포인트 {(queue.HasConfiguredEndpoint ? "연결 설정" : "미설정")} / 대기 {queue.QueuedCount} / 실행 {queue.RunningCount} / 시간초과 {queue.TimeoutCount}"
-                : "로컬 LLM 큐가 현재 씬에 없습니다.");
-        CreateManagementCard(
-            "P1Action_StaffPersona",
-            $"페르소나: {FirstValue(persona?.traitName, personaRuntime?.HasGeneratedPersona == true ? "생성됨" : "기본")}",
-            $"{FirstValue(persona?.flavorText, "설명 없음")}\n선호 시설: {FormatTags(persona?.preferredFacilityTags)} / 요청 {(personaRuntime?.PersonaRequestInProgress == true ? "진행 중" : "대기")}",
-            "생성 요청",
-            () =>
-            {
-                bool accepted = personaRuntime != null && personaRuntime.RequestPersonaIfNeeded(logIfMissingQueue: false);
-                NoticeFeedEvent.Trigger(
-                    accepted ? "페르소나 생성 요청을 보냈습니다." : FirstValue(personaRuntime?.LastError, "페르소나 요청 조건을 확인하세요."),
-                    accepted ? NoticeFeedEvent.Grade.NONE : NoticeFeedEvent.Grade.WARNING);
-                Refresh();
-            },
+            "성격/기분 반응",
+            "직원의 성격과 최근 상황 반응을 확인합니다.");
+        CreateManagementStatusCard(
+            "P1State_StaffPersona",
+            $"성격: {FirstValue(persona?.traitName, "기본")}",
+            $"{FirstValue(persona?.flavorText, "설명 없음")}\n선호 시설: {FormatTags(persona?.preferredFacilityTags)}",
             104f);
-        CreateManagementCard(
-            "P1Action_StaffMood",
-            "AI 무드 임펄스",
-            $"최근 대상 {director?.LastAppliedMoodImpulseActorName ?? "없음"} / 유형 {director?.LastAppliedMoodImpulseType.ToString() ?? "없음"}\n{FirstValue(director?.LastAppliedMoodImpulseDebug, director?.LastError, "적용 기록 없음")}",
-            "무드 요청",
-            () =>
-            {
-                bool accepted = director != null && director.RequestMoodImpulse(worker.Character);
-                NoticeFeedEvent.Trigger(
-                    accepted ? "무드 임펄스 요청을 보냈습니다." : FirstValue(director?.LastError, "무드 요청 조건을 확인하세요."),
-                    accepted ? NoticeFeedEvent.Grade.NONE : NoticeFeedEvent.Grade.WARNING);
-                Refresh();
-            },
+        CreateManagementStatusCard(
+            "P1State_StaffMood",
+            "최근 기분 반응",
+            $"대상 {director?.LastAppliedMoodImpulseActorName ?? "없음"} / 유형 {director?.LastAppliedMoodImpulseType.ToString() ?? "없음"}",
             104f);
     }
 
@@ -381,7 +365,7 @@ public partial class StaffWorkPriorityPanel
         text.fontSize = 16f;
         text.color = DungeonUiTheme.TextPrimary;
         text.textWrappingMode = TextWrappingModes.Normal;
-        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.overflowMode = TextOverflowModes.Truncate;
         text.raycastTarget = false;
 
         GameObject buttonObject = RequireUiFactory().CreateUiObject(actionName, card.transform);
@@ -401,6 +385,31 @@ public partial class StaffWorkPriorityPanel
         buttonText.enableAutoSizing = true;
         buttonText.fontSizeMin = 10f;
         buttonText.fontSizeMax = 16f;
+    }
+
+    private void CreateManagementStatusCard(string stateName, string title, string detail, float height)
+    {
+        GameObject card = RequireUiFactory().CreateUiObject(stateName, tableRoot);
+        spawnedObjects.Add(card);
+        RectTransform rect = card.GetComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(ManagementWidth, height);
+        Image image = RequireUiFactory().AddImage(card, DungeonUiTheme.Surface);
+        image.raycastTarget = false;
+        RequireUiFactory().AddLayoutElement(card, ManagementWidth, height);
+
+        GameObject textObject = RequireUiFactory().CreateUiObject("Text", card.transform);
+        RectTransform textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(12f, 6f);
+        textRect.offsetMax = new Vector2(-12f, -6f);
+        TMP_Text text = RequireUiFactory().AddText(textObject);
+        text.text = $"<b>{title}</b>\n{detail}";
+        text.fontSize = 16f;
+        text.color = DungeonUiTheme.TextPrimary;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.overflowMode = TextOverflowModes.Truncate;
+        text.raycastTarget = false;
     }
 
     private TMP_Text AddManagementText(Transform parent, string value, float fontSize, FontStyles style)

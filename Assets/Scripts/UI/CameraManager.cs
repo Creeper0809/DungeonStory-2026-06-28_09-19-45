@@ -15,11 +15,11 @@ public class CameraManager : MonoBehaviour
     private IMainCameraProvider mainCameraProvider;
     private IPlayerInputReader inputReader;
     private GridSystemManager gridSystemManager;
-    private GridSystemManager fallbackGridSystemManager;
-    private IPlayerInputReader fallbackInputReader;
     private Camera targetCamera;
     private float height;
     private float width;
+    private float userSpeedMultiplier = 1f;
+    private DungeonCameraControlScheme controlScheme = DungeonCameraControlScheme.WasdAndArrows;
 
     [Inject]
     public void Construct(
@@ -45,9 +45,12 @@ public class CameraManager : MonoBehaviour
 
     private void Start()
     {
-        SubscribeToGridExpansion();
+        SubscribeToGridExpansionIfInjected();
         UpdateViewportSize();
-        ClampToCurrentBounds();
+        if (gridSystemProvider != null)
+        {
+            ClampToCurrentBounds();
+        }
     }
 
     private void OnDisable()
@@ -64,26 +67,34 @@ public class CameraManager : MonoBehaviour
     {
         UpdateViewportSize();
 
-        IPlayerInputReader input = RequireInputReader();
+        if (inputReader == null)
+        {
+            return;
+        }
+
+        IPlayerInputReader input = inputReader;
+        bool useWasd = controlScheme != DungeonCameraControlScheme.ArrowsOnly;
+        bool useArrows = controlScheme != DungeonCameraControlScheme.WasdOnly;
+        float effectiveSpeed = speed * userSpeedMultiplier;
         float moveX = GetKeyboardAxis(
-            input.GetKey(KeyCode.A) || input.GetKey(KeyCode.LeftArrow),
-            input.GetKey(KeyCode.D) || input.GetKey(KeyCode.RightArrow)) * speed;
+            useWasd && input.GetKey(KeyCode.A) || useArrows && input.GetKey(KeyCode.LeftArrow),
+            useWasd && input.GetKey(KeyCode.D) || useArrows && input.GetKey(KeyCode.RightArrow)) * effectiveSpeed;
         float moveY = GetKeyboardAxis(
-            input.GetKey(KeyCode.S) || input.GetKey(KeyCode.DownArrow),
-            input.GetKey(KeyCode.W) || input.GetKey(KeyCode.UpArrow)) * speed;
+            useWasd && input.GetKey(KeyCode.S) || useArrows && input.GetKey(KeyCode.DownArrow),
+            useWasd && input.GetKey(KeyCode.W) || useArrows && input.GetKey(KeyCode.UpArrow)) * effectiveSpeed;
         Vector3 mousePosition = input.MousePosition;
 
         if (enableEdgeScroll && Mathf.Approximately(moveX, 0f))
         {
-            moveX = GetHorizontalEdgeAxis(input, mousePosition) * speed;
+            moveX = GetHorizontalEdgeAxis(input, mousePosition) * effectiveSpeed;
         }
 
         if (enableEdgeScroll && Mathf.Approximately(moveY, 0f))
         {
-            moveY = GetVerticalEdgeAxis(input, mousePosition) * speed;
+            moveY = GetVerticalEdgeAxis(input, mousePosition) * effectiveSpeed;
         }
 
-        transform.Translate(new Vector3(moveX * Time.deltaTime, moveY * Time.deltaTime, 0f), Space.World);
+        transform.Translate(new Vector3(moveX * Time.unscaledDeltaTime, moveY * Time.unscaledDeltaTime, 0f), Space.World);
         ClampToCurrentBounds();
     }
 
@@ -95,6 +106,18 @@ public class CameraManager : MonoBehaviour
         float clampX = ClampAxis(transform.position.x, lowerBound.x, upperBound.x, width);
         float clampY = ClampAxis(transform.position.y, lowerBound.y, upperBound.y, height);
         transform.position = new Vector3(clampX, clampY, -10f);
+    }
+
+    public void ApplyUserPreferences(
+        float speedMultiplier,
+        bool edgeScrollEnabled,
+        DungeonCameraControlScheme cameraControlScheme)
+    {
+        userSpeedMultiplier = Mathf.Clamp(speedMultiplier, 0.5f, 2f);
+        enableEdgeScroll = edgeScrollEnabled;
+        controlScheme = Enum.IsDefined(typeof(DungeonCameraControlScheme), cameraControlScheme)
+            ? cameraControlScheme
+            : DungeonCameraControlScheme.WasdAndArrows;
     }
 
     public void OnGridExpand()
@@ -242,71 +265,32 @@ public class CameraManager : MonoBehaviour
 
     private IPlayerInputReader RequireInputReader()
     {
-        if (inputReader != null)
-        {
-            return inputReader;
-        }
-
-        fallbackInputReader ??= new UnityPlayerInputReader();
-        return fallbackInputReader;
+        return inputReader
+            ?? throw new InvalidOperationException($"{nameof(CameraManager)} requires {nameof(IPlayerInputReader)} injection.");
     }
 
     private Camera ResolveMainCamera()
     {
-        if (mainCameraProvider != null)
+        if (mainCameraProvider == null)
         {
-            Camera injectedCamera = mainCameraProvider.Camera;
-            if (injectedCamera != null)
-            {
-                return injectedCamera;
-            }
+            return Camera.main;
         }
 
-        return Camera.main ?? FindFirstObjectByType<Camera>(FindObjectsInactive.Include);
+        Camera camera = mainCameraProvider.Camera;
+        return camera != null
+            ? camera
+            : throw new InvalidOperationException($"{nameof(IMainCameraProvider)} returned no camera.");
     }
 
     private Grid RequireGrid()
     {
-        if (gridSystemProvider != null && gridSystemProvider.TryGetGrid(out Grid injectedGrid))
-        {
-            return injectedGrid;
-        }
-
-        GridSystemManager manager = RequireGridSystemManager();
-        if (manager.grid == null)
-        {
-            throw new InvalidOperationException($"{nameof(GridSystemManager)} did not initialize its {nameof(Grid)}.");
-        }
-
-        return manager.grid;
-    }
-
-    private GridSystemManager RequireGridSystemManager()
-    {
-        if (TryResolveGridSystemManager(out GridSystemManager manager))
-        {
-            return manager;
-        }
-
-        throw new InvalidOperationException($"{nameof(CameraManager)} requires a loaded {nameof(GridSystemManager)}.");
+        return RequireGridSystemProvider().Grid;
     }
 
     private bool TryResolveGridSystemManager(out GridSystemManager manager)
     {
-        if (gridSystemProvider != null && gridSystemProvider.TryGetManager(out manager))
-        {
-            return true;
-        }
-
-        fallbackGridSystemManager ??= FindFirstObjectByType<GridSystemManager>(FindObjectsInactive.Include);
-        if (fallbackGridSystemManager == null)
-        {
-            manager = null;
-            return false;
-        }
-
-        fallbackGridSystemManager.EnsureGridInitialized();
-        manager = fallbackGridSystemManager;
-        return true;
+        manager = null;
+        return gridSystemProvider != null
+            && gridSystemProvider.TryGetManager(out manager);
     }
 }

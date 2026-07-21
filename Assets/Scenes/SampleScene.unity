@@ -299,7 +299,7 @@ MonoBehaviour:
   ownerPrefab: {fileID: 0}
   ownerSpawnPoint: {fileID: 0}
   ownerSpawnGridPosition: {x: 0, y: 0}
-  autoSpawnDefaultOwner: 1
+  autoSpawnDefaultOwner: 0
   selectedOwnerData:
     v: {fileID: 0}
 --- !u!4 &77617280
@@ -599,7 +599,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -99
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 885c58b61f178d845bc56ea8fbc607b6, type: 3}
@@ -1206,7 +1206,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -100
   m_MaskInteraction: 0
   m_Sprite: {fileID: 7482667652216324306, guid: 311925a002f4447b3a28927169b83ea6, type: 3}
@@ -1605,7 +1605,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1668070825
-  m_SortingLayer: -1
+  m_SortingLayer: -2
   m_SortingOrder: 1
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -4578,7 +4578,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ghostObject: {fileID: 220103374}
   cellWorldHeight: 3
-  followLerpSpeed: 25
 --- !u!114 &220103374
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4592,9 +4591,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   ghostObject: {fileID: 1497378222}
-  buildableColor: {r: 0, g: 1, b: 0, a: 1}
   blockedColor: {r: 1, g: 0, b: 0, a: 1}
-  maxPreviewAlpha: 0.18
   previewSortingLayerName: DungeonFrontObject
   previewSortingOrder: 200
 --- !u!115 &221504594
@@ -4690,7 +4687,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -97
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 839969356d2285143a6bf35e8fbb8267, type: 3}
@@ -5106,6 +5103,9 @@ MonoBehaviour:
   hideHallwayUnderBuildings: 0
   hallwaySortingLayerName: DungeonHallway
   hallwaySortingOrder: 100
+  ceilingOverlayTilemap: {fileID: 0}
+  ceilingOverlaySortingLayerName: Wall
+  ceilingOverlaySortingOrder: 110
 --- !u!1 &273779624
 GameObject:
   m_ObjectHideFlags: 0
@@ -5414,7 +5414,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -97
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 839969356d2285143a6bf35e8fbb8267, type: 3}
@@ -6075,7 +6075,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 655820d1dce4b434aa77b8da1b2fd7ec, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  defaultGridWidth: 32
+  defaultGridWidth: 36
   defaultGridHeight: 3
   gridOriginPos: {x: 0, y: 0, z: 100}
 --- !u!114 &435964649
@@ -6663,7 +6663,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -99
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 885c58b61f178d845bc56ea8fbc607b6, type: 3}
@@ -6868,6 +6868,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   speed: 8
   edgeThreshold: 7
+  enableEdgeScroll: 0
   movementPadding: {x: 4, y: 1}
   maxBound: {x: 1, y: 9}
   minBound: {x: -32, y: 0}
@@ -6975,6 +6976,54 @@ MonoBehaviour:
   m_Spacing: {x: 0, y: 0}
   m_Constraint: 0
   m_ConstraintCount: 2
+--- !u!1 &527676748
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 527676750}
+  - component: {fileID: 527676749}
+  m_Layer: 0
+  m_Name: Priority Command Controller
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &527676749
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 527676748}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 18948f0e04f299010b73b44e4c46c929, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::OwnerCommandController
+  targetCamera: {fileID: 0}
+  commandTargetMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+--- !u!4 &527676750
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 527676748}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!115 &555832860
 MonoScript:
   m_ObjectHideFlags: 0
@@ -7812,6 +7861,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 908615684}
     m_Modifications:
+    - target: {fileID: 589844280083665878, guid: c77225d7c65bc5cc5b57803da6a4593e, type: 3}
+      propertyPath: m_TextStyleHashCode
+      value: -1183493901
+      objectReference: {fileID: 0}
     - target: {fileID: 951605689748154858, guid: c77225d7c65bc5cc5b57803da6a4593e, type: 3}
       propertyPath: m_Pivot.x
       value: 0.5
@@ -7985,7 +8038,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 1617109073
-  m_SortingLayer: -2
+  m_SortingLayer: -3
   m_SortingOrder: 100
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -8546,7 +8599,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -828929997
-  m_SortingLayer: -4
+  m_SortingLayer: -6
   m_SortingOrder: 100
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -9027,7 +9080,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -95
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 85f14659543220043bb5528b6188c74b, type: 3}
@@ -9479,6 +9532,8 @@ MonoBehaviour:
   gridTextureCanvas: {fileID: 1832221922}
   buildingInfoUI: {fileID: 895924912}
   constructPanel: {fileID: 378385013}
+  buildableCellColor: {r: 1, g: 1, b: 1, a: 0.82}
+  blockedCellColor: {r: 0.85, g: 0.15, b: 0.15, a: 0.1}
 --- !u!114 &908615687
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9756,7 +9811,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -828929997
-  m_SortingLayer: -4
+  m_SortingLayer: -6
   m_SortingOrder: 100
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -10100,7 +10155,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -96
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 4c2d085b499bea64f82562b14e2b80f4, type: 3}
@@ -10405,7 +10460,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -98
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: f6c782ff192fa954ab74ae2d855f0a44, type: 3}
@@ -11548,49 +11603,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1198085631}
   m_CullTransparentMesh: 1
---- !u!1 &1214818061 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 1384156311545915614, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-  m_PrefabInstance: {fileID: 1376043448}
-  m_PrefabAsset: {fileID: 0}
---- !u!114 &1214818072
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1214818061}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f971a9dbb2bfc3d4b9df4c2f42ec44a3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  serializationData:
-    SerializedFormat: 2
-    SerializedBytes: 
-    ReferencedUnityObjects: []
-    SerializedBytesString: 
-    Prefab: {fileID: 0}
-    PrefabModificationsReferencedUnityObjects: []
-    PrefabModifications: []
-    SerializationNodes: []
-  purchaseFeedbackIconMaxWorldSize: 0.45
---- !u!114 &1214818089
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1214818061}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1490e64906ad3052bb40f0899def83d2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::CharacterFeedbackBubble
-  localOffset: {x: 0, y: 1.35, z: 0}
-  temporaryDuration: 2.5
-  logFeedbackCooldown: 0.35
-  text: {fileID: 0}
 --- !u!1 &1242032068
 GameObject:
   m_ObjectHideFlags: 0
@@ -11744,137 +11756,6 @@ RectTransform:
   m_AnchoredPosition: {x: -1.822876, y: 1.1000061}
   m_SizeDelta: {x: -19.11, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!1001 &1376043448
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 0}
-    m_Modifications:
-    - target: {fileID: 274907766505764320, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 274907766505764320, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 379084862358093888, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 379084862358093888, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 391273409032137216, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 391273409032137216, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 426781603144695872, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 426781603144695872, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 536929450248510877, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 741348672143001472, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 741348672143001472, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 899043239118184320, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 899043239118184320, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 1021700254237097556, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 1021700254237097556, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 1384156311545915614, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: m_Name
-      value: "\uD14C\uC2A4\uD2B8 \uC9C1\uC6D0"
-      objectReference: {fileID: 0}
-    - target: {fileID: 1405664166490629076, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 1405664166490629076, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 2041462126563446826, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 2041462126563446826, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 4013589902492087907, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 4013589902492087907, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 7059045642744938348, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 7059045642744938348, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 7198535206734976458, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 7198535206734976458, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 7619449864653709574, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 7619449864653709574, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 7779014921748304174, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 7779014921748304174, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 8079867970891759040, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 8079867970891759040, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 8697537959367931838, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 8697537959367931838, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    - target: {fileID: 8833899260268517455, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      propertyPath: serializationData.Prefab
-      value: 
-      objectReference: {fileID: 8833899260268517455, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents:
-    - targetCorrespondingSourceObject: {fileID: 1384156311545915614, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 1214818072}
-    - targetCorrespondingSourceObject: {fileID: 1384156311545915614, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 1214818089}
-  m_SourcePrefab: {fileID: 100100000, guid: 44fc1753d909bf0429b1ccfb8598cf22, type: 3}
 --- !u!1 &1393409185
 GameObject:
   m_ObjectHideFlags: 0
@@ -12302,7 +12183,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -99
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 885c58b61f178d845bc56ea8fbc607b6, type: 3}
@@ -12566,7 +12447,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -95
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 85f14659543220043bb5528b6188c74b, type: 3}
@@ -12656,15 +12537,15 @@ SpriteRenderer:
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
-  m_SortingLayerID: 1617109073
-  m_SortingLayer: -2
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
   m_SortingOrder: 200
   m_MaskInteraction: 0
   m_Sprite: {fileID: 0}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
   m_FlipY: 0
-  m_DrawMode: 2
+  m_DrawMode: 0
   m_Size: {x: 6, y: 1}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
@@ -12976,7 +12857,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 1617109073
-  m_SortingLayer: -2
+  m_SortingLayer: -3
   m_SortingOrder: 100
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -13531,6 +13412,10 @@ MonoBehaviour:
   isDestroy: 0
   isDamaged: 0
   facilityLevel: 1
+  facilityState:
+    completedUses: 0
+    completedWorkCycles: 0
+    cleanliness: 100
   characters:
   - {fileID: 11400000, guid: e61f47e09c6cd9449aeeee72493b9fdc, type: 2}
   characterPrefab: {fileID: 3240235570985505524, guid: eb0f86a24c65be04a8059751ede38ea9, type: 3}
@@ -13630,7 +13515,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -96
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 4c2d085b499bea64f82562b14e2b80f4, type: 3}
@@ -13803,7 +13688,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -98
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: f6c782ff192fa954ab74ae2d855f0a44, type: 3}
@@ -14032,10 +13917,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RegularCustomerRuntime
   rules:
-    regularVisitThreshold: 3
+    regularVisitThreshold: 2
     regularAverageSatisfactionThreshold: 65
-    recruitCandidateVisitThreshold: 4
-    recruitCandidateAverageSatisfactionThreshold: 75
+    recruitCandidateVisitThreshold: 2
+    recruitCandidateAverageSatisfactionThreshold: 65
     defaultRecruitCapabilities: 7
 --- !u!114 &1687591078
 MonoBehaviour:
@@ -14146,11 +14031,15 @@ MonoBehaviour:
   intruderData: {fileID: 0}
   intruderPrefab: {fileID: 0}
   intruderSettings:
+    patternId: invasion:pattern:hunter
     secondsToFullFocus: 30
     repathIntervalSeconds: 1.5
     facilityDamageIntervalSeconds: 5
     finalCombatDamage: 45
     finalCombatWindupSeconds: 0.7
+    healthMultiplier: 1
+  normalOwnerBreachDamage: 15
+  bossOwnerBreachDamage: 90
 --- !u!114 &1687591086
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14167,6 +14056,7 @@ MonoBehaviour:
     warningThreshold: 70
     candidateThreshold: 100
     warningCooldownSeconds: 45
+    initialSafetyDurationSeconds: 180
     safetyDurationSeconds: 30
     minCandidateDelaySeconds: 5
     maxCandidateDelaySeconds: 12
@@ -14217,6 +14107,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::OffenseWorldMapRuntime
   configuredTargets: []
   preciseIntel: 0
+  references:
+    version: 2
+    RefIds: []
 --- !u!114 &1687591090
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14300,12 +14193,35 @@ MonoBehaviour:
   maxPromptCharacters: 2400
   appliedRumorCount: 0
   heardRumorCount: 0
-  lastRequestDebug: 
+  lastRequestDebug: "Interpret a DungeonStory NPC event as social rumor/reputation
+    data.\r\nReturn exactly one JSON object with rumorType, targetType, targetFacilityId,
+    targetFacilityTag, targetCharacterId, targetCharacterName, sentiment, summary,
+    spreadChance, trustImpact, validSeconds.\r\nAllowed rumorType values: None, Complaint,
+    Recommendation, Warning, Praise.\r\nAllowed targetType values: None, Facility,
+    Character.\r\nAll numeric fields must be raw JSON numbers, never strings, words,
+    or null.\r\ntargetFacilityId and targetCharacterId must be integers. Use -1 when
+    not used. Never output null.\r\nsentiment and trustImpact must be numbers between
+    -1 and 1. spreadChance must be a number between 0 and 1.\r\nvalidSeconds must
+    be a number between 0 and 1800. Use 600 for normal rumors. Never output 3600
+    or higher.\r\nActionable Complaint, Recommendation, Warning, and Praise rumors
+    must use spreadChance between 0.35 and 1.0.\r\nFor blocked path, no destination,
+    or occupied destination warnings, use spreadChance 1.0.\r\nUse rumorType None
+    only when no NPC should share this event.\r\nUse rumorType None and targetType
+    None when this event should not become a rumor. Do not invent targets outside
+    candidateFacilities.\r\nSpeaker:\r\nname: Social Retry Customer\r\nspecies: Slime\r\nrole:
+    Regular\r\nEvent:\r\ntag: activity:social\r\ncount: 1\r\nmessage: A tense encounter
+    ended badly.\r\ncandidateFacilities:\r\n- id=1050; name=\uB300\uD615\uBCF4\uAD00\uC120\uBC18;
+    tag=Logistics\r\n- id=1001; name=\uACE0\uAE30\uADF8\uB9B4; tag=Meal\r\n- id=1031;
+    name=\uC5F0\uAE08\uC220\uC791\uC5C5\uB300; tag=Research\r\n- id=1014; name=\uC7A0\uAE08\uC9C4\uC5F4\uC7A5;
+    tag=\r\n- id=1046; name=\uC21C\uCC30\uC0C1\uD669\uD310; tag=\r\n- id=1048; name=\uC804\uD22C\uAE43\uBC1C;
+    tag=\r\n- id=1039; name=\uC758\uC2DD\uCD08\uC810\uC11D; tag=Mana\r\n- id=1001;
+    name=\uACE0\uAE30\uADF8\uB9B4; tag=Meal\r\nExample: {\"rumorType\":\"Recommendation\",\"targetType\":\"Facility\",\"targetFacilityId\":12,\"targetFacilityTag\":\"Rest\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":0.6,\"summary\":\"rest
+    facility visit was good\",\"spreadChance\":0.55,\"trustImpact\":0.05,\"validSeconds\":600}\r\n"
   lastRumorDebug: 
   lastError: 
   actorLogEventCountForDebug: 0
   lastActorLogDebug: 
-  lastRequestSkipDebug: 
+  lastRequestSkipDebug: cooldown
   suppressWarningLogsForDebug: 0
   suppressActorLogRequestsForDebug: 0
   actorLogRequestOnlyForDebug: {fileID: 0}
@@ -14377,16 +14293,17 @@ MonoBehaviour:
   modelName: llama3.1
   enableJsonMode: 1
   maxQueueSize: 64
-  maxConcurrentRequests: 1
+  maxConcurrentRequests: 2
   personaTimeoutSeconds: 20
+  characterSkillTimeoutSeconds: 60
   macroGoalTimeoutSeconds: 12
   moodImpulseTimeoutSeconds: 8
   socialRumorTimeoutSeconds: 8
   facilityEvolutionTimeoutSeconds: 10
+  characterRecordTimeoutSeconds: 8
   bubbleTimeoutSeconds: 4
   bubbleMaxQueueAgeSeconds: 3
-  runningCount: 0
-  droppedBubbleCount: 0
+  droppedEphemeralRequestCount: 0
   timeoutCount: 0
   lastError: 
   suppressWarningLogsForDebug: 0
@@ -14404,7 +14321,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CharacterAiScheduler
   driveCharacterUpdates: 1
   driveBehaviorDesignerTrees: 1
-  requireBehaviorTreeOnCharacters: 1
+  registerExistingSceneCharacters: 1
   characterAiExternalBehavior: {fileID: 11400000, guid: 5ca7280068555f246b5c33db28a1d1e3, type: 2}
   limitPathSearches: 1
   limitFeedbackToVisibleCharacters: 1
@@ -14432,6 +14349,14 @@ MonoBehaviour:
   m_Script: {fileID: 555832860}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::OperatingDaySettlementRuntime
+  economySettings:
+    baseStaffWage: 35
+    workingStaffBonus: 10
+    emergencyFundingAmount: 1000
+    emergencyFundingDebt: 1200
+    unpaidWageMoodPenaltyPerDay: 4
+    unpaidWageMoodDurationSeconds: 180
+    breakdownAfterShortfallDays: 2
 --- !u!4 &1687591099
 Transform:
   m_ObjectHideFlags: 0
@@ -15634,7 +15559,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -96
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 4c2d085b499bea64f82562b14e2b80f4, type: 3}
@@ -15726,7 +15651,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1668070825
-  m_SortingLayer: -1
+  m_SortingLayer: -2
   m_SortingOrder: 100
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -15950,7 +15875,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1668070825
-  m_SortingLayer: -1
+  m_SortingLayer: -2
   m_SortingOrder: 1
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -17647,6 +17572,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DungeonSceneBackdropFitter
   backgroundRoot: {fileID: 2025819523}
+  solidBackground: {fileID: 183780937}
   groundTilemap: {fileID: 210129473}
   horizontalPaddingTiles: {x: 8, y: 8}
 --- !u!1001 &2044097973
@@ -17969,7 +17895,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -98
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: f6c782ff192fa954ab74ae2d855f0a44, type: 3}
@@ -18060,7 +17986,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -95
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 85f14659543220043bb5528b6188c74b, type: 3}
@@ -18230,7 +18156,7 @@ SpriteRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1123923591
-  m_SortingLayer: -7
+  m_SortingLayer: -9
   m_SortingOrder: -97
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: 839969356d2285143a6bf35e8fbb8267, type: 3}
@@ -18322,7 +18248,7 @@ TilemapRenderer:
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: -1232675853
-  m_SortingLayer: -5
+  m_SortingLayer: -7
   m_SortingOrder: 100
   m_MaskInteraction: 0
   m_ChunkSize: {x: 32, y: 32, z: 32}
@@ -18916,7 +18842,7 @@ SceneRoots:
   - {fileID: 908615684}
   - {fileID: 2025819523}
   - {fileID: 1592441175}
-  - {fileID: 1376043448}
   - {fileID: 1687591099}
   - {fileID: 77617280}
   - {fileID: 929796606}
+  - {fileID: 527676750}

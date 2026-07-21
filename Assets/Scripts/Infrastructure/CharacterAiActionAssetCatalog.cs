@@ -2,8 +2,7 @@ using System;
 
 public interface ICharacterAiActionAssetCatalog
 {
-    T GetRequiredAction<T>(string resourcePath) where T : AIActionSet;
-    AIFacilityRoleAction GetRequiredFacilityRoleAction(string resourcePath, FacilityRole role);
+    AIActionSet GetRequiredAction(string resourcePath, CharacterAiBranch expectedBranch);
 }
 
 public sealed class ResourceCharacterAiActionAssetCatalog : ICharacterAiActionAssetCatalog
@@ -16,23 +15,19 @@ public sealed class ResourceCharacterAiActionAssetCatalog : ICharacterAiActionAs
             ?? throw new ArgumentNullException(nameof(resourcesAssetLoader));
     }
 
-    public T GetRequiredAction<T>(string resourcePath) where T : AIActionSet
+    public AIActionSet GetRequiredAction(string resourcePath, CharacterAiBranch expectedBranch)
     {
         if (string.IsNullOrWhiteSpace(resourcePath))
         {
             throw new ArgumentException("AI action resource path is required.", nameof(resourcePath));
         }
 
-        return resourcesAssetLoader.LoadRequired<T>(resourcePath);
-    }
-
-    public AIFacilityRoleAction GetRequiredFacilityRoleAction(string resourcePath, FacilityRole role)
-    {
-        AIFacilityRoleAction actionSet = GetRequiredAction<AIFacilityRoleAction>(resourcePath);
-        if (actionSet.Role != role)
+        AIActionSet actionSet = resourcesAssetLoader.LoadRequired<AIActionSet>(resourcePath);
+        if (actionSet.Branch != expectedBranch)
         {
             throw new InvalidOperationException(
-                $"Required AI action asset has wrong role: Resources/{resourcePath} expected={role} actual={actionSet.Role}");
+                $"Required AI action asset has wrong branch: Resources/{resourcePath} "
+                + $"expected={expectedBranch} actual={actionSet.Branch}");
         }
 
         return actionSet;

@@ -40,6 +40,11 @@ MonoBehaviour:
   objectName: "\uD654\uC7A5\uC2E4"
   sprite: {fileID: 21300000, guid: 4b1b786a5cfabf1e99bc00d62d551098, type: 3}
   icon: {fileID: 21300000, guid: 4b1b786a5cfabf1e99bc00d62d551098, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562978982527675
+    - rid: 7302562985835495584
+    - rid: 7302562985835495585
   width: 2
   height: 1
   layer: 1
@@ -48,45 +53,28 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 0
-  facility:
-    roles: 128
-    capacity: 2
-    useDuration: 1.2
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 0
-    supportedWorkTypes: 4
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 1
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags: []
-    scores: []
-    metrics: []
+  facilityAnchors:
+    slots: []
   unlocked: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562978982527675
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 128
+          capacity: 2
+          useDuration: 1.2
+          requiredWorkers: 0
+          supportedWorkTypes: 4
+          disabledWhenDamaged: 1
+    - rid: 7302562985835495584
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562985835495585
+      type: {class: BuildingSelfContainedRoomAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSelfContainedRoomAbility

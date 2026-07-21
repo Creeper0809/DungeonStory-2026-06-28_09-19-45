@@ -103,7 +103,6 @@ GameObject:
   - component: {fileID: 5555953569223095454}
   - component: {fileID: 1344862758937822444}
   - component: {fileID: 8424189592642634456}
-  - component: {fileID: 7619449864653709574}
   - component: {fileID: 741348672143001472}
   - component: {fileID: 1405664166490629076}
   - component: {fileID: 8697537959367931838}
@@ -120,6 +119,7 @@ GameObject:
   - component: {fileID: 7004039133299571103}
   - component: {fileID: 7322711153434796532}
   - component: {fileID: 1215785365045945190}
+  - component: {fileID: 4008056805840517810}
   m_Layer: 0
   m_Name: CharacterPrefab 1
   m_TagString: Character
@@ -238,39 +238,6 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
---- !u!114 &7619449864653709574
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1384156311545915614}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8edba9721b64c82458e81175b2eee3aa, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  serializationData:
-    SerializedFormat: 2
-    SerializedBytes: 
-    ReferencedUnityObjects: []
-    SerializedBytesString: 
-    Prefab: {fileID: 0}
-    PrefabModificationsReferencedUnityObjects: []
-    PrefabModifications: []
-    SerializationNodes: []
-  noExit: {fileID: 0}
-  identity: {fileID: 0}
-  abilityCache: {fileID: 0}
-  characterStats: {fileID: 0}
-  visual: {fileID: 0}
-  lifecycle: {fileID: 0}
-  characterLog: {fileID: 0}
-  blackboard: {fileID: 0}
-  personaRuntime: {fileID: 0}
-  dialogueRuntime: {fileID: 0}
-  socialMemory: {fileID: 0}
-  behaviorTree: {fileID: 0}
 --- !u!114 &741348672143001472
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -299,6 +266,7 @@ MonoBehaviour:
   data: {fileID: 11400000, guid: 92781acb830918b4b909e14fba2fc478, type: 2}
   characterType: 0
   role: 0
+  persistentId: 
 --- !u!114 &1405664166490629076
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -323,14 +291,32 @@ MonoBehaviour:
   assignedShop: {fileID: 0}
   isWorking: 0
   workPriorities:
-    operate: 1
-    restock: 2
-    repair: 2
-    clean: 3
-    research: 3
-    guard: 3
-    rescue: 2
-    rest: 3
+    schemaVersion: 1
+    priorities:
+    - workTypeId: work:operate
+      priority: 1
+    - workTypeId: work:restock
+      priority: 2
+    - workTypeId: work:repair
+      priority: 2
+    - workTypeId: work:clean
+      priority: 3
+    - workTypeId: work:research
+      priority: 2
+    - workTypeId: work:guard
+      priority: 3
+    - workTypeId: work:rescue
+      priority: 2
+    - workTypeId: work:rest
+      priority: 3
+    legacyOperate: 1
+    legacyRestock: 2
+    legacyRepair: 2
+    legacyClean: 3
+    legacyResearch: 2
+    legacyGuard: 3
+    legacyRescue: 2
+    legacyRest: 3
   restProtectionSleepThreshold: 1
   restProtectionResumeSleepThreshold: 35
   minimumRestProtectionSeconds: 6
@@ -414,29 +400,17 @@ MonoBehaviour:
     SerializationNodes: []
   availableActions:
   - actionset: {fileID: 11400000, guid: 0c97c16e3b3bc7840b250866f792b75d, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   - actionset: {fileID: 11400000, guid: 354847a5295b48319bfb4e1f01a31a24, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   - actionset: {fileID: 11400000, guid: 7135b8e3960399447af8f4e294df54af, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   - actionset: {fileID: 11400000, guid: 1e9be18b3b8179558b2b3115fb04d54d, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   - actionset: {fileID: 11400000, guid: e4c3c69b221b2814c9558ac87d89e60e, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   bestAction:
     actionset: {fileID: 0}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: -1
   isBestActionEnd: 0
   isExecuted: 0
@@ -554,6 +528,9 @@ MonoBehaviour:
   stats: {fileID: 0}
   log: {fileID: 0}
   lifecycleState: 0
+  aiPaused: 0
+  expeditionRecovery:
+    stress: 0
 --- !u!114 &379084862358093888
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -576,6 +553,7 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   log: []
+  activities: []
 --- !u!114 &2041462126563446826
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -599,6 +577,7 @@ MonoBehaviour:
     SerializationNodes: []
   noExit: {fileID: 0}
   identity: {fileID: 0}
+  progression: {fileID: 0}
   abilityCache: {fileID: 0}
   characterStats: {fileID: 0}
   visual: {fileID: 0}
@@ -884,3 +863,76 @@ MonoBehaviour:
   facilitySentimentDebug: []
   characterSentimentDebug: []
   sourceTrustDebug: []
+--- !u!114 &4008056805840517810
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: badabbf33eed2ae46b77a5f13883bc2d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterProgression
+  level: 1
+  currentExperience: 0
+  growthState:
+    initialized: 0
+    autoChooseDrafts: 0
+    potentialGrade: 0
+    generationSeed: 0
+    origin: 
+    displayName: 
+    initialBaseStats:
+      entries:
+      - statId: stat:attack
+        value: 5
+      - statId: stat:sales
+        value: 5
+      - statId: stat:research
+        value: 5
+      - statId: stat:move-speed
+        value: 5
+      - statId: stat:strength
+        value: 5
+      - statId: stat:toughness
+        value: 5
+      - statId: stat:dexterity
+        value: 5
+      - statId: stat:cleaning
+        value: 5
+      - statId: stat:endurance
+        value: 5
+    levelGrowthStats:
+      entries: []
+    traitIds: 
+    activeSkills: []
+    passiveSkills: []
+    ultimate:
+      id: 
+      displayName: 
+      description: 
+      narrativeReason: 
+      kind: 0
+      rarity: 0
+      trigger: 0
+      target: 0
+      ultimateDomain: 0
+      cooldownTurns: 0
+      usableFrom: 7
+      targetPositions: 7
+      modules: []
+      requestKey: 
+    drafts: []
+    pendingRequestKeys: []
+    allocationRecords: []
+    useLimits:
+      offenseBattleSerial: -1
+      defenseInvasionSerial: -1
+      managementOperatingDay: -1
+    allocatedGrowthPoints: 0
+    nextActiveDraftHasPity: 0
+    skillGenerationRevision: 0
+  narrativeLedger:
+    facts: []

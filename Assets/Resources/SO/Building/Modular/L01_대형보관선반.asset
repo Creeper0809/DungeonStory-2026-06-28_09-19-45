@@ -37,9 +37,18 @@ MonoBehaviour:
       Entry: 6
       Data: 
   id: 1050
-  objectName: "\uB300\uD615 \uBCF4\uAD00 \uC120\uBC18"
+  objectName: "\uB300\uD615\uBCF4\uAD00\uC120\uBC18"
   sprite: {fileID: 21300000, guid: 522f55e0b9cc87f4f9226bfacf8ec674, type: 3}
   icon: {fileID: 21300000, guid: 522f55e0b9cc87f4f9226bfacf8ec674, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562995605602493
+    - rid: 7302562995605602494
+    - rid: 7302562995605602495
+    - rid: 7302562995605602496
+    - rid: 7302562995605602497
+    - rid: 7302562995605602498
+    - rid: 7302562995605602499
   width: 2
   height: 1
   layer: 1
@@ -48,72 +57,65 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 3
-  facility:
-    roles: 64
-    capacity: 1
-    useDuration: 1.5
-    internalStockMax: 60
-    restockRequestThreshold: 15
-    requiredWorkers: 1
-    supportedWorkTypes: 6
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Logistics
-    - Storage
-    scores:
-    - key: Logistics
-      value: 2
-    - key: Storage
-      value: 2.5
-    metrics: []
-  operational:
-    code: L01
-    functions: 67371008
-    recovery:
-      sleep: 0
-      mood: 0
-      fun: 0
-      hunger: 0
-      excretion: 0
-      hygiene: 0
-    storageCategory: 1
-    storageCapacity: 60
-    seatCapacity: 0
-    tableCapacity: 0
-    serviceCapacity: 0
-    workOutputAmount: 0
-    constructionCost: 110
-    unlockPhase: 1
-    demolitionRefundRate: 0.5
-    lightIntensity: 0
-    lightRadius: 0
+  facilityAnchors:
+    slots: []
   unlocked: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562995605602493
+      type: {class: BuildingFacilityPartAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityPartAbility
+        code: L01
+    - rid: 7302562995605602494
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 110
+        maintenance: 3
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302562995605602495
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 64
+          capacity: 1
+          useDuration: 1.5
+          requiredWorkers: 1
+          supportedWorkTypes: 6
+          disabledWhenDamaged: 1
+    - rid: 7302562995605602496
+      type: {class: BuildingInternalStockAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingInternalStockAbility
+        capacity: 60
+        restockRequestThreshold: 15
+    - rid: 7302562995605602497
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562995605602498
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Logistics
+          - Storage
+          scores:
+          - key: Logistics
+            value: 2
+          - key: Storage
+            value: 2.5
+          metrics: []
+    - rid: 7302562995605602499
+      type: {class: BuildingStorageAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingStorageAbility
+        category: 1
+        capacity: 60
+        allCategories: 1

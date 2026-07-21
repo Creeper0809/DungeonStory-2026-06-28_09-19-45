@@ -9,6 +9,9 @@ public class AbilityShopping : CharacterAbility
     private const int DefaultMaxLookAroundCount = 1;
 
     private int holdingMoney;
+    private readonly List<BuildableObject> mutableVisitedBuildings = new List<BuildableObject>();
+    private IReadOnlyList<BuildableObject> visitedBuildingsView;
+    private bool attemptedLooseItemTheftBeforeExit;
     [SerializeField, Min(0.05f)]
     private float purchaseFeedbackIconMaxWorldSize = FloatingIconFeedbackDefaults.DefaultMaxWorldSize;
     private IShopStockCatalog shopStockCatalog;
@@ -16,7 +19,8 @@ public class AbilityShopping : CharacterAbility
 
     public int visitCount { get; private set; }
     public int lookAroundCount { get; private set; }
-    public List<BuildableObject> visitedBuilding { get; private set; }
+    public IReadOnlyList<BuildableObject> visitedBuilding =>
+        visitedBuildingsView ??= ReadOnlyView.List(mutableVisitedBuildings);
     public int HoldingMoney => holdingMoney;
 
     [Inject]
@@ -33,21 +37,23 @@ public class AbilityShopping : CharacterAbility
     public override void Initializtion(CharacterSO data)
     {
         base.Initializtion(data);
-        visitedBuilding = new List<BuildableObject>();
+        mutableVisitedBuildings.Clear();
         visitCount = data != null ? data.GetFrequencyVisit() : 1;
         lookAroundCount = 0;
+        attemptedLooseItemTheftBeforeExit = false;
         holdingMoney = data != null
-            ? data.GetHoldingMoney(identity != null ? identity.Profile : null)
+            ? Mathf.Max(0, Mathf.RoundToInt(
+                data.GetHoldingMoney() * (actor?.Stats?.GetSpendingMultiplier() ?? 1f)))
             : 0;
     }
-    public Stock DetermineBuyingItem(List<Stock> stocks)
+    public Stock DetermineBuyingItem(IReadOnlyList<Stock> stocks)
     {
         if (stocks == null || stocks.Count == 0)
         {
             return new Stock(-1,0);
         }
 
-        if (Shop.IsInternalStaffUse(actor))
+        if (IsInternalStaffUse())
         {
             return stocks[Random.Range(0, stocks.Count)];
         }
@@ -74,10 +80,10 @@ public class AbilityShopping : CharacterAbility
     public bool CanPay(Stock stock)
     {
         return actor != null
-            && (Shop.IsInternalStaffUse(actor) || stock.cost <= holdingMoney);
+            && (IsInternalStaffUse() || stock.cost <= holdingMoney);
     }
 
-    public bool CanBuyFrom(Shop shop, out string failureReason)
+    public bool CanBuyFrom(IRetailFacility shop, out string failureReason)
     {
         failureReason = string.Empty;
         if (shop == null)
@@ -86,13 +92,13 @@ public class AbilityShopping : CharacterAbility
             return false;
         }
 
-        if (CharacterVisitPolicy.IsStaffPurchaseShop(actor, shop))
+        if (IsInternalStaffUse())
         {
             failureReason = "직원은 구매 상점을 이용하지 않음";
             return false;
         }
 
-        List<Stock> stocks = shop.GetStock();
+        IReadOnlyList<Stock> stocks = shop.GetPurchasableStock();
         if (stocks == null || stocks.Count == 0)
         {
             failureReason = "재고 없음";
@@ -118,17 +124,17 @@ public class AbilityShopping : CharacterAbility
         return true;
     }
 
-    public float GetAffordabilityScore(Shop shop)
+    public float GetAffordabilityScore(IRetailFacility shop)
     {
         if (shop == null) return 1f;
 
-        List<Stock> stocks = shop.GetStock();
+        IReadOnlyList<Stock> stocks = shop.GetPurchasableStock();
         if (stocks == null || stocks.Count == 0)
         {
             return 0f;
         }
 
-        if (Shop.IsInternalStaffUse(actor))
+        if (IsInternalStaffUse())
         {
             return 1f;
         }
@@ -157,7 +163,14 @@ public class AbilityShopping : CharacterAbility
             : null;
         if (action == null || action.destination == null)
         {
-            actor?.AddLog("쇼핑 실패: 목적지 없음");
+            actor?.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Failed,
+                "쇼핑 실패: 목적지 없음",
+                actionId: "shopping:visit",
+                reasonCode: "missing-destination",
+                sentiment: -0.7f,
+                bubbleEligible: true));
             if (actor != null && actor.Brain != null)
             {
                 actor.Brain.isBestActionEnd = true;
@@ -171,7 +184,14 @@ public class AbilityShopping : CharacterAbility
         }
         if (move == null || grid == null)
         {
-            actor?.AddLog("쇼핑 실패: 이동 정보 없음");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Failed,
+                "쇼핑 실패: 이동 정보 없음",
+                action.destination,
+                actionId: "shopping:visit",
+                reasonCode: "missing-movement-context",
+                bubbleEligible: true));
             action.ReleaseReservation(actor);
             if (actor != null && actor.Brain != null)
             {
@@ -192,7 +212,14 @@ public class AbilityShopping : CharacterAbility
         }
         else
         {
-            actor?.AddLog("쇼핑 실패: 목적지 도달 실패");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Failed,
+                "쇼핑 실패: 목적지 도달 실패",
+                action.destination,
+                actionId: "shopping:visit",
+                reasonCode: "destination-unreachable",
+                bubbleEligible: true));
             action.ReleaseReservation(actor);
         }
         if (actor != null && actor.Brain != null)
@@ -203,15 +230,20 @@ public class AbilityShopping : CharacterAbility
 
     public void RegisterVisit(BuildableObject building)
     {
-        if (building != null && !visitedBuilding.Contains(building))
+        if (building != null && !mutableVisitedBuildings.Contains(building))
         {
-            visitedBuilding.Add(building);
+            mutableVisitedBuildings.Add(building);
         }
 
         if (visitCount > 0)
         {
             visitCount--;
         }
+    }
+
+    public bool HasVisited(BuildableObject building)
+    {
+        return building != null && mutableVisitedBuildings.Contains(building);
     }
 
     public void RegisterLookAround()
@@ -223,13 +255,21 @@ public class AbilityShopping : CharacterAbility
     {
         visitCount = Mathf.Max(visitCount, 1);
         lookAroundCount = DefaultMaxLookAroundCount;
-        visitedBuilding?.Clear();
+        mutableVisitedBuildings.Clear();
+    }
+
+    public void RestorePersistentState(int savedVisitCount, int savedLookAroundCount, int savedHoldingMoney)
+    {
+        visitCount = Mathf.Max(0, savedVisitCount);
+        lookAroundCount = Mathf.Max(0, savedLookAroundCount);
+        holdingMoney = Mathf.Max(0, savedHoldingMoney);
+        mutableVisitedBuildings.Clear();
     }
 
     public bool IsOffDutyStaffVisitor()
     {
         return actor != null
-            && Shop.IsInternalStaffUse(actor)
+            && IsInternalStaffUse()
             && abilityCache != null
             && abilityCache.TryGetAbility(out AbilityWork work)
             && work.IsOffDuty;
@@ -243,6 +283,7 @@ public class AbilityShopping : CharacterAbility
     public bool CanLookAround()
     {
         return actor != null
+            && visitCount > 0
             && ShouldEndVisitCycle()
             && lookAroundCount < DefaultMaxLookAroundCount;
     }
@@ -251,7 +292,8 @@ public class AbilityShopping : CharacterAbility
     {
         return actor != null
             && ShouldEndVisitCycle()
-            && lookAroundCount >= DefaultMaxLookAroundCount;
+            && (visitCount <= 0
+                || lookAroundCount >= DefaultMaxLookAroundCount);
     }
 
     public bool ShouldEndVisitCycle()
@@ -340,13 +382,13 @@ public class AbilityShopping : CharacterAbility
         if (!CharacterVisitPolicy.CanVisitBuilding(
             actor,
             building,
-            building != null && visitedBuilding.Contains(building),
+            HasVisited(building),
             out _))
         {
             return false;
         }
 
-        return building is not Shop shop || CanBuyFrom(shop, out _);
+        return building is not IRetailFacility shop || CanBuyFrom(shop, out _);
     }
 
     public int GetShoppingCount()
@@ -365,14 +407,91 @@ public class AbilityShopping : CharacterAbility
         }
 
         yield return new WaitForSeconds(0.5f);
-        if (!Shop.IsInternalStaffUse(actor))
+        if (!IsInternalStaffUse())
         {
             holdingMoney -= Mathf.Max(0, purchaseCost);
         }
+
+        if (!IsInternalStaffUse() && iteminfo != null)
+        {
+            AddPurchasedItemToCarry(iteminfo);
+        }
+
         foreach(var events in item.onbuy)
         {
             events.Onbuy(actor);
         }
+    }
+
+    private void AddPurchasedItemToCarry(SaleItem itemInfo)
+    {
+        if (actor == null || itemInfo == null)
+        {
+            return;
+        }
+
+        CharacterCarryInventory inventory = CharacterCarryInventory.Ensure(actor);
+        if (inventory == null)
+        {
+            return;
+        }
+
+        IDungeonItemCatalogProvider catalogProvider = WorldItemStackRuntime.Active?.CatalogProvider
+            ?? new ResourceDungeonItemCatalogProvider();
+        string itemId = DungeonItemCatalogSO.StockItemId(itemInfo.category);
+        inventory.TryAdd(
+            $"purchase:{itemInfo.id}:{Time.frameCount}",
+            itemId,
+            1,
+            catalogProvider,
+            WorldItemStackRuntime.Active?.HaulingSettingsProvider,
+            out _);
+    }
+
+    public bool TryStealLooseItemBeforeExit()
+    {
+        if (attemptedLooseItemTheftBeforeExit
+            || actor == null
+            || IsInternalStaffUse()
+            || actor.characterType != CharacterType.Customer
+            || WorldItemStackRuntime.Active == null)
+        {
+            return false;
+        }
+
+        attemptedLooseItemTheftBeforeExit = true;
+        if (!WorldItemStackRuntime.Active.TryStealLooseItem(
+                actor,
+                4,
+                out WorldItemStackSnapshot stolen,
+                out _))
+        {
+            return false;
+        }
+
+        string itemName = !string.IsNullOrWhiteSpace(stolen?.DisplayName)
+            ? stolen.DisplayName
+            : "item";
+        string detail = $"{actor.name} pocketed {itemName} from the floor.";
+        actor.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Shopping,
+            CharacterActivityOutcomes.Damaged,
+            detail,
+            actionId: "crime:floor-theft",
+            targetId: stolen?.StackId ?? string.Empty,
+            targetName: itemName,
+            reasonCode: "floor-theft",
+            value: stolen?.TotalValue ?? 0,
+            quantity: 1,
+            sentiment: -0.5f,
+            bubbleEligible: true));
+        EventAlertService.Raise("Floor theft", detail, EventAlertImportance.Medium, "Crime");
+        return true;
+    }
+
+    private bool IsInternalStaffUse()
+    {
+        return CharacterWorkRoleUtility.TryGetWork(actor, out _);
     }
 
     private IFloatingIconFeedbackService RequireFloatingIconFeedbackService()

@@ -1,68 +1,60 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
-using UnityEngine;
 
 public interface IUITabContentTextProvider
 {
-    string Build(int id);
+    string Build(TabId id);
+}
+
+public interface IUITabContentPresenter
+{
+    TabId Id { get; }
+    string Build();
 }
 
 public sealed class UITabContentTextProvider : IUITabContentTextProvider
 {
-    private readonly IBuildingManagementSummaryService buildingManagementSummaryService;
-    private readonly IStaffWorkforceQueryService staffWorkforceQueryService;
-    private readonly IInvasionDefenseSummaryService invasionDefenseSummaryService;
-    private readonly IOffenseTabSummaryService offenseTabSummaryService;
-    private readonly IOperationTabSummaryService operationTabSummaryService;
-    private readonly IResearchCraftingSummaryService researchCraftingSummaryService;
-    private readonly ICodexRecordSummaryService codexRecordSummaryService;
+    private readonly IReadOnlyDictionary<TabId, IUITabContentPresenter> presenters;
 
-    public UITabContentTextProvider(
-        IBuildingManagementSummaryService buildingManagementSummaryService,
-        IStaffWorkforceQueryService staffWorkforceQueryService,
-        IInvasionDefenseSummaryService invasionDefenseSummaryService,
-        IOffenseTabSummaryService offenseTabSummaryService,
-        IOperationTabSummaryService operationTabSummaryService,
-        IResearchCraftingSummaryService researchCraftingSummaryService,
-        ICodexRecordSummaryService codexRecordSummaryService)
+    public UITabContentTextProvider(IEnumerable<IUITabContentPresenter> presenters)
     {
-        this.buildingManagementSummaryService = buildingManagementSummaryService
-            ?? throw new ArgumentNullException(nameof(buildingManagementSummaryService));
-        this.staffWorkforceQueryService = staffWorkforceQueryService
-            ?? throw new ArgumentNullException(nameof(staffWorkforceQueryService));
-        this.invasionDefenseSummaryService = invasionDefenseSummaryService
-            ?? throw new ArgumentNullException(nameof(invasionDefenseSummaryService));
-        this.offenseTabSummaryService = offenseTabSummaryService
-            ?? throw new ArgumentNullException(nameof(offenseTabSummaryService));
-        this.operationTabSummaryService = operationTabSummaryService
-            ?? throw new ArgumentNullException(nameof(operationTabSummaryService));
-        this.researchCraftingSummaryService = researchCraftingSummaryService
-            ?? throw new ArgumentNullException(nameof(researchCraftingSummaryService));
-        this.codexRecordSummaryService = codexRecordSummaryService
-            ?? throw new ArgumentNullException(nameof(codexRecordSummaryService));
-    }
-
-    public string Build(int id)
-    {
-        return id switch
+        IUITabContentPresenter[] registered = presenters?.ToArray()
+            ?? throw new ArgumentNullException(nameof(presenters));
+        IGrouping<TabId, IUITabContentPresenter> duplicate = registered
+            .GroupBy((presenter) => presenter.Id)
+            .FirstOrDefault((group) => group.Count() > 1);
+        if (duplicate != null)
         {
-            1 => BuildBuildingManagementText(),
-            2 => BuildStaffManagementText(),
-            3 => BuildShopText(),
-            4 => BuildWarehouseText(),
-            5 => BuildOperationText(),
-            6 => BuildInvasionDefenseText(),
-            7 => BuildOffenseText(),
-            8 => BuildResearchCraftingText(),
-            9 => BuildCodexRecordText(),
-            _ => string.Empty
-        };
+            throw new InvalidOperationException($"Multiple tab content presenters are registered for {duplicate.Key}.");
+        }
+
+        this.presenters = registered.ToDictionary((presenter) => presenter.Id);
     }
 
-    private string BuildBuildingManagementText()
+    public string Build(TabId id)
     {
-        BuildingManagementSummary summary = buildingManagementSummaryService.CaptureBuildings();
+        return presenters.TryGetValue(id, out IUITabContentPresenter presenter)
+            ? presenter.Build()
+            : string.Empty;
+    }
+}
 
+public sealed class BuildingTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IBuildingManagementSummaryService summaryService;
+
+    public BuildingTabContentPresenter(IBuildingManagementSummaryService summaryService)
+    {
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
+
+    public TabId Id => TabId.Buildings;
+
+    public string Build()
+    {
+        BuildingManagementSummary summary = summaryService.CaptureBuildings();
         return string.Join("\n", new[]
         {
             $"총 건물: {summary.TotalBuildings}",
@@ -76,17 +68,29 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
             "- 보충 필요 시설과 연구 가능 시설 필터"
         });
     }
+}
 
-    private string BuildStaffManagementText()
+public sealed class StaffTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IStaffWorkforceQueryService workforce;
+
+    public StaffTabContentPresenter(IStaffWorkforceQueryService workforce)
+    {
+        this.workforce = workforce ?? throw new ArgumentNullException(nameof(workforce));
+    }
+
+    public TabId Id => TabId.Staff;
+
+    public string Build()
     {
         int staffCount = 0;
         int offDutyCount = 0;
         int workingCount = 0;
         int expeditionCount = 0;
 
-        foreach (CharacterActor character in staffWorkforceQueryService.FindActiveWorkers())
+        foreach (CharacterActor character in workforce.FindActiveWorkers())
         {
-            if (!staffWorkforceQueryService.IsActiveWorker(character)
+            if (!workforce.IsActiveWorker(character)
                 || !CharacterWorkRoleUtility.TryGetWork(character, out AbilityWork work))
             {
                 continue;
@@ -111,11 +115,22 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
             "- 특정 시설 우선 배치와 침입자 제압 명령"
         });
     }
+}
 
-    private string BuildShopText()
+public sealed class ShopTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IBuildingManagementSummaryService summaryService;
+
+    public ShopTabContentPresenter(IBuildingManagementSummaryService summaryService)
     {
-        ShopManagementSummary summary = buildingManagementSummaryService.CaptureShops();
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
 
+    public TabId Id => TabId.Shop;
+
+    public string Build()
+    {
+        ShopManagementSummary summary = summaryService.CaptureShops();
         return string.Join("\n", new[]
         {
             $"상점 수: {summary.TotalShops}",
@@ -129,20 +144,32 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
             "- 구매한 설계도와 연구 잠금 상태"
         });
     }
+}
 
-    private string BuildWarehouseText()
+public sealed class WarehouseTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IBuildingManagementSummaryService summaryService;
+
+    public WarehouseTabContentPresenter(IBuildingManagementSummaryService summaryService)
     {
-        WarehouseManagementSummary summary = buildingManagementSummaryService.CaptureWarehouses();
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
 
+    public TabId Id => TabId.Warehouse;
+
+    public string Build()
+    {
+        WarehouseManagementSummary summary = summaryService.CaptureWarehouses();
         StringBuilder builder = new StringBuilder();
         builder.AppendLine($"창고 시설: {summary.WarehouseCount}");
         builder.AppendLine(summary.HasCapacityLimit
             ? $"총 재고: {summary.TotalStock} / {summary.TotalCapacity}"
             : $"총 재고: {summary.TotalStock}");
-        builder.AppendLine($"식재료: {summary.FoodStock}");
-        builder.AppendLine($"잡화: {summary.GeneralStock}");
-        builder.AppendLine($"무기: {summary.WeaponStock}");
-        builder.AppendLine($"마력: {summary.ManaStock}");
+        foreach (StockCategoryDefinition definition in StockCategoryCatalog.All)
+        {
+            builder.AppendLine($"{definition.DisplayName}: {summary.GetStock(definition.Category)}");
+        }
+
         builder.AppendLine();
         builder.AppendLine("창고 탭에 들어가야 할 핵심");
         builder.AppendLine("- 카테고리별 보유량과 남은 용량");
@@ -152,10 +179,22 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
         builder.AppendLine("- 창고별 우선순위: 식재료/무기/마력 전용화");
         return builder.ToString();
     }
+}
 
-    private string BuildOperationText()
+public sealed class OperationsTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IOperationTabSummaryService summaryService;
+
+    public OperationsTabContentPresenter(IOperationTabSummaryService summaryService)
     {
-        OperationTabSummary summary = operationTabSummaryService.Capture();
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
+
+    public TabId Id => TabId.Operations;
+
+    public string Build()
+    {
+        OperationTabSummary summary = summaryService.Capture();
         StringBuilder builder = new StringBuilder();
         if (summary.HasGameData)
         {
@@ -179,10 +218,22 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
         builder.AppendLine("- 다음 운영일 진행 버튼");
         return builder.ToString();
     }
+}
 
-    private string BuildInvasionDefenseText()
+public sealed class DefenseTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IInvasionDefenseSummaryService summaryService;
+
+    public DefenseTabContentPresenter(IInvasionDefenseSummaryService summaryService)
     {
-        InvasionDefenseSummary summary = invasionDefenseSummaryService.Capture();
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
+
+    public TabId Id => TabId.Defense;
+
+    public string Build()
+    {
+        InvasionDefenseSummary summary = summaryService.Capture();
         StringBuilder builder = new StringBuilder();
         if (summary.HasThreatRuntime)
         {
@@ -208,16 +259,31 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
         builder.AppendLine("- 전투 결과 리포트");
         return builder.ToString();
     }
+}
 
-    private string BuildOffenseText()
+public sealed class ExpeditionTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IOffenseTabSummaryService summaryService;
+
+    public ExpeditionTabContentPresenter(IOffenseTabSummaryService summaryService)
     {
-        OffenseTabSummary summary = offenseTabSummaryService.Capture();
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
+
+    public TabId Id => TabId.Expedition;
+
+    public string Build()
+    {
+        OffenseTabSummary summary = summaryService.Capture();
         StringBuilder builder = new StringBuilder();
         if (summary.HasWorldMap)
         {
             builder.AppendLine($"정찰 레벨: {summary.ReconLevel}");
             builder.AppendLine($"정찰 범위: {summary.ScanRange:0.#}");
             builder.AppendLine($"발견 목표: {summary.VisibleTargets}");
+            builder.AppendLine(summary.TruthRevealed
+                ? "승리 목표: 던전의 진실 공개 완료"
+                : $"승리 목표: 오펜스 {summary.CompletedTargets}/{summary.TotalTargets}");
             builder.AppendLine($"선택 목표: {(summary.HasSelectedTarget ? summary.SelectedTargetId : "없음")}");
         }
         else
@@ -236,10 +302,22 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
         builder.AppendLine("- 보상 수령과 창고 입고 내역");
         return builder.ToString();
     }
+}
 
-    private string BuildResearchCraftingText()
+public sealed class ResearchTabContentPresenter : IUITabContentPresenter
+{
+    private readonly IResearchCraftingSummaryService summaryService;
+
+    public ResearchTabContentPresenter(IResearchCraftingSummaryService summaryService)
     {
-        ResearchCraftingSummary summary = researchCraftingSummaryService.Capture();
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
+
+    public TabId Id => TabId.Research;
+
+    public string Build()
+    {
+        ResearchCraftingSummary summary = summaryService.Capture();
         StringBuilder builder = new StringBuilder();
         builder.AppendLine($"연구 작업 수: {summary.ResearchTaskCount}");
         builder.AppendLine($"완료 설계도: {summary.CompletedBlueprintCount}");
@@ -256,10 +334,22 @@ public sealed class UITabContentTextProvider : IUITabContentTextProvider
         builder.AppendLine("- 결과 시설 미리보기와 합성 확정");
         return builder.ToString();
     }
+}
 
-    private string BuildCodexRecordText()
+public sealed class CodexTabContentPresenter : IUITabContentPresenter
+{
+    private readonly ICodexRecordSummaryService summaryService;
+
+    public CodexTabContentPresenter(ICodexRecordSummaryService summaryService)
     {
-        CodexRecordSummary summary = codexRecordSummaryService.Capture();
+        this.summaryService = summaryService ?? throw new ArgumentNullException(nameof(summaryService));
+    }
+
+    public TabId Id => TabId.Codex;
+
+    public string Build()
+    {
+        CodexRecordSummary summary = summaryService.Capture();
         StringBuilder builder = new StringBuilder();
         builder.AppendLine($"몬스터 도감: {summary.MonsterEntries}");
         builder.AppendLine($"침공 도감: {summary.InvasionEntries}");

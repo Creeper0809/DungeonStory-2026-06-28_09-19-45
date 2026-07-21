@@ -43,28 +43,36 @@ public readonly struct WarehouseManagementSummary
         int warehouseCount,
         int totalStock,
         int totalCapacity,
-        int foodStock,
-        int generalStock,
-        int weaponStock,
-        int manaStock)
+        IReadOnlyDictionary<StockCategory, int> stockByCategory)
     {
         WarehouseCount = warehouseCount;
         TotalStock = totalStock;
         TotalCapacity = totalCapacity;
-        FoodStock = foodStock;
-        GeneralStock = generalStock;
-        WeaponStock = weaponStock;
-        ManaStock = manaStock;
+        StockByCategory = stockByCategory != null
+            ? new Dictionary<StockCategory, int>(stockByCategory)
+            : new Dictionary<StockCategory, int>();
     }
 
     public int WarehouseCount { get; }
     public int TotalStock { get; }
     public int TotalCapacity { get; }
-    public int FoodStock { get; }
-    public int GeneralStock { get; }
-    public int WeaponStock { get; }
-    public int ManaStock { get; }
+    public IReadOnlyDictionary<StockCategory, int> StockByCategory { get; }
     public bool HasCapacityLimit => TotalCapacity > 0;
+
+    public int GetStock(StockCategory category)
+    {
+        return StockByCategory.TryGetValue(category, out int amount) ? amount : 0;
+    }
+
+    public IReadOnlyList<KeyValuePair<StockCategory, int>> EnumerateStock()
+    {
+        return StockByCategory
+            .OrderBy((pair) => StockCategoryCatalog.TryGet(pair.Key, out StockCategoryDefinition definition)
+                ? definition.SortOrder
+                : int.MaxValue)
+            .ThenBy((pair) => (int)pair.Key)
+            .ToArray();
+    }
 }
 
 public interface IBuildingManagementSummaryService
@@ -90,7 +98,8 @@ public sealed class BuildingManagementSummaryService : IBuildingManagementSummar
 
     public ShopManagementSummary CaptureShops()
     {
-        return BuildingManagementSummaryQuery.FromShops(sceneQuery.All<Shop>());
+        return BuildingManagementSummaryQuery.FromShops(
+            sceneQuery.All<MonoBehaviour>().OfType<IRetailFacility>());
     }
 
     public WarehouseManagementSummary CaptureWarehouses()
@@ -133,12 +142,12 @@ public static class BuildingManagementSummaryQuery
             damagedBuildings);
     }
 
-    public static ShopManagementSummary FromShops(IEnumerable<Shop> shops)
+    public static ShopManagementSummary FromShops(IEnumerable<IRetailFacility> shops)
     {
-        Shop[] snapshot = shops?
+        IRetailFacility[] snapshot = shops?
             .Where((shop) => shop != null)
             .ToArray()
-            ?? Array.Empty<Shop>();
+            ?? Array.Empty<IRetailFacility>();
 
         int stockedShops = snapshot.Count((shop) => shop.HasAvailableStock);
         return new ShopManagementSummary(snapshot.Length, stockedShops, snapshot.Length - stockedShops);
@@ -156,14 +165,18 @@ public static class BuildingManagementSummaryQuery
             ? snapshot.Sum((warehouse) => warehouse.Inventory.HasCapacityLimit ? warehouse.Inventory.MaxCapacity : 0)
             : 0;
 
+        Dictionary<StockCategory, int> stockByCategory = snapshot
+            .SelectMany((warehouse) => warehouse.Inventory.EnumerateStock())
+            .GroupBy((pair) => pair.Key)
+            .ToDictionary(
+                (group) => group.Key,
+                (group) => group.Sum((pair) => pair.Value));
+
         return new WarehouseManagementSummary(
             snapshot.Length,
             snapshot.Sum((warehouse) => warehouse.Inventory.TotalStock),
             totalCapacity,
-            snapshot.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.Food)),
-            snapshot.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.General)),
-            snapshot.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.Weapon)),
-            snapshot.Sum((warehouse) => warehouse.Inventory.GetStock(StockCategory.Mana)));
+            stockByCategory);
     }
 
     private static bool IsValidWarehouse(IWarehouseFacility warehouse)

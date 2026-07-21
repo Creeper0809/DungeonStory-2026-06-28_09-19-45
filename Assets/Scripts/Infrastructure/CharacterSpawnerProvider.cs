@@ -18,7 +18,11 @@ public sealed class CharacterSpawnerProvider : ICharacterSpawnerProvider
 
     public bool TryGetSpawner(out CharacterSpawner resolvedSpawner)
     {
-        spawner ??= sceneQuery.First<CharacterSpawner>(includeInactive: true);
+        if (spawner == null)
+        {
+            spawner = sceneQuery.First<CharacterSpawner>(includeInactive: true);
+        }
+
         resolvedSpawner = spawner;
         return resolvedSpawner != null;
     }

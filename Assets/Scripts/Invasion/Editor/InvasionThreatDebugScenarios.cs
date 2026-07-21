@@ -23,6 +23,8 @@ public static class InvasionThreatDebugScenarios
         RunScenario("경고 이벤트와 알림", VerifyWarningAlert, errors);
         RunScenario("침입 후보 지연 이벤트", VerifyCandidateDelay, errors);
         RunScenario("침입 시작 후 초기화와 안전 시간", VerifyResetAndSafety, errors);
+        RunScenario("Preparation days refresh initial safety", VerifyInitialSafety, errors);
+        RunScenario("Structural pieces do not inflate dungeon value", VerifyStructuralValueExclusion, errors);
 
         if (errors.Count > 0)
         {
@@ -42,11 +44,49 @@ public static class InvasionThreatDebugScenarios
         return true;
     }
 
+    public static string DescribeActiveSceneValue()
+    {
+        BuildableObject[] buildings = Object.FindObjectsByType<BuildableObject>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None);
+        int structures = buildings.Count(building => building != null
+            && building.BuildingData != null
+            && (building.BuildingData.IsWall
+                || building.BuildingData.IsDoor
+                || building.BuildingData.IsGridMovement));
+        int valuables = buildings.Count(building => building != null
+            && InvasionThreatValueCalculator.CalculateBuildingValue(building.BuildingData) > 0f);
+        float value = InvasionThreatValueCalculator.CalculateDungeonValue(buildings);
+        return $"buildings={buildings.Length}; structuresExcluded={structures}; "
+            + $"valuables={valuables}; dungeonValue={value:0.##}; "
+            + $"riseContribution={value * 0.012f:0.###}/s";
+    }
+
     private static void RunScenario(string name, System.Func<bool> scenario, List<string> errors)
     {
-        if (scenario()) return;
+        try
+        {
+            if (scenario()) return;
+        }
+        finally
+        {
+            CleanupLeakedScenarioObjects();
+        }
 
         errors.Add(name);
+    }
+
+    private static void CleanupLeakedScenarioObjects()
+    {
+        foreach (InvasionThreatRuntime runtime in Object.FindObjectsByType<InvasionThreatRuntime>(
+                     FindObjectsInactive.Include,
+                     FindObjectsSortMode.None))
+        {
+            if (runtime != null && runtime.gameObject.name == "InvasionThreatRuntime_Test")
+            {
+                Object.DestroyImmediate(runtime.gameObject);
+            }
+        }
     }
 
     private static bool VerifyThreatRiseFactors()
@@ -137,10 +177,62 @@ public static class InvasionThreatDebugScenarios
         return reset && safetyEnded;
     }
 
+    private static bool VerifyInitialSafety()
+    {
+        InvasionThreatRuntime runtime = CreateRuntime(out GameObject root);
+        runtime.Settings.initialSafetyDurationSeconds = 180f;
+
+        runtime.OnTriggerEvent(new OperatingDayStartedEvent(1));
+        bool active = runtime.CurrentStage == InvasionThreatStage.Safety
+            && Mathf.Approximately(runtime.SafetyRemaining, 180f);
+        runtime.Tick(179f);
+        runtime.OnTriggerEvent(new OperatingDayStartedEvent(2));
+        bool dayTwoRefreshed = Mathf.Approximately(runtime.SafetyRemaining, 180f);
+        runtime.Tick(179f);
+        runtime.OnTriggerEvent(new OperatingDayStartedEvent(3));
+        bool dayThreeRefreshed = Mathf.Approximately(runtime.SafetyRemaining, 180f);
+        runtime.Tick(181f);
+        runtime.OnTriggerEvent(new OperatingDayStartedEvent(4));
+        bool growthStartsThreat = runtime.CurrentStage != InvasionThreatStage.Safety
+            && runtime.CurrentThreat > 0f;
+
+        Object.DestroyImmediate(root);
+        return active && dayTwoRefreshed && dayThreeRefreshed && growthStartsThreat;
+    }
+
+    private static bool VerifyStructuralValueExclusion()
+    {
+        BuildingSO wall = ScriptableObject.CreateInstance<BuildingSO>();
+        BuildingSO door = ScriptableObject.CreateInstance<BuildingSO>();
+        BuildingSO facility = ScriptableObject.CreateInstance<BuildingSO>();
+        try
+        {
+            wall.category = BuildingCategory.Wall;
+            door.type = typeof(Door);
+            facility.category = BuildingCategory.Production;
+            facility.Facility = new FacilityData { roles = FacilityRole.Research };
+
+            return Mathf.Approximately(InvasionThreatValueCalculator.CalculateBuildingValue(wall), 0f)
+                && Mathf.Approximately(InvasionThreatValueCalculator.CalculateBuildingValue(door), 0f)
+                && InvasionThreatValueCalculator.CalculateBuildingValue(facility) >= 0.5f;
+        }
+        finally
+        {
+            Object.DestroyImmediate(wall);
+            Object.DestroyImmediate(door);
+            Object.DestroyImmediate(facility);
+        }
+    }
+
     private static InvasionThreatRuntime CreateRuntime(out GameObject root)
     {
         root = new GameObject("InvasionThreatRuntime_Test");
-        return root.AddComponent<InvasionThreatRuntime>();
+        InvasionThreatRuntime runtime = root.AddComponent<InvasionThreatRuntime>();
+        runtime.Construct(
+            new FixedWorldSampler(),
+            new NeutralRunVariableReader(),
+            new NeutralMetaProgressionReader());
+        return runtime;
     }
 
     private static void ConfigureFastSettings(InvasionThreatRuntime runtime)
@@ -175,6 +267,45 @@ public static class InvasionThreatDebugScenarios
             {
                 Object.DestroyImmediate(obj);
             }
+        }
+    }
+
+    private sealed class FixedWorldSampler : IInvasionThreatWorldSampler
+    {
+        public InvasionThreatFactors Sample(float secondsSinceLastInvasion)
+        {
+            return new InvasionThreatFactors(0f, 0f, 0f, 0f);
+        }
+    }
+
+    private sealed class NeutralRunVariableReader : IRunVariableRuntimeReader
+    {
+        public int GetInitialShopSeed() => 0;
+        public IReadOnlyList<int> GetStartingBlueprintCandidateIds() => System.Array.Empty<int>();
+        public float GetGuestDemandMultiplier(string speciesTag) => 1f;
+        public float GetStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFacilityShopCostMultiplier(BuildingSO building) => 1f;
+        public float GetBlueprintCostMultiplier(FacilityBlueprintSO blueprint) => 1f;
+        public float GetThreatRiseMultiplier() => 1f;
+        public float GetWarningThresholdMultiplier() => 1f;
+        public InvasionIntruderSettings ApplyInvasionSettings(InvasionIntruderSettings source) => source;
+    }
+
+    private sealed class NeutralMetaProgressionReader : IMetaProgressionRuntimeReader
+    {
+        public int GetStartingFacilityCandidateBonus() => 0;
+        public int GetStartingOwnerTraitCandidateBonus() => 0;
+        public float GetOwnerMaxHealthMultiplier() => 1f;
+        public float GetInvasionWarningThresholdMultiplier() => 1f;
+        public float GetCommerceStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFortressFacilityCostMultiplier(BuildingSO building) => 1f;
+        public float GetArcaneResearchWorkMultiplier() => 1f;
+        public bool IsRecipePreserved(string recipeId) => false;
+
+        public IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(
+            IEnumerable<BuildingSO> buildings)
+        {
+            return System.Array.Empty<int>();
         }
     }
 

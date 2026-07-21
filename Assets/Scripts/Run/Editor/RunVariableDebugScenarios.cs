@@ -20,6 +20,7 @@ public static class RunVariableDebugScenarios
     public static bool RunAll(bool logSuccess)
     {
         List<string> errors = new List<string>();
+        RunScenario("주인 교리 3종 운영 효과", VerifyOwnerDoctrines, errors);
 
         RunScenario("시작 변수 선택", VerifyStartVariables, errors);
         RunScenario("운영 이벤트 9종 배율", VerifyOperationVariables, errors);
@@ -27,6 +28,8 @@ public static class RunVariableDebugScenarios
         RunScenario("상점/재고 비용 연결", VerifyCostIntegrations, errors);
         RunScenario("침입 변수 5종 설정 연결", VerifyInvasionVariables, errors);
         RunScenario("이벤트 알림 발행", VerifyEventAlerts, errors);
+        RunScenario("미등록 효과/안정 ID 확장", VerifyOpenEffectRegistration, errors);
+        RunScenario("런 변수 스냅샷 격리", VerifySnapshotIsolation, errors);
 
         if (errors.Count > 0)
         {
@@ -56,8 +59,25 @@ public static class RunVariableDebugScenarios
         {
             Debug.LogException(ex);
         }
+        finally
+        {
+            CleanupLeakedScenarioObjects();
+        }
 
         errors.Add(name);
+    }
+
+    private static void CleanupLeakedScenarioObjects()
+    {
+        foreach (RunVariableRuntime runtime in Object.FindObjectsByType<RunVariableRuntime>(
+                     FindObjectsInactive.Include,
+                     FindObjectsSortMode.None))
+        {
+            if (runtime != null && runtime.gameObject.name == "Run Variable Scenario Runtime")
+            {
+                Object.DestroyImmediate(runtime.gameObject);
+            }
+        }
     }
 
     private static bool VerifyStartVariables()
@@ -70,13 +90,134 @@ public static class RunVariableDebugScenarios
         bool valid = snapshot != null
             && snapshot.seed == 12345
             && snapshot.ownerSpeciesTag == "Slime"
-            && snapshot.difficulty == InvasionThreatDifficulty.Hard
+            && snapshot.runDifficulty == DungeonDifficulty.Hard
             && snapshot.threatRiseMultiplier > 1f
+            && snapshot.ownerDoctrineId == OwnerDoctrineIds.SlimeStewardship
             && snapshot.initialShopSeed != 0
-            && snapshot.initialDungeonLayoutId == "wet-front";
+            && snapshot.initialDungeonLayoutId == "wet-front"
+            && snapshot.startingBlueprintCandidateIds.Count == 2
+            && snapshot.startingBlueprintCandidateIds[0] == RunStrategyBlueprintIds.CommerceBasics;
 
         Object.DestroyImmediate(owner);
         return valid;
+    }
+
+    private static bool VerifyOwnerDoctrines()
+    {
+        CharacterSO slime = CreateCharacter(8111, CharacterType.NPC, "Slime");
+        CharacterSO orc = CreateCharacter(8112, CharacterType.NPC, "Orc");
+        CharacterSO vampire = CreateCharacter(8113, CharacterType.NPC, "Vampire");
+        BuildingSO generalBuilding = CreateBuilding(8114, "일반 시설", false);
+        BuildingSO defenseBuilding = CreateBuilding(8115, "방어 시설", true);
+        FacilityBlueprintSO blueprint = CreateBlueprint(8116, "교리 검증 설계도", 100);
+
+        try
+        {
+            using ScenarioRuntime slimeScenario = new ScenarioRuntime();
+            slimeScenario.Runtime.StartRun(111, slime, InvasionThreatDifficulty.Normal);
+            bool slimeValid = slimeScenario.Runtime.State.StartVariables.ownerDoctrineId
+                    == OwnerDoctrineIds.SlimeStewardship
+                && Mathf.Approximately(
+                    slimeScenario.Runtime.GetStockCostMultiplier(StockCategory.Food),
+                    0.85f)
+                && Mathf.Approximately(
+                    slimeScenario.Runtime.GetStockCostMultiplier(StockCategory.General),
+                    0.85f)
+                && Mathf.Approximately(
+                    slimeScenario.Runtime.GetFacilityShopCostMultiplier(generalBuilding),
+                    1.1f);
+
+            using ScenarioRuntime orcScenario = new ScenarioRuntime();
+            orcScenario.Runtime.StartRun(112, orc, InvasionThreatDifficulty.Normal);
+            bool orcValid = orcScenario.Runtime.State.StartVariables.ownerDoctrineId
+                    == OwnerDoctrineIds.OrcWarCamp
+                && Mathf.Approximately(
+                    orcScenario.Runtime.GetFacilityShopCostMultiplier(generalBuilding),
+                    1f)
+                && Mathf.Approximately(
+                    orcScenario.Runtime.GetFacilityShopCostMultiplier(defenseBuilding),
+                    0.75f)
+                && Mathf.Approximately(orcScenario.Runtime.GetThreatRiseMultiplier(), 1.15f);
+
+            using ScenarioRuntime vampireScenario = new ScenarioRuntime();
+            vampireScenario.Runtime.StartRun(113, vampire, InvasionThreatDifficulty.Normal);
+            bool vampireValid = vampireScenario.Runtime.State.StartVariables.ownerDoctrineId
+                    == OwnerDoctrineIds.VampireForbiddenStudy
+                && Mathf.Approximately(
+                    vampireScenario.Runtime.GetBlueprintCostMultiplier(blueprint),
+                    0.75f)
+                && Mathf.Approximately(
+                    vampireScenario.Runtime.GetFacilityShopCostMultiplier(generalBuilding),
+                    1.1f)
+                && Mathf.Approximately(
+                    vampireScenario.Runtime.GetStockCostMultiplier(StockCategory.Food),
+                    1f);
+
+            return slimeValid && orcValid && vampireValid;
+        }
+        finally
+        {
+            Object.DestroyImmediate(slime);
+            Object.DestroyImmediate(orc);
+            Object.DestroyImmediate(vampire);
+            Object.DestroyImmediate(generalBuilding);
+            Object.DestroyImmediate(defenseBuilding);
+            Object.DestroyImmediate(blueprint);
+        }
+    }
+
+    private static bool VerifySnapshotIsolation()
+    {
+        int[] sourceFacilities = { 10, 20 };
+        IRunVariableEffect[] sourceEffects = { new TestGuestDemandEffect() };
+        RunStartVariableSnapshot start = new RunStartVariableSnapshot(
+            11,
+            "Slime",
+            InvasionThreatDifficulty.Normal,
+            sourceFacilities,
+            new[] { "Slime" },
+            new[] { 30 },
+            12,
+            "compact-shop",
+            1f);
+        RunVariableDefinition definition = new RunVariableDefinition(
+            "run:test:snapshot",
+            RunVariableCategory.Operation,
+            "Snapshot",
+            "Snapshot",
+            EventAlertImportance.Low,
+            1,
+            sourceEffects);
+
+        sourceFacilities[0] = 99;
+        sourceEffects[0] = null;
+
+        bool mutationRejected = false;
+        if (start.startingFacilityCandidateIds is IList<int> facilityIds)
+        {
+            try
+            {
+                facilityIds[0] = 77;
+            }
+            catch (NotSupportedException)
+            {
+                mutationRejected = true;
+            }
+        }
+
+        using ScenarioRuntime scenario = new ScenarioRuntime();
+        ActiveRunVariable active = scenario.Runtime.ActivateOperationVariable(
+            RunVariableIds.SlimeCrowdVisit,
+            1,
+            false);
+        RunVariableActivatedEvent activatedEvent = new RunVariableActivatedEvent(active);
+        scenario.Runtime.OnTriggerEvent(new OperatingDayEndedEvent(1));
+
+        return mutationRejected
+            && start.startingFacilityCandidateIds[0] == 10
+            && definition.effects[0] != null
+            && active.RemainingDays == 0
+            && activatedEvent.activeVariable.RemainingDays == 1;
     }
 
     private static bool VerifyOperationVariables()
@@ -110,7 +251,7 @@ public static class RunVariableDebugScenarios
     private static bool VerifyOperationVariableExpiration()
     {
         using ScenarioRuntime scenario = new ScenarioRuntime();
-        scenario.Runtime.ActivateOperationVariable(RunVariableId.SlimeCrowdVisit, 1, false);
+        scenario.Runtime.ActivateOperationVariable(RunVariableIds.SlimeCrowdVisit, 1, false);
         bool active = scenario.Runtime.GetGuestDemandMultiplier("Slime") > 1f;
 
         scenario.Runtime.OnTriggerEvent(new OperatingDayEndedEvent(1));
@@ -136,7 +277,7 @@ public static class RunVariableDebugScenarios
                 0,
                 scenario.Runtime.GetFacilityShopCostMultiplier,
                 scenario.Runtime.GetBlueprintCostMultiplier)
-            .First((offer) => offer.Type == FacilityShopOfferType.Building)
+            .First((offer) => offer is FacilityBuildingOffer)
             .Cost;
         int baseBlueprintCost = FacilityShopService.CreateDailyOffers(
                 1,
@@ -145,12 +286,12 @@ public static class RunVariableDebugScenarios
                 0,
                 scenario.Runtime.GetFacilityShopCostMultiplier,
                 scenario.Runtime.GetBlueprintCostMultiplier)
-            .First((offer) => offer.Type == FacilityShopOfferType.Blueprint)
+            .First((offer) => offer is FacilityBlueprintOffer)
             .Cost;
 
-        scenario.Runtime.ActivateOperationVariable(RunVariableId.FoodDeliveryDelay, 1, false);
-        scenario.Runtime.ActivateOperationVariable(RunVariableId.VisitingMerchant, 1, false);
-        scenario.Runtime.ActivateOperationVariable(RunVariableId.BlueprintRumor, 1, false);
+        scenario.Runtime.ActivateOperationVariable(RunVariableIds.FoodDeliveryDelay, 1, false);
+        scenario.Runtime.ActivateOperationVariable(RunVariableIds.VisitingMerchant, 1, false);
+        scenario.Runtime.ActivateOperationVariable(RunVariableIds.BlueprintRumor, 1, false);
 
         int eventFoodCost = StockSupplyService.CreateDailyDeliveryOffers(1, scenario.Runtime.GetStockCostMultiplier)
             .First((offer) => offer.category == StockCategory.Food)
@@ -162,7 +303,7 @@ public static class RunVariableDebugScenarios
                 0,
                 scenario.Runtime.GetFacilityShopCostMultiplier,
                 scenario.Runtime.GetBlueprintCostMultiplier)
-            .First((offer) => offer.Type == FacilityShopOfferType.Building)
+            .First((offer) => offer is FacilityBuildingOffer)
             .Cost;
         int eventBlueprintCost = FacilityShopService.CreateDailyOffers(
                 1,
@@ -171,7 +312,7 @@ public static class RunVariableDebugScenarios
                 0,
                 scenario.Runtime.GetFacilityShopCostMultiplier,
                 scenario.Runtime.GetBlueprintCostMultiplier)
-            .First((offer) => offer.Type == FacilityShopOfferType.Blueprint)
+            .First((offer) => offer is FacilityBlueprintOffer)
             .Cost;
 
         Object.DestroyImmediate(generalBuilding);
@@ -193,16 +334,26 @@ public static class RunVariableDebugScenarios
             finalCombatWindupSeconds = 0.7f
         };
 
-        bool scout = scenario.Runtime.SelectInvasionVariable(RunVariableId.ScoutTraces, false) != null
-            && scenario.Runtime.ApplyInvasionSettings(source).secondsToFullFocus < source.secondsToFullFocus;
-        bool ambush = scenario.Runtime.SelectInvasionVariable(RunVariableId.Ambush, false) != null
-            && scenario.Runtime.ApplyInvasionSettings(source).repathIntervalSeconds < source.repathIntervalSeconds;
-        bool armed = scenario.Runtime.SelectInvasionVariable(RunVariableId.ArmedIntruder, false) != null
-            && scenario.Runtime.ApplyInvasionSettings(source).finalCombatDamage > source.finalCombatDamage;
-        bool loot = scenario.Runtime.SelectInvasionVariable(RunVariableId.LootPriority, false) != null
-            && scenario.Runtime.ApplyInvasionSettings(source).facilityDamageIntervalSeconds < source.facilityDamageIntervalSeconds;
-        bool tired = scenario.Runtime.SelectInvasionVariable(RunVariableId.TiredIntruder, false) != null
-            && scenario.Runtime.ApplyInvasionSettings(source).finalCombatDamage < source.finalCombatDamage;
+        bool scout = scenario.Runtime.SelectInvasionVariable(RunVariableIds.ScoutTraces, false) != null
+            && scenario.Runtime.ApplyInvasionSettings(source) is InvasionIntruderSettings scoutSettings
+            && scoutSettings.patternId == InvasionIntruderPatternIds.Hunter
+            && scoutSettings.secondsToFullFocus < source.secondsToFullFocus;
+        bool ambush = scenario.Runtime.SelectInvasionVariable(RunVariableIds.Ambush, false) != null
+            && scenario.Runtime.ApplyInvasionSettings(source) is InvasionIntruderSettings ambushSettings
+            && ambushSettings.patternId == InvasionIntruderPatternIds.Ambusher
+            && ambushSettings.repathIntervalSeconds < source.repathIntervalSeconds;
+        bool armed = scenario.Runtime.SelectInvasionVariable(RunVariableIds.ArmedIntruder, false) != null
+            && scenario.Runtime.ApplyInvasionSettings(source) is InvasionIntruderSettings armedSettings
+            && armedSettings.patternId == InvasionIntruderPatternIds.Breaker
+            && armedSettings.finalCombatDamage > source.finalCombatDamage;
+        bool loot = scenario.Runtime.SelectInvasionVariable(RunVariableIds.LootPriority, false) != null
+            && scenario.Runtime.ApplyInvasionSettings(source) is InvasionIntruderSettings lootSettings
+            && lootSettings.patternId == InvasionIntruderPatternIds.Plunderer
+            && lootSettings.facilityDamageIntervalSeconds < source.facilityDamageIntervalSeconds;
+        bool tired = scenario.Runtime.SelectInvasionVariable(RunVariableIds.TiredIntruder, false) != null
+            && scenario.Runtime.ApplyInvasionSettings(source) is InvasionIntruderSettings tiredSettings
+            && tiredSettings.patternId == InvasionIntruderPatternIds.Straggler
+            && tiredSettings.finalCombatDamage < source.finalCombatDamage;
 
         scenario.Runtime.OnTriggerEvent(new InvasionResolvedEvent(true, 0f));
         bool cleared = scenario.Runtime.State.CurrentInvasionVariable == null;
@@ -215,11 +366,41 @@ public static class RunVariableDebugScenarios
         using ScenarioRuntime scenario = new ScenarioRuntime();
         using CountingEventAlertRequestListener alerts = new CountingEventAlertRequestListener();
 
-        scenario.Runtime.ActivateOperationVariable(RunVariableId.OrcFeast, 1);
-        scenario.Runtime.SelectInvasionVariable(RunVariableId.ArmedIntruder);
+        scenario.Runtime.ActivateOperationVariable(RunVariableIds.OrcFeast, 1);
+        scenario.Runtime.SelectInvasionVariable(RunVariableIds.ArmedIntruder);
 
         return alerts.Requests.Any((request) => request.Title == "오크 회식" && request.Category == "운영 변수")
             && alerts.Requests.Any((request) => request.Title == "무장한 침입자" && request.Category == "침입 변수");
+    }
+
+    private static bool VerifyOpenEffectRegistration()
+    {
+        const string CustomId = "run:test:festival-demand";
+        try
+        {
+            RunVariableCatalog.Register(new RunVariableDefinition(
+                CustomId,
+                RunVariableCategory.Operation,
+                "테스트 축제",
+                "테스트 종족 수요 증가",
+                EventAlertImportance.Low,
+                1,
+                new IRunVariableEffect[] { new TestGuestDemandEffect() }));
+
+            using ScenarioRuntime scenario = new ScenarioRuntime();
+            ActiveRunVariable active = scenario.Runtime.ActivateOperationVariable(CustomId, 1, false);
+            bool noLegacyEffectBag = typeof(RunVariableDefinition)
+                .GetField("guestDemandMultiplier") == null
+                && typeof(RunVariableDefinition).GetField("finalCombatDamageMultiplier") == null;
+            return active != null
+                && active.Definition.id == CustomId
+                && scenario.Runtime.GetGuestDemandMultiplier("TestSpecies") > 2f
+                && noLegacyEffectBag;
+        }
+        finally
+        {
+            RunVariableCatalog.ResetToBuiltIns();
+        }
     }
 
     private static BuildingSO CreateBuilding(int id, string name, bool defense)
@@ -233,9 +414,12 @@ public static class RunVariableDebugScenarios
         building.layer = GridLayer.Building;
         if (defense)
         {
-            building.Defense.enabled = true;
-            building.Defense.star = 1;
-            building.Defense.concept = DefenseAttackConcept.Physical;
+            building.Defense = new DefenseFacilityData
+            {
+                enabled = true,
+                star = 1,
+                concept = DefenseAttackConcept.Physical
+            };
         }
 
         return building;
@@ -269,8 +453,20 @@ public static class RunVariableDebugScenarios
         public ScenarioRuntime()
         {
             runtimeObject = new GameObject("Run Variable Scenario Runtime");
-            Runtime = runtimeObject.AddComponent<RunVariableRuntime>();
-            Runtime.StartRun(999, null, InvasionThreatDifficulty.Normal);
+            try
+            {
+                Runtime = runtimeObject.AddComponent<RunVariableRuntime>();
+                Runtime.Construct(
+                    new TestOwnerRunDataProvider(),
+                    new MissingThreatRuntimeProvider(),
+                    new TestRunStartVariableSelector());
+                Runtime.StartRun(999, null, InvasionThreatDifficulty.Normal);
+            }
+            catch
+            {
+                Object.DestroyImmediate(runtimeObject);
+                throw;
+            }
         }
 
         public void Dispose()
@@ -303,6 +499,60 @@ public static class RunVariableDebugScenarios
         public void Dispose()
         {
             this.EventStopListening<EventAlertRequestedEvent>();
+        }
+    }
+
+    private sealed class TestGuestDemandEffect : IRunVariableMultiplierEffect<string>
+    {
+        public float GetMultiplier(string context)
+        {
+            return string.Equals(context, "TestSpecies", StringComparison.OrdinalIgnoreCase)
+                ? 2.25f
+                : 1f;
+        }
+    }
+
+    private sealed class TestOwnerRunDataProvider : IOwnerRunDataProvider
+    {
+        public CharacterSO SelectedOwnerData => null;
+    }
+
+    private sealed class MissingThreatRuntimeProvider : IInvasionThreatRuntimeProvider
+    {
+        public bool TryGetRuntime(out InvasionThreatRuntime runtime)
+        {
+            runtime = null;
+            return false;
+        }
+    }
+
+    private sealed class TestRunStartVariableSelector : IRunStartVariableSelector
+    {
+        public RunStartVariableSnapshot Create(
+            int seed,
+            CharacterSO ownerData,
+            DungeonDifficulty difficulty)
+        {
+            string species = !string.IsNullOrWhiteSpace(ownerData?.SpeciesTag)
+                ? ownerData.SpeciesTag
+                : "Unknown";
+            int strategyBlueprintId = RunStrategyBlueprintIds.ResolveForSpecies(species);
+            int[] startingBlueprintIds = strategyBlueprintId >= 0
+                ? new[] { strategyBlueprintId, 6999 }
+                : Array.Empty<int>();
+            return new RunStartVariableSnapshot(
+                seed,
+                species,
+                difficulty,
+                Array.Empty<int>(),
+                Array.Empty<string>(),
+                startingBlueprintIds,
+                seed ^ 0x5F3759DF,
+                string.Equals(species, "Slime", StringComparison.OrdinalIgnoreCase)
+                    ? "wet-front"
+                    : "compact-shop",
+                difficulty == DungeonDifficulty.Hard ? 1.2f : 1f,
+                OwnerDoctrineCatalog.ResolveForSpecies(species)?.id);
         }
     }
 }

@@ -57,22 +57,49 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
     private int activeClickNumber;
     private bool subscribed;
     private bool stateCaptured;
+    private bool preparedRun;
     private InputSettings.EditorInputBehaviorInPlayMode originalEditorInputBehavior;
     private bool inputBehaviorCaptured;
+    private Mouse originalMouse;
+    private Mouse verificationMouse;
+    private int verificationMouseSerial;
 
     private IEnumerator Start()
     {
         Directory.CreateDirectory("Temp");
+        PlayModeVerificationPersistenceSnapshot.CaptureCurrent("character-click-priority");
         Application.logMessageReceived += OnLogMessageReceived;
         originalEditorInputBehavior = InputSystem.settings.editorInputBehaviorInPlayMode;
         inputBehaviorCaptured = true;
         InputSystem.settings.editorInputBehaviorInPlayMode =
             InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+        originalMouse = Mouse.current;
+        if (originalMouse != null)
+        {
+            InputSystem.DisableDevice(originalMouse);
+        }
+        CreateVerificationMouse();
         originalTimeScale = Time.timeScale;
         Time.timeScale = 0f;
 
         yield return null;
         yield return null;
+
+        Check(verificationMouse != null, "MOUSE", "Input System mouse resolved");
+        if (verificationMouse == null)
+        {
+            CleanupAndFinish();
+            yield break;
+        }
+
+        originalMousePosition = verificationMouse.position.ReadValue();
+        yield return EnsurePlayableRun();
+        if (preparedRun)
+        {
+            originalTimeScale = Time.timeScale;
+        }
+        Time.timeScale = 0f;
+        yield return new WaitForSecondsRealtime(0.2f);
 
         Camera camera = Camera.main;
         characterSummary = UnityEngine.Object.FindFirstObjectByType<CharacterSummeryInfo>();
@@ -85,9 +112,8 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         Check(buildingSummary != null, "BUILDING_SUMMARY", "building summary resolved");
         Check(buildingDetail != null, "BUILDING_DETAIL", "full building detail panel resolved");
         Check(actor != null, "CHARACTER", "active character resolved");
-        Check(Mouse.current != null, "MOUSE", "Input System mouse resolved");
         if (camera == null || characterSummary == null || buildingSummary == null
-            || buildingDetail == null || actor == null || Mouse.current == null)
+            || buildingDetail == null || actor == null)
         {
             CleanupAndFinish();
             yield break;
@@ -117,7 +143,6 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         }
 
         originalActorPosition = actor.transform.position;
-        originalMousePosition = Mouse.current.position.ReadValue();
         stateCaptured = true;
         Vector2 clickWorldPosition = buildingCollider.bounds.center;
         actor.transform.position += (Vector3)(clickWorldPosition - (Vector2)actorCollider.bounds.center);
@@ -156,12 +181,16 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         yield return PressMouse(screenPoint);
         yield return new WaitForSecondsRealtime(0.2f);
 
-        Check(buildingClickCount == 1, "BUILDING_PRESS_CLICK", $"buildingClicks={buildingClickCount}");
-        Check(IsBuildingOnlyOpen(), "BUILDING_PRESS_UI", "full building detail only; character and duplicate summary closed");
+        Check(IsBuildingOnlyOpen() && IsDisplayedBuilding(building),
+            "BUILDING_PRESS_CLICK",
+            $"{DescribeBuildingInfoPanels()}; displayed={GetDisplayedBuildingName()}; expected={building.BuildingData.objectName}; buildingClicks={buildingClickCount}");
+        Check(IsBuildingOnlyOpen(), "BUILDING_PRESS_UI", DescribeBuildingInfoPanels());
         yield return CaptureScreenshot(CharacterClickPriorityPlayModeVerifier.BuildingCapturePath);
         yield return ReleaseMouse(screenPoint);
-        Check(buildingClickCount == 1, "BUILDING_RELEASE_CLICK", $"buildingClicks={buildingClickCount}");
-        Check(IsBuildingOnlyOpen(), "BUILDING_RELEASE_UI", "full building detail remains the only information panel");
+        Check(IsBuildingOnlyOpen() && IsDisplayedBuilding(building),
+            "BUILDING_RELEASE_CLICK",
+            $"{DescribeBuildingInfoPanels()}; displayed={GetDisplayedBuildingName()}; expected={building.BuildingData.objectName}; buildingClicks={buildingClickCount}");
+        Check(IsBuildingOnlyOpen(), "BUILDING_RELEASE_UI", DescribeBuildingInfoPanels());
 
         InfoFeedEvent.Trigger(actor);
         yield return null;
@@ -172,6 +201,65 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         RestoreWorldState();
         yield return null;
         CleanupAndFinish();
+    }
+
+    private IEnumerator EnsurePlayableRun()
+    {
+        Button startNew = FindSceneButton("StartNewRunButton");
+        if (startNew != null && startNew.gameObject.activeInHierarchy)
+        {
+            preparedRun = true;
+            yield return ClickUiButton(startNew, "new game");
+            if (startNew.gameObject.activeInHierarchy)
+            {
+                yield return ClickUiButton(startNew, "confirm new game");
+            }
+            yield return new WaitForSecondsRealtime(0.2f);
+        }
+
+        OwnerRunManager ownerManager = UnityEngine.Object.FindFirstObjectByType<OwnerRunManager>();
+        if (ownerManager != null && ownerManager.CurrentOwnerActor == null)
+        {
+            preparedRun = true;
+            Button ownerOption = Resources.FindObjectsOfTypeAll<Button>()
+                .FirstOrDefault(button => button != null
+                    && button.gameObject.scene.IsValid()
+                    && button.gameObject.activeInHierarchy
+                    && button.name.StartsWith("OwnerOption_", StringComparison.Ordinal));
+            yield return ClickUiButton(ownerOption, "owner option");
+            yield return StartPartyPlayModeTestDriver.CompleteIfVisible();
+            yield return new WaitForSecondsRealtime(0.2f);
+        }
+
+        Check(ownerManager != null && ownerManager.CurrentOwnerActor != null,
+            "RUN_READY",
+            "new game and owner selection completed with pointer input");
+    }
+
+    private IEnumerator ClickUiButton(Button button, string label)
+    {
+        bool available = button != null && button.gameObject.activeInHierarchy && button.interactable;
+        Check(available, "POINTER_TARGET", available ? label : label + " missing");
+        if (!available)
+        {
+            yield break;
+        }
+
+        Canvas.ForceUpdateCanvases();
+        RectTransform rect = button.GetComponent<RectTransform>();
+        Vector2 screenPoint = RectTransformUtility.WorldToScreenPoint(
+            GetCanvasCamera(rect),
+            rect.TransformPoint(rect.rect.center));
+        yield return PressMouse(screenPoint);
+        yield return ReleaseMouse(screenPoint);
+    }
+
+    private static Button FindSceneButton(string name)
+    {
+        return Resources.FindObjectsOfTypeAll<Button>()
+            .FirstOrDefault(button => button != null
+                && button.gameObject.scene.IsValid()
+                && button.name == name);
     }
 
     private CharacterActor FindActor()
@@ -230,6 +318,17 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
                     continue;
                 }
 
+                BuildableObject[] overlappingBuildings = Physics2D
+                    .OverlapPointAll(candidateCollider.bounds.center)
+                    .Select(hit => hit != null ? hit.GetComponentInParent<BuildableObject>() : null)
+                    .Where(item => item != null && !item.isDestroy)
+                    .Distinct()
+                    .ToArray();
+                if (overlappingBuildings.Length != 1 || overlappingBuildings[0] != candidate)
+                {
+                    continue;
+                }
+
                 selectedCollider = candidateCollider;
                 selectedScreenPoint = screenPoint;
                 return candidate;
@@ -266,7 +365,48 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         bool buildingOpen = buildingSummary != null
             && buildingSummary.UI != null
             && buildingSummary.UI.activeInHierarchy;
-        return IsDetailedBuildingOpen() && !characterOpen && !buildingOpen;
+        bool detailOpen = IsDetailedBuildingOpen();
+        return !characterOpen && (detailOpen ^ buildingOpen);
+    }
+
+    private string DescribeBuildingInfoPanels()
+    {
+        bool characterOpen = characterSummary != null
+            && characterSummary.UI != null
+            && characterSummary.UI.activeInHierarchy;
+        bool summaryOpen = buildingSummary != null
+            && buildingSummary.UI != null
+            && buildingSummary.UI.activeInHierarchy;
+        bool detailOpen = IsDetailedBuildingOpen();
+        return $"character={characterOpen}; summary={summaryOpen}; detail={detailOpen}";
+    }
+
+    private bool IsDisplayedBuilding(BuildableObject expected)
+    {
+        if (expected == null || expected.BuildingData == null)
+        {
+            return false;
+        }
+
+        return string.Equals(GetDisplayedBuildingName(), expected.BuildingData.objectName, StringComparison.Ordinal);
+    }
+
+    private string GetDisplayedBuildingName()
+    {
+        if (buildingSummary != null
+            && buildingSummary.UI != null
+            && buildingSummary.UI.activeInHierarchy
+            && buildingSummary.objectName != null)
+        {
+            return buildingSummary.objectName.text;
+        }
+
+        if (IsDetailedBuildingOpen() && buildingDetail != null && buildingDetail.nameText != null)
+        {
+            return buildingDetail.nameText.text;
+        }
+
+        return string.Empty;
     }
 
     private bool IsDetailedBuildingOpen()
@@ -290,38 +430,88 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
     private IEnumerator PressMouse(Vector2 screenPoint)
     {
         activeClickNumber = ++physicalClickCount;
-        Mouse mouse = Mouse.current;
         MouseState pressedState = new MouseState
         {
             position = screenPoint
         }.WithButton(MouseButton.Left, true);
-        InputSystem.QueueStateEvent(mouse, pressedState);
+        ApplyMouseState(pressedState);
         yield return null;
         yield return null;
 
-        Vector2 actualPosition = mouse.position.ReadValue();
+        Vector2 actualPosition = verificationMouse.position.ReadValue();
         Check(
             Vector2.Distance(actualPosition, screenPoint) <= 0.01f,
             $"PLAYMODE_CLICK_{activeClickNumber}_POSITION",
             $"expected={screenPoint}; actual={actualPosition}");
         report.Add(
             $"PLAYMODE_CLICK_{activeClickNumber}_PRESS_STATE; frame={Time.frameCount}; "
-            + $"pressed={mouse.leftButton.isPressed}; down={mouse.leftButton.wasPressedThisFrame}");
+            + $"pressed={verificationMouse.leftButton.isPressed}; down={verificationMouse.leftButton.wasPressedThisFrame}");
     }
 
     private IEnumerator ReleaseMouse(Vector2 screenPoint)
     {
-        Mouse mouse = Mouse.current;
         MouseState releasedState = new MouseState
         {
             position = screenPoint
         };
-        InputSystem.QueueStateEvent(mouse, releasedState);
+        ApplyMouseState(releasedState);
         yield return null;
         yield return null;
         report.Add(
             $"PLAYMODE_CLICK_{activeClickNumber}_RELEASE_STATE; frame={Time.frameCount}; "
-            + $"pressed={mouse.leftButton.isPressed}; up={mouse.leftButton.wasReleasedThisFrame}");
+            + $"pressed={verificationMouse.leftButton.isPressed}; up={verificationMouse.leftButton.wasReleasedThisFrame}");
+    }
+
+    private void ApplyMouseState(MouseState state)
+    {
+        EnsureVerificationMouse();
+        if (verificationMouse == null || !verificationMouse.added)
+        {
+            return;
+        }
+
+        verificationMouse.MakeCurrent();
+        InputState.Change(verificationMouse, state);
+        InputSystem.QueueStateEvent(verificationMouse, state);
+        InputSystem.Update();
+        if (Vector2.Distance(verificationMouse.position.ReadValue(), state.position) <= 0.1f)
+        {
+            return;
+        }
+
+        CreateVerificationMouse();
+        verificationMouse.MakeCurrent();
+        InputState.Change(verificationMouse, state);
+        InputSystem.QueueStateEvent(verificationMouse, state);
+        InputSystem.Update();
+    }
+
+    private void EnsureVerificationMouse()
+    {
+        if (verificationMouse == null || !verificationMouse.added)
+        {
+            CreateVerificationMouse();
+            return;
+        }
+
+        if (!verificationMouse.enabled)
+        {
+            InputSystem.EnableDevice(verificationMouse);
+        }
+
+        verificationMouse.MakeCurrent();
+    }
+
+    private void CreateVerificationMouse()
+    {
+        if (verificationMouse != null && verificationMouse.added)
+        {
+            InputSystem.RemoveDevice(verificationMouse);
+        }
+
+        verificationMouse = InputSystem.AddDevice<Mouse>($"CharacterClickVerificationMouse{++verificationMouseSerial}");
+        InputSystem.EnableDevice(verificationMouse);
+        verificationMouse.MakeCurrent();
     }
 
     private IEnumerator WaitForWorldPointClear(Vector2 screenPoint, string key)
@@ -392,6 +582,7 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         }
 
         Destroy(gameObject);
+        EditorApplication.ExitPlaymode();
     }
 
     private void Cleanup()
@@ -407,6 +598,15 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         {
             InputSystem.settings.editorInputBehaviorInPlayMode = originalEditorInputBehavior;
             inputBehaviorCaptured = false;
+        }
+        if (verificationMouse != null && verificationMouse.added)
+        {
+            InputSystem.RemoveDevice(verificationMouse);
+        }
+        if (originalMouse != null && originalMouse.added)
+        {
+            InputSystem.EnableDevice(originalMouse);
+            originalMouse.MakeCurrent();
         }
         Time.timeScale = originalTimeScale;
     }

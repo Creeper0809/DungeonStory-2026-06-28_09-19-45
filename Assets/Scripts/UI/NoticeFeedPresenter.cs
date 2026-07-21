@@ -59,6 +59,7 @@ public sealed class NoticeFeedPresenter : INoticeFeedPresenter
             .PrependInterval(VisibleSeconds)
             .Append(canvasGroup.DOFade(0f, FadeSeconds))
             .SetTarget(noticeObject)
+            .SetLink(noticeObject, LinkBehaviour.KillOnDestroy)
             .OnComplete(() => pool.Release(noticeObject))
             .Play();
     }

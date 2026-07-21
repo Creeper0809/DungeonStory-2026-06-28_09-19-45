@@ -49,6 +49,5 @@ MonoBehaviour:
       Entry: 8
       Data: 
   id: 50
-  type: 1
   shopId: 50
   multifly: 1.1

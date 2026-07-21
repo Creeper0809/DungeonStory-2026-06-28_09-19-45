@@ -2,11 +2,50 @@
 using UnityEngine;
 using VContainer;
 
+public sealed class InvasionThreatPersistenceState
+{
+    public InvasionThreatPersistenceState(
+        float currentThreat,
+        float secondsSinceLastInvasion,
+        float safetyRemaining,
+        float candidateDelayRemaining,
+        float warningCooldownRemaining,
+        bool warningRaisedThisCycle,
+        bool candidateRaisedThisCycle,
+        float residualRisk,
+        InvasionThreatFactors lastFactors)
+    {
+        CurrentThreat = Mathf.Max(0f, currentThreat);
+        SecondsSinceLastInvasion = Mathf.Max(0f, secondsSinceLastInvasion);
+        SafetyRemaining = Mathf.Max(0f, safetyRemaining);
+        CandidateDelayRemaining = candidateDelayRemaining < 0f
+            ? -1f
+            : Mathf.Max(0f, candidateDelayRemaining);
+        WarningCooldownRemaining = Mathf.Max(0f, warningCooldownRemaining);
+        WarningRaisedThisCycle = warningRaisedThisCycle;
+        CandidateRaisedThisCycle = candidateRaisedThisCycle;
+        ResidualRisk = Mathf.Max(0f, residualRisk);
+        LastFactors = lastFactors;
+    }
+
+    public float CurrentThreat { get; }
+    public float SecondsSinceLastInvasion { get; }
+    public float SafetyRemaining { get; }
+    public float CandidateDelayRemaining { get; }
+    public float WarningCooldownRemaining { get; }
+    public bool WarningRaisedThisCycle { get; }
+    public bool CandidateRaisedThisCycle { get; }
+    public float ResidualRisk { get; }
+    public InvasionThreatFactors LastFactors { get; }
+}
+
 public class InvasionThreatRuntime : MonoBehaviour,
     UtilEventListener<InvasionStartedEvent>,
     UtilEventListener<InvasionResolvedEvent>,
     UtilEventListener<OperatingDayStartedEvent>
 {
+    private const int PreparationEndDay = 3;
+
     [SerializeField] private InvasionThreatSettings settings = new InvasionThreatSettings();
 
     private float currentThreat;
@@ -18,6 +57,7 @@ public class InvasionThreatRuntime : MonoBehaviour,
     private bool candidateRaisedThisCycle;
     private float residualRisk;
     private InvasionThreatFactors lastFactors;
+    private float endlessDefenseThreatMultiplier = 1f;
     private IInvasionThreatWorldSampler worldSampler;
     private IRunVariableRuntimeReader runVariableReader;
     private IMetaProgressionRuntimeReader metaProgressionReader;
@@ -28,6 +68,49 @@ public class InvasionThreatRuntime : MonoBehaviour,
     public InvasionThreatStage CurrentStage => ResolveStage();
     public InvasionThreatSnapshot LatestSnapshot => BuildSnapshot();
     public InvasionThreatSettings Settings => settings;
+    public float EndlessDefenseThreatMultiplier => endlessDefenseThreatMultiplier;
+
+    public void SetEndlessDefenseThreatMultiplier(float multiplier)
+    {
+        endlessDefenseThreatMultiplier = Mathf.Max(1f, multiplier);
+    }
+
+    public InvasionThreatPersistenceState CapturePersistentState()
+    {
+        return new InvasionThreatPersistenceState(
+            currentThreat,
+            secondsSinceLastInvasion,
+            safetyRemaining,
+            candidateDelayRemaining,
+            warningCooldownRemaining,
+            warningRaisedThisCycle,
+            candidateRaisedThisCycle,
+            residualRisk,
+            lastFactors);
+    }
+
+    public void RestorePersistentState(InvasionThreatPersistenceState source)
+    {
+        source ??= new InvasionThreatPersistenceState(
+            0f,
+            0f,
+            0f,
+            -1f,
+            0f,
+            false,
+            false,
+            0f,
+            default);
+        currentThreat = source.CurrentThreat;
+        secondsSinceLastInvasion = source.SecondsSinceLastInvasion;
+        safetyRemaining = source.SafetyRemaining;
+        candidateDelayRemaining = source.CandidateDelayRemaining;
+        warningCooldownRemaining = source.WarningCooldownRemaining;
+        warningRaisedThisCycle = source.WarningRaisedThisCycle;
+        candidateRaisedThisCycle = source.CandidateRaisedThisCycle;
+        residualRisk = source.ResidualRisk;
+        lastFactors = source.LastFactors;
+    }
 
     [Inject]
     public void Construct(
@@ -45,7 +128,17 @@ public class InvasionThreatRuntime : MonoBehaviour,
 
     private void Update()
     {
+        if (worldSampler == null || runVariableReader == null || metaProgressionReader == null)
+        {
+            return;
+        }
+
         Tick(Time.deltaTime);
+    }
+
+    private void Start()
+    {
+        BeginInitialSafetyIfFresh();
     }
 
     public void Tick(float deltaTime)
@@ -82,7 +175,7 @@ public class InvasionThreatRuntime : MonoBehaviour,
         currentThreat += InvasionThreatCalculator.CalculateRisePerSecond(
             settings,
             lastFactors,
-            RequireRunVariableReader().GetThreatRiseMultiplier()) * safeDelta;
+            RequireRunVariableReader().GetThreatRiseMultiplier() * endlessDefenseThreatMultiplier) * safeDelta;
         currentThreat = Mathf.Max(0f, currentThreat);
 
         TryRaiseWarning();
@@ -95,6 +188,33 @@ public class InvasionThreatRuntime : MonoBehaviour,
         lastFactors = SampleWorldFactors();
         TryRaiseWarning();
         TickCandidateDelay(0f);
+    }
+
+    public bool ForceCandidateNow()
+    {
+        if (settings == null || candidateRaisedThisCycle)
+        {
+            return false;
+        }
+
+        safetyRemaining = 0f;
+        float thresholdMultiplier = GetWarningThresholdMultiplier();
+        currentThreat = Mathf.Max(
+            currentThreat,
+            settings.candidateThreshold * Mathf.Max(0.05f, thresholdMultiplier));
+        lastFactors = SampleWorldFactors();
+        warningRaisedThisCycle = true;
+        candidateDelayRemaining = 0f;
+        candidateRaisedThisCycle = true;
+
+        InvasionThreatSnapshot snapshot = BuildSnapshot();
+        InvasionCandidateEvent.Trigger(snapshot);
+        EventAlertService.Raise(
+            "최종 침공 임박",
+            "던전의 운명을 가를 적이 입구로 접근하고 있습니다.",
+            EventAlertImportance.High,
+            "침입");
+        return true;
     }
 
     public void OnTriggerEvent(InvasionStartedEvent eventType)
@@ -113,12 +233,35 @@ public class InvasionThreatRuntime : MonoBehaviour,
 
     public void OnTriggerEvent(OperatingDayStartedEvent eventType)
     {
-        if (eventType.day <= 1)
+        if (eventType.day <= PreparationEndDay)
         {
+            if (settings != null)
+            {
+                safetyRemaining = Mathf.Max(
+                    safetyRemaining,
+                    settings.GetInitialSafetyDuration());
+            }
+
             return;
         }
 
         AddThreat(Mathf.Min(6f, eventType.day * 0.5f));
+    }
+
+    private void BeginInitialSafetyIfFresh()
+    {
+        if (settings == null
+            || currentThreat > 0f
+            || secondsSinceLastInvasion > 0f
+            || safetyRemaining > 0f
+            || candidateDelayRemaining >= 0f
+            || warningRaisedThisCycle
+            || candidateRaisedThisCycle)
+        {
+            return;
+        }
+
+        safetyRemaining = settings.GetInitialSafetyDuration();
     }
 
     private void OnEnable()

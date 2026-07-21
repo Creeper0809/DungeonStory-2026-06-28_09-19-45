@@ -8,7 +8,7 @@ using VContainer;
 
 public interface IP0FeatureSurfacePanelFactory
 {
-    P0FeatureSurfacePanel Ensure(GameObject panelObject, int tabId);
+    P0FeatureSurfacePanel Ensure(GameObject panelObject, TabId tabId);
 }
 
 public sealed class P0FeatureSurfacePanelFactory : IP0FeatureSurfacePanelFactory
@@ -21,7 +21,7 @@ public sealed class P0FeatureSurfacePanelFactory : IP0FeatureSurfacePanelFactory
             ?? throw new ArgumentNullException(nameof(objectResolver));
     }
 
-    public P0FeatureSurfacePanel Ensure(GameObject panelObject, int tabId)
+    public P0FeatureSurfacePanel Ensure(GameObject panelObject, TabId tabId)
     {
         if (panelObject == null)
         {
@@ -45,12 +45,13 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
     private const float SectionSpacing = 10f;
     private const float CardHeight = 86f;
     private const float CompactCardHeight = 66f;
+    private const float EventAlertSafeRightInset = EventAlertLayout.AlertButtonWidth + 32f;
     private const int MaxVisibleCardsPerSection = 8;
 
     private readonly HashSet<string> completedUiActions = new HashSet<string>();
     private readonly List<GameObject> spawnedObjects = new List<GameObject>();
 
-    private int tabId = -1;
+    private TabId? tabId;
     private RectTransform contentRoot;
     private TMP_Text feedbackText;
     private string feedbackMessage = "작업 대기";
@@ -70,6 +71,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
     private IRoomEnvironmentEvaluator roomEnvironmentEvaluator;
     private IRoomInspectionService roomInspectionService;
     private ITmpKoreanFontService fontService;
+    private IFeatureSurfaceTabPresenterRegistry presenterRegistry;
 
     [Inject]
     public void Construct(
@@ -86,7 +88,8 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         IRoomLayoutCache roomLayoutCache,
         IRoomEnvironmentEvaluator roomEnvironmentEvaluator,
         IRoomInspectionService roomInspectionService,
-        ITmpKoreanFontService fontService)
+        ITmpKoreanFontService fontService,
+        IFeatureSurfaceTabPresenterRegistry presenterRegistry)
     {
         this.dailyShopProvider = dailyShopProvider
             ?? throw new ArgumentNullException(nameof(dailyShopProvider));
@@ -116,9 +119,11 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             ?? throw new ArgumentNullException(nameof(roomInspectionService));
         this.fontService = fontService
             ?? throw new ArgumentNullException(nameof(fontService));
+        this.presenterRegistry = presenterRegistry
+            ?? throw new ArgumentNullException(nameof(presenterRegistry));
     }
 
-    public void SetTabId(int id)
+    public void SetTabId(TabId id)
     {
         tabId = id;
     }
@@ -126,9 +131,14 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
     private void Awake()
     {
         UITab tab = GetComponent<UITab>();
-        if (tab != null && tabId < 0)
+        UITabIdentity identity = GetComponent<UITabIdentity>();
+        if (!tabId.HasValue && identity != null)
         {
-            tabId = tab.id;
+            tabId = identity.Id;
+        }
+        else if (!tabId.HasValue && tab != null && UITabCatalog.TryFromLegacyId(tab.id, out TabId legacyId))
+        {
+            tabId = legacyId;
         }
     }
 
@@ -182,7 +192,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         viewportRect.anchorMin = Vector2.zero;
         viewportRect.anchorMax = Vector2.one;
         viewportRect.offsetMin = new Vector2(12f, 12f);
-        viewportRect.offsetMax = new Vector2(-12f, -12f);
+        viewportRect.offsetMax = new Vector2(-EventAlertSafeRightInset, -12f);
 
         Image viewportImage = viewportObject.AddComponent<Image>();
         viewportImage.color = new Color(1f, 1f, 1f, 0.01f);
@@ -239,39 +249,28 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
 
         AddFeedback();
 
-        switch (tabId)
+        if (!tabId.HasValue)
         {
-            case 1:
-                BuildFacilitiesManagement();
-                break;
-            case 3:
-                BuildFacilityShop();
-                break;
-            case 4:
-                BuildWarehouse();
-                break;
-            case 5:
-                BuildOperationHub();
-                break;
-            case 6:
-                BuildDefenseOperations();
-                break;
-            case 7:
-                BuildOffenseOperations();
-                break;
-            case 8:
-                BuildResearch();
-                break;
-            case 9:
-                BuildCodexAndHistory();
-                break;
-            default:
-                AddEmptyState($"기능 패널이 없는 탭입니다. id={tabId}");
-                break;
+            AddEmptyState("기능 패널의 안정 ID가 설정되지 않았습니다.");
+            return;
         }
+
+        if (presenterRegistry == null)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(P0FeatureSurfacePanel)} requires {nameof(IFeatureSurfaceTabPresenterRegistry)} injection.");
+        }
+
+        if (!presenterRegistry.TryGet(tabId.Value, out IFeatureSurfaceTabPresenter presenter))
+        {
+            AddEmptyState($"기능 presenter가 등록되지 않은 탭입니다. id={tabId.Value}");
+            return;
+        }
+
+        presenter.Present(this);
     }
 
-    private void BuildFacilityShop()
+    internal void BuildFacilityShop()
     {
         if (!dailyShopProvider.TryGetRuntime(out DailyFacilityShopRuntime runtime))
         {
@@ -291,10 +290,17 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             AddLabel("오늘 구매 가능한 상품이 없습니다.", 20f, 34f);
         }
 
-        for (int i = 0; i < Mathf.Min(dailyOffers.Count, MaxVisibleCardsPerSection); i++)
+        IEnumerable<(FacilityShopOffer offer, int index)> orderedDailyOffers = dailyOffers
+            .Select((offer, index) => (offer, index))
+            .OrderBy(entry => string.Equals(
+                entry.offer?.OfferTypeId,
+                FacilityShopOfferTypeIds.Blueprint,
+                StringComparison.Ordinal) ? 0 : 1)
+            .ThenBy(entry => entry.index)
+            .Take(MaxVisibleCardsPerSection);
+        foreach ((FacilityShopOffer offer, int offerIndex) in orderedDailyOffers)
         {
-            int index = i;
-            FacilityShopOffer offer = dailyOffers[i];
+            int index = offerIndex;
             string actionName = $"P0Action_ShopDaily_{index}";
             CreateOfferCard(
                 actionName,
@@ -362,7 +368,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         BuildShopOperationsDetail();
     }
 
-    private void BuildResearch()
+    internal void BuildResearch()
     {
         if (!researchProvider.TryGetRuntime(out BlueprintResearchRuntime runtime))
         {
@@ -382,22 +388,32 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             $"대기/완료 포함 작업 {state.Tasks.Count}개 / 완료 {state.CompletedBlueprintIds.Count}개");
         AddLabel(activeText, 20f, 38f);
 
-        CreateButtonRow(
-            "P0Action_ResearchProgress",
-            "연구 작업 +10초",
-            "활성 설계도에 연구 작업을 적용합니다.",
-            () =>
-            {
-                if (!TryFindResearchFacility(out BuildableObject researchFacility))
-                {
-                    SetFeedback("연구 실패: 연구 가능한 시설이 현재 씬에 없습니다.");
-                    return;
-                }
-
-                BlueprintResearchWorkResult result = runtime.ApplyResearchWork(null, researchFacility, 10f);
-                SetFeedback(
-                    $"{(result.Success ? "연구 진행" : "연구 실패")}: {result.Message} / {GetBlueprintName(result.Blueprint)} {result.ProgressRatio:P0}");
-            });
+        bool hasResearchFacility = TryFindResearchFacility(out BuildableObject researchFacility);
+        List<AbilityWork> researchWorkers = sceneQuery.All<AbilityWork>()
+            .Where((work) => work != null
+                && work.WorkerActor != null
+                && !work.WorkerActor.IsDead
+                && work.WorkPriorities.IsEnabled(FacilityWorkType.Research))
+            .ToList();
+        int assignedResearchers = researchWorkers.Count((work) =>
+            work.AssignedWorkType == FacilityWorkType.Research && work.assignedShop == researchFacility);
+        string researchBlocker = !hasActive
+            ? "활성 연구 없음"
+            : !hasResearchFacility
+                ? "연구 시설 필요"
+                : researchWorkers.Count == 0
+                    ? "연구 허용 직원 필요"
+                    : assignedResearchers > 0
+                        ? "연구 진행 중"
+                        : researchWorkers.Any((work) =>
+                            work.WorkPriorities.GetPriority(FacilityWorkType.Research) == WorkPriorityLevel.Priority1)
+                            ? "연구 최우선 대기"
+                            : "다른 우선 업무 대기";
+        CreateStatusCard(
+            "P0State_ResearchWorkSource",
+            "연구 작업 상태",
+            $"{researchBlocker} / 시설 {(hasResearchFacility ? GetBuildingName(researchFacility) : "없음")} / 연구 허용 {researchWorkers.Count}명 / 현재 배정 {assignedResearchers}명",
+            CompactCardHeight);
 
         if (hasActive)
         {
@@ -436,10 +452,11 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
                         ? "연구 가능"
                         : "상점 구매 필요";
             string actionName = $"P0Action_ResearchStart_{blueprint.id}";
+            string rewardPreview = FormatBlueprintRewardPreview(blueprint);
             CreateDataCard(
                 actionName,
                 GetBlueprintName(blueprint),
-                $"{status} / 비용 {blueprint.defaultCost} / 희귀도 {blueprint.rarity}",
+                $"{status} / 구매 {blueprint.defaultCost}G / 연구 {blueprint.researchWorkRequired:0.#}\n{rewardPreview}",
                 acquired && !queued && !completed ? "연구 시작" : "상태 확인",
                 () =>
                 {
@@ -464,15 +481,64 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
                     bool started = runtime.EnqueueBlueprint(blueprint);
                     SetFeedback($"{(started ? "연구 시작" : "연구 시작 실패")}: {GetBlueprintName(blueprint)}");
                 },
-                CompactCardHeight);
+                108f);
         }
     }
 
-    private void BuildWarehouse()
+    private string FormatBlueprintRewardPreview(FacilityBlueprintSO blueprint)
+    {
+        if (blueprint == null)
+        {
+            return "해금 보상 없음";
+        }
+
+        Dictionary<int, BuildingSO> buildings = facilityShopCatalog.Buildings
+            .Where(building => building != null)
+            .GroupBy(building => building.id)
+            .ToDictionary(group => group.Key, group => group.First());
+        List<string> rewards = new List<string>();
+        foreach (BlueprintUnlock unlock in blueprint.Unlocks)
+        {
+            switch (unlock)
+            {
+                case BlueprintBuildingUnlock buildingUnlock
+                    when buildings.TryGetValue(buildingUnlock.buildingId, out BuildingSO directBuilding):
+                    rewards.Add(FacilityShopService.GetBuildingName(directBuilding));
+                    break;
+                case BlueprintBasicPurchaseUnlock purchaseUnlock
+                    when buildings.TryGetValue(purchaseUnlock.buildingId, out BuildingSO purchaseBuilding):
+                    rewards.Add($"{FacilityShopService.GetBuildingName(purchaseBuilding)} 구매");
+                    break;
+                case BlueprintRecipeUnlock recipeUnlock
+                    when !string.IsNullOrWhiteSpace(recipeUnlock.recipeId):
+                    rewards.Add($"조합식 {recipeUnlock.recipeId}");
+                    break;
+            }
+        }
+
+        string[] distinct = rewards.Distinct(StringComparer.Ordinal).ToArray();
+        if (distinct.Length == 0)
+        {
+            return string.IsNullOrWhiteSpace(blueprint.description)
+                ? "해금 보상 없음"
+                : blueprint.description;
+        }
+
+        const int visibleRewardCount = 4;
+        string summary = string.Join(", ", distinct.Take(visibleRewardCount));
+        if (distinct.Length > visibleRewardCount)
+        {
+            summary += $" 외 {distinct.Length - visibleRewardCount}개";
+        }
+
+        return $"해금: {summary}";
+    }
+
+    internal void BuildWarehouse()
     {
         WarehouseManagementSummary summary = buildingSummaryService.CaptureWarehouses();
         List<IWarehouseFacility> warehouses = FindWarehouses();
-        List<Shop> shops = FindShops();
+        List<BuildableObject> restockableFacilities = FindRestockableFacilities();
 
         AddSection(
             "창고 재고",
@@ -480,9 +546,13 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
                 ? $"창고 {summary.WarehouseCount}개 / 총 재고 {summary.TotalStock}/{summary.TotalCapacity}"
                 : $"창고 {summary.WarehouseCount}개 / 총 재고 {summary.TotalStock}");
         AddLabel(
-            $"식재료 {summary.FoodStock} / 잡화 {summary.GeneralStock} / 무기 {summary.WeaponStock} / 마력 {summary.ManaStock}",
+            FormatStockAmounts(summary.GetStock, useShortNames: false),
             20f,
             36f);
+        AddLabel(
+            BuildPhysicalStockStateText(summary.TotalStock),
+            18f,
+            32f);
 
         foreach (IWarehouseFacility warehouse in warehouses.Take(MaxVisibleCardsPerSection))
         {
@@ -490,31 +560,39 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             CreateDataCard(
                 "P0State_Warehouse_" + GetUnityObjectId(warehouse),
                 GetWarehouseName(warehouse),
-                $"총 {inventory.TotalStock}/{(inventory.HasCapacityLimit ? inventory.MaxCapacity.ToString() : "무제한")} / 식 {inventory.GetStock(StockCategory.Food)} 잡 {inventory.GetStock(StockCategory.General)} 무 {inventory.GetStock(StockCategory.Weapon)} 마 {inventory.GetStock(StockCategory.Mana)}",
+                $"총 {inventory.TotalStock}/{(inventory.HasCapacityLimit ? inventory.MaxCapacity.ToString() : "무제한")} / {FormatStockAmounts(inventory.GetStock, useShortNames: true)}",
                 "상태",
                 () => SetFeedback($"{GetWarehouseName(warehouse)} 재고를 확인했습니다."),
                 CompactCardHeight);
         }
 
-        AddSection("상점 수동 보충", $"상점 {shops.Count}개 / 보충 필요 {shops.Count((shop) => shop != null && shop.NeedsRestock)}개");
-        foreach (Shop shop in shops.Where((candidate) => candidate != null && candidate.NeedsRestock).Take(MaxVisibleCardsPerSection))
+        AddSection(
+            "상점 수동 보충",
+            $"상점 {restockableFacilities.Count}개 / 보충 필요 {restockableFacilities.Count((building) => ((IRestockableFacility)building).NeedsRestock)}개");
+        foreach (BuildableObject building in restockableFacilities
+                     .Where((candidate) => ((IRestockableFacility)candidate).NeedsRestock)
+                     .Take(MaxVisibleCardsPerSection))
         {
-            Shop capturedShop = shop;
-            string actionName = "P0Action_WarehouseRestock_" + capturedShop.GetInstanceID();
+            BuildableObject capturedBuilding = building;
+            IRestockableFacility capturedFacility = (IRestockableFacility)capturedBuilding;
+            string actionName = "P0Action_WarehouseRestock_" + capturedBuilding.GetInstanceID();
             CreateDataCard(
                 actionName,
-                GetBuildingName(capturedShop),
-                $"재고 {capturedShop.CurrentStock}/{capturedShop.MaxInternalStock} / 부족 {capturedShop.MissingStock}",
+                GetBuildingName(capturedBuilding),
+                $"재고 {capturedFacility.CurrentStock}/{capturedFacility.MaxStock} / 부족 {capturedFacility.MissingStock}",
                 "보충",
                 () =>
                 {
-                    int beforeShop = capturedShop.CurrentStock;
+                    int beforeShop = capturedFacility.CurrentStock;
                     int beforeWarehouse = warehouses.Sum((warehouse) => warehouse.Inventory.TotalStock);
-                    int moved = capturedShop.RestockFrom(warehouses, Mathf.Min(5, capturedShop.MissingStock), out string message);
-                    int afterShop = capturedShop.CurrentStock;
+                    int moved = capturedFacility.RestockFrom(
+                        warehouses,
+                        Mathf.Min(5, capturedFacility.MissingStock),
+                        out string message);
+                    int afterShop = capturedFacility.CurrentStock;
                     int afterWarehouse = warehouses.Sum((warehouse) => warehouse.Inventory.TotalStock);
                     SetFeedback(
-                        $"보충 {(moved > 0 ? "성공" : "실패")}: {GetBuildingName(capturedShop)} {message} / 상점 {beforeShop}->{afterShop}, 창고 {beforeWarehouse}->{afterWarehouse}");
+                        $"보충 {(moved > 0 ? "성공" : "실패")}: {GetBuildingName(capturedBuilding)} {message} / 상점 {beforeShop}->{afterShop}, 창고 {beforeWarehouse}->{afterWarehouse}");
                 },
                 CompactCardHeight);
         }
@@ -547,46 +625,54 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         }
     }
 
-    private void BuildOperationHub()
+    internal void BuildOperationHub()
     {
         GameData gameData = ResolveGameData();
         OperatingDaySettlementRuntime settlement = sceneQuery.First<OperatingDaySettlementRuntime>(includeInactive: true);
         OperatingDayReport report = settlement != null ? settlement.LatestReport : null;
 
+        BuildRecruitmentSection();
+
         AddSection(
             "운영 정산",
             $"Day {GetCurrentDay()} / {GetCurrentHour()}:00 / 자금 {FormatMoney(gameData)}");
-        CreateButtonRow(
-            "P0Action_OperationSettleDay",
-            "오늘 정산",
-            report != null
-                ? $"최근 보고서: Day {report.day}, 매출 {report.totalRevenue}, 방문 {report.totalVisits}"
-                : "아직 정산 보고서가 없습니다.",
-            () =>
-            {
-                int beforeDay = GetCurrentDay();
-                OperatingDayEndedEvent.Trigger(beforeDay);
-                if (gameData != null && gameData.day != null)
+        if (settlement == null)
+        {
+            AddLabel("정산 정보를 불러오지 못했습니다.", 19f, 44f);
+        }
+        else
+        {
+            OperatingCostForecast forecast = settlement.CurrentOperatingCostForecast;
+            string paymentState = forecast.CanPayInFull
+                ? $"납부 후 {forecast.AvailableMoney - forecast.TotalDue}"
+                : $"부족 {forecast.ExpectedShortfall}";
+            AddLabel(
+                $"오늘 예상: 유지비 {forecast.MaintenanceCost} + 급여 {forecast.PayrollCost} + 미납 {forecast.OutstandingDebt} = {forecast.TotalDue} / {paymentState}",
+                19f,
+                52f);
+            CreateButtonRow(
+                "P0Action_OperationEmergencyFunding",
+                settlement.CanTakeEmergencyFunding ? "긴급 융자" : "융자 사용됨",
+                settlement.CanTakeEmergencyFunding
+                    ? "이번 런에서 한 번만 자금을 확보할 수 있습니다. 받은 금액보다 큰 미납금이 다음 정산에 추가됩니다."
+                    : $"이번 런의 긴급 융자를 이미 사용했습니다. 현재 미납금 {settlement.OutstandingDebt}.",
+                () =>
                 {
-                    gameData.day.Value = beforeDay + 1;
-                }
-
-                OperatingDayStartedEvent.Trigger(beforeDay + 1);
-                OperatingDayReport updated = settlement != null ? settlement.LatestReport : null;
-                SetFeedback(updated != null
-                    ? $"정산 완료: Day {updated.day} 매출 {updated.totalRevenue}, 방문 {updated.totalVisits}, 보고서 생성"
-                    : "정산 이벤트를 보냈지만 보고서 런타임을 찾지 못했습니다.");
-            });
+                    bool success = settlement.TryTakeEmergencyFunding(out string message);
+                    SetFeedback($"{(success ? "융자 실행" : "융자 불가")}: {message}");
+                });
+        }
 
         if (report != null)
         {
+            int shortageCount = report.stockShortageFacilities?.Count ?? 0;
+            int incidentCount = report.incidents?.Count ?? 0;
             AddLabel(
-                $"최근 보고서: Day {report.day} / 매출 {report.totalRevenue} / 방문 {report.totalVisits} / 재고 부족 {report.stockShortageFacilities.Count} / 사건 {report.incidents.Count}",
+                $"최근 정산: Day {report.day} / 매출 {report.totalRevenue} / 운영비 {report.paidOperatingCost}/{report.totalOperatingCost} / 미납 {report.unpaidOperatingCost} / 재고 부족 {shortageCount} / 사건 {incidentCount}",
                 19f,
                 52f);
         }
 
-        BuildRecruitmentSection();
         BuildMetaUpgradeSection();
         BuildRunVariableSection();
         BuildEconomyDetailSection();
@@ -601,8 +687,11 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         }
 
         IReadOnlyList<RegularCustomerRecord> records = runtime.State.Records
-            .OrderByDescending((record) => record.Status)
+            .OrderByDescending((record) => record.Status == RegularCustomerStatus.RecruitCandidate && !record.IsRecruited)
+            .ThenBy((record) => record.IsRecruited)
+            .ThenByDescending((record) => record.AverageSatisfaction)
             .ThenByDescending((record) => record.VisitCount)
+            .ThenBy((record) => record.CustomerId, StringComparer.Ordinal)
             .ToArray();
         AddSection(
             "단골/영입",
@@ -651,8 +740,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
 
         foreach (MetaUpgradeDefinition definition in MetaProgressionCatalog.All
             .OrderBy((item) => item.branch)
-            .ThenBy((item) => item.id)
-            .Take(MaxVisibleCardsPerSection))
+            .ThenBy((item) => item.id))
         {
             MetaUpgradeDefinition capturedDefinition = definition;
             int level = state.GetUpgradeLevel(capturedDefinition.id);
@@ -679,8 +767,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
 
     private void CreateOfferCard(string actionName, FacilityShopOffer offer, string buttonText, Action onClick)
     {
-        string typeText = offer.Type == FacilityShopOfferType.Blueprint ? "설계도" : "시설";
-        string detail = $"{typeText} / {offer.Rarity} / 비용 {offer.Cost} / {offer.Star}성";
+        string detail = $"{offer.TypeDisplayName} / {offer.Rarity} / 비용 {offer.Cost} / {offer.Star}성";
         if (offer.IsBasicPurchase)
         {
             detail += " / 기본 구매";
@@ -732,7 +819,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         titleText.enableAutoSizing = true;
         titleText.fontSizeMin = 14f;
         titleText.fontSizeMax = 20f;
-        titleText.overflowMode = TextOverflowModes.Ellipsis;
+        titleText.overflowMode = TextOverflowModes.Truncate;
 
         TMP_Text detailText = AddText(textColumn.transform, detail, 16f, FontStyles.Normal);
         detailText.color = DungeonUiTheme.TextSecondary;
@@ -742,6 +829,52 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         detailText.textWrappingMode = TextWrappingModes.Normal;
 
         CreateActionButton(card.transform, actionName, buttonText, onClick, 132f, height - 18f);
+    }
+
+    private void CreateStatusCard(string stateName, string title, string detail, float height)
+    {
+        GameObject card = CreateUiObject(stateName, contentRoot);
+        spawnedObjects.Add(card);
+        RectTransform rect = card.GetComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(0f, height);
+
+        Image image = card.AddComponent<Image>();
+        image.color = DungeonUiTheme.Surface;
+        image.raycastTarget = false;
+
+        VerticalLayoutGroup vertical = card.AddComponent<VerticalLayoutGroup>();
+        vertical.spacing = 2f;
+        vertical.padding = new RectOffset(12, 12, 8, 8);
+        vertical.childControlWidth = true;
+        vertical.childControlHeight = true;
+        vertical.childForceExpandWidth = true;
+        vertical.childForceExpandHeight = false;
+
+        LayoutElement cardLayout = card.AddComponent<LayoutElement>();
+        cardLayout.preferredHeight = height;
+        cardLayout.minHeight = height;
+
+        TMP_Text titleText = AddText(card.transform, title, 20f, FontStyles.Bold);
+        titleText.color = DungeonUiTheme.TextPrimary;
+        titleText.enableAutoSizing = true;
+        titleText.fontSizeMin = 14f;
+        titleText.fontSizeMax = 20f;
+        titleText.overflowMode = TextOverflowModes.Truncate;
+        titleText.raycastTarget = false;
+        LayoutElement titleLayout = titleText.gameObject.AddComponent<LayoutElement>();
+        titleLayout.preferredHeight = 22f;
+        titleLayout.minHeight = 20f;
+
+        TMP_Text detailText = AddText(card.transform, detail, 16f, FontStyles.Normal);
+        detailText.color = DungeonUiTheme.TextSecondary;
+        detailText.enableAutoSizing = true;
+        detailText.fontSizeMin = 11f;
+        detailText.fontSizeMax = 16f;
+        detailText.textWrappingMode = TextWrappingModes.Normal;
+        detailText.raycastTarget = false;
+        LayoutElement detailLayout = detailText.gameObject.AddComponent<LayoutElement>();
+        detailLayout.preferredHeight = Mathf.Max(20f, height - 40f);
+        detailLayout.minHeight = 18f;
     }
 
     private void CreateButtonRow(string actionName, string buttonText, string detail, Action onClick)
@@ -773,7 +906,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         titleText.color = DungeonUiTheme.Warning;
         TMP_Text summaryText = AddText(section.transform, summary, 15f, FontStyles.Normal);
         summaryText.color = DungeonUiTheme.TextSecondary;
-        summaryText.overflowMode = TextOverflowModes.Ellipsis;
+        summaryText.overflowMode = TextOverflowModes.Truncate;
     }
 
     private void AddFeedback()
@@ -801,7 +934,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         feedbackText.enableAutoSizing = true;
         feedbackText.fontSizeMin = 11f;
         feedbackText.fontSizeMax = 18f;
-        feedbackText.overflowMode = TextOverflowModes.Ellipsis;
+        feedbackText.overflowMode = TextOverflowModes.Truncate;
     }
 
     private void AddLabel(string text, float fontSize, float height)
@@ -942,11 +1075,63 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             .ToList();
     }
 
-    private List<Shop> FindShops()
+    private string BuildPhysicalStockStateText(int availableStock)
     {
-        return sceneQuery.All<Shop>()
-            .Where((shop) => shop != null && !shop.isDestroy)
-            .OrderByDescending((shop) => shop.MissingStock)
+        int loose = 0;
+        int reserved = 0;
+        int facilityBuffer = 0;
+        if (WorldItemStackRuntime.Active != null)
+        {
+            foreach (WorldItemStackSnapshot stack in WorldItemStackRuntime.Active.GetAllStacks())
+            {
+                if (stack == null || stack.Quantity <= 0)
+                {
+                    continue;
+                }
+
+                bool reservedLike = stack.IsReserved
+                    || stack.HasDestinationPosition
+                    || stack.State == WorldItemStackState.ExpeditionPacked;
+                if (reservedLike)
+                {
+                    reserved += stack.Quantity;
+                    continue;
+                }
+
+                if (stack.State == WorldItemStackState.Loose)
+                {
+                    loose += stack.Quantity;
+                }
+                else if (stack.State == WorldItemStackState.FacilityBuffer)
+                {
+                    facilityBuffer += stack.Quantity;
+                }
+            }
+        }
+
+        int carried = sceneQuery.All<CharacterCarryInventory>()
+            .Where(inventory => inventory != null)
+            .Sum(inventory => inventory.Items.Sum(item => item != null ? Mathf.Max(0, item.quantity) : 0));
+        return $"재고 상태  사용 가능 {availableStock} / 예약됨 {reserved} / 바닥 {loose} / 시설 버퍼 {facilityBuffer} / 운반 중 {carried}";
+    }
+
+    private List<BuildableObject> FindRetailFacilities()
+    {
+        return sceneQuery.All<BuildableObject>()
+            .Where((building) => building != null
+                && !building.isDestroy
+                && building is IRetailFacility)
+            .OrderByDescending((building) => ((IStockedFacility)building).CurrentStock)
+            .ToList();
+    }
+
+    private List<BuildableObject> FindRestockableFacilities()
+    {
+        return sceneQuery.All<BuildableObject>()
+            .Where((building) => building != null
+                && !building.isDestroy
+                && building is IRestockableFacility)
+            .OrderByDescending((building) => ((IRestockableFacility)building).MissingStock)
             .ToList();
     }
 
@@ -1005,6 +1190,11 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             : building.name;
     }
 
+    private static string GetBuildingName(IRetailFacility facility)
+    {
+        return GetBuildingName(facility as BuildableObject);
+    }
+
     private static int GetUnityObjectId(object value)
     {
         return value is Component component ? component.GetInstanceID() : value != null ? value.GetHashCode() : 0;
@@ -1012,14 +1202,22 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
 
     private static string GetStockCategoryName(StockCategory category)
     {
-        return category switch
+        return StockCategoryCatalog.GetDisplayName(category);
+    }
+
+    private static string FormatStockAmounts(
+        Func<StockCategory, int> getStock,
+        bool useShortNames)
+    {
+        if (getStock == null)
         {
-            StockCategory.Food => "식재료",
-            StockCategory.General => "잡화",
-            StockCategory.Weapon => "무기",
-            StockCategory.Mana => "마력",
-            _ => category.ToString()
-        };
+            return string.Empty;
+        }
+
+        return string.Join(
+            " / ",
+            StockCategoryCatalog.All.Select((definition) =>
+                $"{(useShortNames ? definition.ShortName : definition.DisplayName)} {getStock(definition.Category)}"));
     }
 
     private static string FormatBranch(MetaProgressionBranch branch)
@@ -1029,6 +1227,9 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             MetaProgressionBranch.OperationKnowledge => "운영 지식",
             MetaProgressionBranch.DesignPreservation => "설계 보존",
             MetaProgressionBranch.OwnerSurvival => "사장 생존",
+            MetaProgressionBranch.CommerceLogistics => "상업·물류",
+            MetaProgressionBranch.FortressDefense => "요새·방어",
+            MetaProgressionBranch.ArcaneResearch => "비전·연구",
             _ => branch.ToString()
         };
     }

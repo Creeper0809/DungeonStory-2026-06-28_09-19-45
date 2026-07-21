@@ -16,7 +16,29 @@ public static class InvasionIntruderPlanner
         float focus,
         out bool directPath)
     {
+        return GetNextPath(
+            grid,
+            start,
+            ownerPosition,
+            focus,
+            InvasionIntruderPatternCatalog.Default,
+            out directPath,
+            out _);
+    }
+
+    public static Queue<GridMoveStep> GetNextPath(
+        Grid grid,
+        Vector2Int start,
+        Vector2Int ownerPosition,
+        float focus,
+        InvasionIntruderPatternDefinition pattern,
+        out bool directPath,
+        out BuildableObject priorityTarget,
+        ISet<int> excludedFacilityInstanceIds = null,
+        int damagedFacilityCount = 0)
+    {
         directPath = false;
+        priorityTarget = null;
         if (grid == null || !grid.IsValidGridPos(start) || !grid.IsValidGridPos(ownerPosition))
         {
             return new Queue<GridMoveStep>();
@@ -28,13 +50,25 @@ public static class InvasionIntruderPlanner
             return new Queue<GridMoveStep>();
         }
 
-        if (focus >= 0.95f)
+        pattern ??= InvasionIntruderPatternCatalog.Default;
+        GridPathSearchResult searchResult = grid.SearchPath(start);
+        if (damagedFacilityCount < pattern.maxFacilityDamageCount
+            && focus < pattern.facilityDiversionFocus
+            && InvasionFacilityDamageResolver.TryFindPriorityTarget(
+                searchResult,
+                pattern.targetPreference,
+                out priorityTarget,
+                excludedFacilityInstanceIds))
+        {
+            return searchResult.GetMovePathTo(priorityTarget);
+        }
+
+        if (focus >= pattern.directOwnerFocus)
         {
             directPath = true;
             return grid.GetMovePath(start, (pos) => pos == ownerPosition);
         }
 
-        GridPathSearchResult searchResult = grid.SearchPath(start);
         Vector2Int exploreTarget = SelectExploreTarget(grid, searchResult, ownerPosition, focus);
         if (exploreTarget == start)
         {
@@ -65,7 +99,7 @@ public static class InvasionIntruderPlanner
             return searchResult.start;
         }
 
-        if (focus <= 0.01f && candidates.Count > 1)
+        if (candidates.Count > 1)
         {
             candidates.Remove(ownerPosition);
         }

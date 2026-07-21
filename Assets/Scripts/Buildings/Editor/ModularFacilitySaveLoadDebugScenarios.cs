@@ -48,6 +48,7 @@ public static class ModularFacilitySaveLoadDebugScenarios
         BuildingSO foodStorage = RequireCode(catalog, "D10");
         BuildingSO shopCounter = RequireCode(catalog, "S01");
         BuildingSO shopShelf = RequireCode(catalog, "S02");
+        BuildingSO alarmBell = RequireCode(catalog, "G02");
         BuildingSO wallFixture = RequireCode(catalog, "D11");
         BuildingSO ceilingFixture = RequireCode(catalog, "E03");
         BuildingSO floorOverlay = RequireCode(catalog, "E04");
@@ -74,12 +75,12 @@ public static class ModularFacilitySaveLoadDebugScenarios
             Place(sourceGrid, ceilingFixture, new Vector2Int(18, 0), sourceBuildings);
             Place(sourceGrid, floorOverlay, new Vector2Int(18, 0), sourceBuildings);
 
-            dining.RestoreOperationalState(new FacilityOperationalState
+            dining.RestoreLegacyFacilityStateV1(new LegacyFacilityOperationalStateV1
             {
                 completedUses = 7,
                 completedWorkCycles = 3,
                 producedStock = 5,
-                alarmCharges = 2,
+                alarmCharges = 0,
                 cleanliness = 31.5f
             });
             dining.SetDamaged(true);
@@ -90,11 +91,11 @@ public static class ModularFacilitySaveLoadDebugScenarios
             {
                 maxCapacity = 18,
                 restrictCategory = true,
-                acceptedCategory = StockCategory.Food,
-                food = 9,
-                general = 0,
-                weapon = 0,
-                mana = 0
+                acceptedCategoryId = StockCategoryPersistenceId.ToId(StockCategory.Food),
+                stocks = new List<StockAmountSnapshot>
+                {
+                    StockAmountSnapshot.From(StockCategory.Food, 9)
+                }
             });
 
             Require(shop != null, "source shop exists");
@@ -102,6 +103,12 @@ public static class ModularFacilitySaveLoadDebugScenarios
             Require(shopStock.items != null && shopStock.items.Count > 0, "source shop has stock snapshot");
             shopStock.items[0].amount = 2;
             shop.ApplyStockSnapshot(shopStock);
+
+            BuildableObject alarm = Place(sourceGrid, alarmBell, new Vector2Int(20, 0), sourceBuildings);
+            BuildingSecurityAbility alarmAbility = alarm.BuildingData.GetAbility<BuildingSecurityAbility>();
+            alarm.RequireStateModule<BuildingSecurityStateModule>(
+                    BuildingStateModuleIds.ForAbility("security", alarmAbility.AbilityId))
+                .SetAlarmCharges(2);
 
             Place(targetGrid, hallway, new Vector2Int(25, 0), targetStaleBuildings);
             Place(targetGrid, diningCore, new Vector2Int(22, 0), targetStaleBuildings);
@@ -198,8 +205,7 @@ public static class ModularFacilitySaveLoadDebugScenarios
     {
         BuildingSO building = catalog.Values.FirstOrDefault(
             candidate => candidate != null
-                && candidate.Operational != null
-                && string.Equals(candidate.Operational.code, code, StringComparison.Ordinal));
+                && string.Equals(candidate.GetFacilityCode(), code, StringComparison.Ordinal));
         if (building == null)
         {
             throw new InvalidOperationException($"Modular facility code {code} was not found.");
@@ -333,11 +339,7 @@ public static class ModularFacilitySaveLoadDebugScenarios
             || a.centerY != b.centerY
             || a.isDamaged != b.isDamaged
             || a.facilityLevel != b.facilityLevel
-            || !EqualOperational(a.operationalState, b.operationalState)
-            || a.hasWarehouseSnapshot != b.hasWarehouseSnapshot
-            || a.hasShopStockSnapshot != b.hasShopStockSnapshot
-            || (a.hasWarehouseSnapshot && !EqualWarehouse(a.warehouseSnapshot, b.warehouseSnapshot))
-            || (a.hasShopStockSnapshot && !EqualShopStock(a.shopStockSnapshot, b.shopStockSnapshot)))
+            || !EqualStateModules(a.stateModules, b.stateModules))
         {
             details = $"state mismatch id={a.buildingId} layer={a.layer}";
             return false;
@@ -347,41 +349,20 @@ public static class ModularFacilitySaveLoadDebugScenarios
         return true;
     }
 
-    private static bool EqualOperational(FacilityOperationalState a, FacilityOperationalState b)
+    private static bool EqualStateModules(
+        IEnumerable<BuildingStateModuleSaveData> a,
+        IEnumerable<BuildingStateModuleSaveData> b)
     {
-        return a != null
-            && b != null
-            && a.completedUses == b.completedUses
-            && a.completedWorkCycles == b.completedWorkCycles
-            && a.producedStock == b.producedStock
-            && a.alarmCharges == b.alarmCharges
-            && Mathf.Approximately(a.cleanliness, b.cleanliness);
-    }
-
-    private static bool EqualWarehouse(WarehouseInventorySnapshot a, WarehouseInventorySnapshot b)
-    {
-        return a != null
-            && b != null
-            && a.maxCapacity == b.maxCapacity
-            && a.restrictCategory == b.restrictCategory
-            && a.acceptedCategory == b.acceptedCategory
-            && a.food == b.food
-            && a.general == b.general
-            && a.weapon == b.weapon
-            && a.mana == b.mana;
-    }
-
-    private static bool EqualShopStock(ShopStockStateSnapshot a, ShopStockStateSnapshot b)
-    {
-        List<ShopStockItemSnapshot> left = (a?.items ?? new List<ShopStockItemSnapshot>())
-            .OrderBy(item => item.saleItemId)
+        List<BuildingStateModuleSaveData> left = (a ?? Enumerable.Empty<BuildingStateModuleSaveData>())
+            .OrderBy(item => item.moduleId, StringComparer.Ordinal)
             .ToList();
-        List<ShopStockItemSnapshot> right = (b?.items ?? new List<ShopStockItemSnapshot>())
-            .OrderBy(item => item.saleItemId)
+        List<BuildingStateModuleSaveData> right = (b ?? Enumerable.Empty<BuildingStateModuleSaveData>())
+            .OrderBy(item => item.moduleId, StringComparer.Ordinal)
             .ToList();
         return left.Count == right.Count
-            && !left.Where((item, index) => item.saleItemId != right[index].saleItemId
-                || item.amount != right[index].amount).Any();
+            && !left.Where((item, index) => !string.Equals(item.moduleId, right[index].moduleId, StringComparison.Ordinal)
+                || item.version != right[index].version
+                || !string.Equals(item.payload, right[index].payload, StringComparison.Ordinal)).Any();
     }
 
     private static Dictionary<string, ModularFacilityBuildingSaveData> ToBuildingMap(

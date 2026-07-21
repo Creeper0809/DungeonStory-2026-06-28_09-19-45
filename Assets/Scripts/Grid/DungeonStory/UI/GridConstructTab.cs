@@ -31,6 +31,7 @@ public class GridConstructTab : UITab
     private IDataCatalog dataCatalog;
     private IUiPopupService popupService;
     private IDungeonGridBuildingControllerProvider buildingControllerProvider;
+    private IBlueprintResearchRuntimeProvider researchRuntimeProvider;
     private ITmpKoreanFontService tmpKoreanFontService;
     private IGridConstructButtonFactory buttonFactory;
     private bool preservePlacementOnClose;
@@ -40,6 +41,7 @@ public class GridConstructTab : UITab
         IDataCatalog dataCatalog,
         IUiPopupService popupService,
         IDungeonGridBuildingControllerProvider buildingControllerProvider,
+        IBlueprintResearchRuntimeProvider researchRuntimeProvider,
         ITmpKoreanFontService tmpKoreanFontService,
         IGridConstructButtonFactory buttonFactory)
     {
@@ -47,6 +49,8 @@ public class GridConstructTab : UITab
         this.popupService = popupService ?? throw new ArgumentNullException(nameof(popupService));
         this.buildingControllerProvider = buildingControllerProvider
             ?? throw new ArgumentNullException(nameof(buildingControllerProvider));
+        this.researchRuntimeProvider = researchRuntimeProvider
+            ?? throw new ArgumentNullException(nameof(researchRuntimeProvider));
         this.tmpKoreanFontService = tmpKoreanFontService
             ?? throw new ArgumentNullException(nameof(tmpKoreanFontService));
         this.buttonFactory = buttonFactory ?? throw new ArgumentNullException(nameof(buttonFactory));
@@ -100,7 +104,7 @@ public class GridConstructTab : UITab
         foreach (BuildingSO building in RequireDataCatalog()
                      .GetData<BuildingSO>()
                      .Values
-                     .Where((x) => x != null && x.unlocked)
+                     .Where(IsVisibleBuilding)
                      .OrderBy((x) => x.id))
         {
             BuildingCategory menuCategory = ResolveMenuCategory(building);
@@ -423,17 +427,7 @@ public class GridConstructTab : UITab
 
     private static string GetCategoryDisplayName(BuildingCategory category)
     {
-        return category switch
-        {
-            BuildingCategory.Wall => "벽/문",
-            BuildingCategory.Shop => "상점",
-            BuildingCategory.Special => "특수",
-            BuildingCategory.Movement => "이동",
-            BuildingCategory.Production => "생산",
-            BuildingCategory.Crafting => "제작",
-            BuildingCategory.Resource => "자원",
-            _ => "기타"
-        };
+        return BuildingCategoryCatalog.GetDisplayName(category, "기타");
     }
 
     private static bool TryGetCategoryDisplayName(string rawText, out string displayName)
@@ -445,13 +439,15 @@ public class GridConstructTab : UITab
         }
 
         string normalized = rawText.Trim();
-        if (!Enum.TryParse(normalized, true, out BuildingCategory category))
+        if (BuildingCategoryCatalog.TryResolve(
+                normalized,
+                out BuildingCategoryDefinition definition))
         {
-            return false;
+            displayName = definition.DisplayName;
+            return true;
         }
 
-        displayName = GetCategoryDisplayName(category);
-        return true;
+        return false;
     }
 
     private static BuildingCategory ResolveMenuCategory(BuildingSO building)
@@ -461,6 +457,23 @@ public class GridConstructTab : UITab
             : building != null
                 ? building.category
                 : BuildingCategory.None;
+    }
+
+    private bool IsVisibleBuilding(BuildingSO building)
+    {
+        if (building == null)
+        {
+            return false;
+        }
+
+        if (building.unlocked)
+        {
+            return true;
+        }
+
+        return researchRuntimeProvider != null
+            && researchRuntimeProvider.TryGetRuntime(out BlueprintResearchRuntime runtime)
+            && runtime.State.IsBuildingUnlocked(building.id);
     }
 
     private IDataCatalog RequireDataCatalog()

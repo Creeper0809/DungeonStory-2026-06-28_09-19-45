@@ -79,6 +79,7 @@ public sealed class GridFacilityEvolutionBuildingReplacer : IFacilityEvolutionBu
         BuildingSO sourceBuilding = source.BuildingData;
 
         grid.RemoveOccupant(
+            source,
             sourceBuilding.Placement.Layer,
             source.buildPoses,
             sourceBuilding.Placement.IsMovement);
@@ -132,7 +133,7 @@ public readonly struct FacilityEvolutionResult
         SourceFacilityName = sourceFacilityName ?? string.Empty;
         Proposal = proposal;
         Message = message ?? string.Empty;
-        MutationTags = mutationTags ?? Array.Empty<string>();
+        MutationTags = EventPayloadSnapshot.Copy(mutationTags);
     }
 
     public bool Success { get; }
@@ -154,10 +155,9 @@ public struct FacilityEvolutionCompletedEvent
         this.result = result;
     }
 
-    private static FacilityEvolutionCompletedEvent e;
-
     public static void Trigger(FacilityEvolutionResult result)
     {
+        FacilityEvolutionCompletedEvent e = new FacilityEvolutionCompletedEvent();
         e.result = result;
         EventObserver.TriggerEvent(e);
     }
@@ -202,7 +202,7 @@ public sealed class DefaultFacilityEvolutionValidator : IFacilityEvolutionValida
             recipe,
             profile,
             researchState,
-            resources ?? new EmptyFacilityEvolutionResourceProvider(),
+            resources ?? throw new ArgumentNullException(nameof(resources)),
             recipeQuery,
             stateComponentFactory);
 
@@ -332,7 +332,8 @@ public sealed class FacilityEvolutionEngine
             ?? throw new ArgumentNullException(nameof(recordComponentService));
         this.recordProvider = recordProvider ?? this.recordComponentService;
         this.proposalProvider = proposalProvider ?? new RuleBasedFacilityEvolutionProposalProvider();
-        this.resourceProvider = resourceProvider ?? new EmptyFacilityEvolutionResourceProvider();
+        this.resourceProvider = resourceProvider
+            ?? throw new ArgumentNullException(nameof(resourceProvider));
         this.buildingReplacer = buildingReplacer
             ?? throw new ArgumentNullException(nameof(buildingReplacer));
         this.roomLayoutCache = roomLayoutCache
@@ -367,7 +368,8 @@ public sealed class FacilityEvolutionEngine
 
     public IReadOnlyList<FacilityEvolutionCandidate> GetCandidates(
         BuildableObject facility,
-        bool includeRejected = false)
+        bool includeRejected = false,
+        bool requestLlmProposal = true)
     {
         if (facility == null || facility.isDestroy)
         {
@@ -375,7 +377,9 @@ public sealed class FacilityEvolutionEngine
         }
 
         FacilityEvolutionContext context = BuildContext(facility);
-        FacilityEvolutionProposal proposal = proposalProvider.Propose(context);
+        FacilityEvolutionProposal proposal = requestLlmProposal
+            ? proposalProvider.Propose(context)
+            : new RuleBasedFacilityEvolutionProposalProvider().Propose(context);
         IReadOnlyDictionary<string, int> proposalOrder = BuildProposalOrder(proposal);
 
         return context.CandidateRecipes
@@ -569,6 +573,7 @@ public class FacilityEvolutionRuntime : MonoBehaviour
         IFacilityEvolutionStateComponentFactory stateComponentFactory,
         IFacilityCandidateCache facilityCandidateCache,
         IFacilityEvolutionRecipeQuery recipeQuery,
+        IFacilityEvolutionResourceProvider resourceProvider,
         IFacilityEvolutionRecordTokenConsumer recordTokenConsumer,
         IFacilityEvolutionRecordComponentService recordComponentService,
         IFacilityEvolutionBuildingReplacerFactory buildingReplacerFactory)
@@ -585,6 +590,8 @@ public class FacilityEvolutionRuntime : MonoBehaviour
             ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
         this.recipeQuery = recipeQuery
             ?? throw new ArgumentNullException(nameof(recipeQuery));
+        this.resourceProvider = resourceProvider
+            ?? throw new ArgumentNullException(nameof(resourceProvider));
         this.recordTokenConsumer = recordTokenConsumer
             ?? throw new ArgumentNullException(nameof(recordTokenConsumer));
         this.recordComponentService = recordComponentService
@@ -647,9 +654,10 @@ public class FacilityEvolutionRuntime : MonoBehaviour
 
     public IReadOnlyList<FacilityEvolutionCandidate> GetCandidates(
         BuildableObject facility,
-        bool includeRejected = false)
+        bool includeRejected = false,
+        bool requestLlmProposal = true)
     {
-        return Engine.GetCandidates(facility, includeRejected);
+        return Engine.GetCandidates(facility, includeRejected, requestLlmProposal);
     }
 
     public bool TryEvolve(
@@ -692,7 +700,8 @@ public class FacilityEvolutionRuntime : MonoBehaviour
             roomProfileProvider ?? new RoomProfileBuilder(records, rooms),
             records,
             proposalProvider ?? CreateDefaultProposalProvider(),
-            resourceProvider ?? new EmptyFacilityEvolutionResourceProvider(),
+            resourceProvider
+                ?? throw new InvalidOperationException($"{nameof(FacilityEvolutionRuntime)} requires {nameof(IFacilityEvolutionResourceProvider)} injection or explicit configuration."),
             buildingReplacer ?? ResolveBuildingReplacerFactory().Create(),
             rooms,
             states,

@@ -26,6 +26,8 @@ public static class MetaProgressionDebugScenarios
         RunScenario("운영 지식 강화 효과", VerifyOperationKnowledgeUpgrades, errors);
         RunScenario("설계 보존 강화 효과", VerifyRecipePreservation, errors);
         RunScenario("사장 생존 강화 효과", VerifyOwnerSurvivalUpgrades, errors);
+        RunScenario("세 전략 계승 강화 실제 배율", VerifyStrategyUpgradeEffects, errors);
+        RunScenario("미등록 메타 효과/안정 ID 확장", VerifyOpenMetaEffectRegistration, errors);
 
         if (errors.Count > 0)
         {
@@ -66,8 +68,8 @@ public static class MetaProgressionDebugScenarios
         using CountingRunResultReadyListener results = new CountingRunResultReadyListener();
 
         scenario.Runtime.OnTriggerEvent(new OperatingDayStartedEvent(4));
-        scenario.Runtime.OnTriggerEvent(new OperatingDayReportEvent(new OperatingDayReport { day = 1 }));
-        scenario.Runtime.OnTriggerEvent(new OperatingDayReportEvent(new OperatingDayReport { day = 2 }));
+        scenario.Runtime.OnTriggerEvent(new OperatingDayReportEvent(OperatingDayReport.Create(1)));
+        scenario.Runtime.OnTriggerEvent(new OperatingDayReportEvent(OperatingDayReport.Create(2)));
         scenario.Runtime.OnTriggerEvent(new InvasionStartedEvent(new InvasionThreatSnapshot(
             120f,
             InvasionThreatStage.Candidate,
@@ -77,7 +79,7 @@ public static class MetaProgressionDebugScenarios
         scenario.Runtime.OnTriggerEvent(new InvasionResolvedEvent(true, 1f));
         scenario.Runtime.OnTriggerEvent(new FacilityVisitEvent((CharacterActor)null, CreateFacility(9001, "발견 시설")));
 
-        CharacterActor owner = CreateOwner();
+        CharacterActor owner = CreateOwner(scenario.Runtime);
         RunResultSnapshot result = scenario.Runtime.EndRun(CharacterActor.From(owner), "테스트 사망");
 
         bool valid = result != null
@@ -96,24 +98,20 @@ public static class MetaProgressionDebugScenarios
 
     private static bool VerifySurvivalRewardDominatesDiscoveryOnly()
     {
-        RunResultSnapshot shortDiscovery = new RunResultSnapshot
-        {
-            survivalSeconds = 30f,
-            survivedOperatingDays = 1,
-            settlementCount = 0,
-            firstDiscoveredFacilityCount = 15,
-            firstUnlockedRecipeCount = 3,
-            difficultyMultiplier = 1f
-        };
-        RunResultSnapshot longSurvival = new RunResultSnapshot
-        {
-            survivalSeconds = 180f * 8f,
-            survivedOperatingDays = 8,
-            settlementCount = 7,
-            firstDiscoveredFacilityCount = 1,
-            firstUnlockedRecipeCount = 0,
-            difficultyMultiplier = 1f
-        };
+        RunResultSnapshot shortDiscovery = new RunResultSnapshot(
+            survivalSeconds: 30f,
+            survivedOperatingDays: 1,
+            settlementCount: 0,
+            firstDiscoveredFacilityCount: 15,
+            firstUnlockedRecipeCount: 3,
+            difficultyMultiplier: 1f);
+        RunResultSnapshot longSurvival = new RunResultSnapshot(
+            survivalSeconds: 180f * 8f,
+            survivedOperatingDays: 8,
+            settlementCount: 7,
+            firstDiscoveredFacilityCount: 1,
+            firstUnlockedRecipeCount: 0,
+            difficultyMultiplier: 1f);
 
         return MetaProgressionCalculator.CalculateLegacyCurrency(longSurvival)
             > MetaProgressionCalculator.CalculateLegacyCurrency(shortDiscovery);
@@ -125,10 +123,10 @@ public static class MetaProgressionDebugScenarios
         scenario.Runtime.State.AddCurrency(500);
 
         bool purchasedFacility = scenario.Runtime.TryPurchaseUpgrade(
-            MetaUpgradeId.StartingFacilityCandidatePlusOne,
+            MetaUpgradeIds.StartingFacilityCandidatePlusOne,
             out _);
         bool purchasedBasic = scenario.Runtime.TryPurchaseUpgrade(
-            MetaUpgradeId.BasicPurchaseListExpansion,
+            MetaUpgradeIds.BasicPurchaseListExpansion,
             out _);
 
         BuildingSO first = CreateBuilding(9101, "1성 테스트 시설 A", false);
@@ -142,7 +140,8 @@ public static class MetaProgressionDebugScenarios
         bool valid = purchasedFacility
             && purchasedBasic
             && scenario.Runtime.GetStartingFacilityCandidateBonus() == 1
-            && offers.Any((offer) => offer.Building == first || offer.Building == second);
+            && offers.OfType<FacilityBuildingOffer>()
+                .Any((offer) => offer.Building == first || offer.Building == second);
 
         Object.DestroyImmediate(first);
         Object.DestroyImmediate(second);
@@ -158,18 +157,21 @@ public static class MetaProgressionDebugScenarios
     {
         using ScenarioRuntime scenario = new ScenarioRuntime();
         scenario.Runtime.State.AddCurrency(500);
-        scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeId.SpecialRecipeRecordSlot, out _);
+        scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeIds.SpecialRecipeRecordSlot, out _);
 
         FacilityBlueprintSO blueprint = ScriptableObject.CreateInstance<FacilityBlueprintSO>();
         blueprint.id = 9201;
         blueprint.blueprintName = "보존 테스트 설계도";
+        BlueprintUnlockRecord recipeUnlock = new BlueprintUnlockRecord(
+            BlueprintUnlockTypeIds.Recipe,
+            "조합식",
+            "recipe_preserve_test",
+            "recipe_preserve_test");
         BlueprintResearchUnlockResult unlock = new BlueprintResearchUnlockResult(
             blueprint,
-            Array.Empty<string>(),
-            Array.Empty<string>(),
-            new[] { "recipe_preserve_test" });
+            new[] { recipeUnlock });
         scenario.Runtime.OnTriggerEvent(new BlueprintResearchCompletedEvent(blueprint, unlock));
-        CharacterActor owner = CreateOwner();
+        CharacterActor owner = CreateOwner(scenario.Runtime);
         scenario.Runtime.EndRun(CharacterActor.From(owner), "테스트 사망");
 
         bool valid = scenario.Runtime.IsRecipePreserved("recipe_preserve_test");
@@ -183,11 +185,11 @@ public static class MetaProgressionDebugScenarios
     {
         using ScenarioRuntime scenario = new ScenarioRuntime();
         scenario.Runtime.State.AddCurrency(500);
-        bool healthPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeId.OwnerSurvivalBonus, out _);
-        bool traitPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeId.StartingOwnerTraitCandidatePlusOne, out _);
-        bool warningPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeId.InvasionWarningAccuracy, out _);
+        bool healthPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeIds.OwnerSurvivalBonus, out _);
+        bool traitPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeIds.StartingOwnerTraitCandidatePlusOne, out _);
+        bool warningPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeIds.InvasionWarningAccuracy, out _);
 
-        CharacterActor owner = CreateOwner();
+        CharacterActor owner = CreateOwner(scenario.Runtime);
         bool valid = healthPurchased
             && traitPurchased
             && warningPurchased
@@ -200,7 +202,104 @@ public static class MetaProgressionDebugScenarios
         return valid;
     }
 
-    private static CharacterActor CreateOwner()
+    private static bool VerifyStrategyUpgradeEffects()
+    {
+        using ScenarioRuntime scenario = new ScenarioRuntime();
+        scenario.Runtime.State.AddCurrency(1000);
+        bool commercePurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeIds.CommerceSupplyNetwork, out _);
+        bool fortressPurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeIds.FortressEngineering, out _);
+        bool arcanePurchased = scenario.Runtime.TryPurchaseUpgrade(MetaUpgradeIds.ArcaneResearchMethod, out _);
+
+        BuildingSO defense = CreateBuilding(9401, "전략 방어 시설", true);
+        BuildingSO general = CreateBuilding(9402, "전략 일반 시설", false);
+        RuntimeMetaProgressionReader metaReader = new RuntimeMetaProgressionReader(scenario.Runtime);
+        RunVariableRuntimeReader runReader = new RunVariableRuntimeReader(
+            new EmptyRunVariableRuntimeProvider(),
+            metaReader);
+
+        BuildingSO researchBuilding = CreateBuilding(9403, "전략 연구 시설", false);
+        researchBuilding.Facility = new FacilityData
+        {
+            roles = FacilityRole.Research,
+            capacity = 1,
+            supportedWorkTypes = FacilityWorkType.Research
+        };
+        GameObject researchFacilityObject = new GameObject("Strategy Research Facility");
+        BuildableObject researchFacility = researchFacilityObject.AddComponent<BuildableObject>();
+        researchFacility.Initialization(researchBuilding, Vector2Int.zero);
+        FacilityBlueprintSO researchBlueprint = ScriptableObject.CreateInstance<FacilityBlueprintSO>();
+        researchBlueprint.id = 9404;
+        researchBlueprint.blueprintName = "전략 연구 배율 검증";
+        researchBlueprint.researchWorkRequired = 100f;
+        GameObject researchRuntimeObject = new GameObject("Strategy Research Runtime");
+        BlueprintResearchRuntime researchRuntime = researchRuntimeObject.AddComponent<BlueprintResearchRuntime>();
+        researchRuntime.State.EnqueueBlueprint(researchBlueprint);
+        BlueprintResearchWorkService researchService = new BlueprintResearchWorkService(
+            new FixedBlueprintResearchRuntimeProvider(researchRuntime),
+            metaReader);
+        BlueprintResearchWorkResult researchResult = researchService.ApplyResearchWork(
+            null,
+            researchFacility,
+            1f);
+
+        bool valid = commercePurchased
+            && fortressPurchased
+            && arcanePurchased
+            && Mathf.Approximately(scenario.Runtime.GetCommerceStockCostMultiplier(StockCategory.Food), 0.96f)
+            && Mathf.Approximately(scenario.Runtime.GetCommerceStockCostMultiplier(StockCategory.General), 0.96f)
+            && Mathf.Approximately(scenario.Runtime.GetCommerceStockCostMultiplier(StockCategory.Mana), 1f)
+            && Mathf.Approximately(scenario.Runtime.GetFortressFacilityCostMultiplier(defense), 0.95f)
+            && Mathf.Approximately(scenario.Runtime.GetFortressFacilityCostMultiplier(general), 1f)
+            && Mathf.Approximately(scenario.Runtime.GetArcaneResearchWorkMultiplier(), 1.08f)
+            && Mathf.Approximately(runReader.GetStockCostMultiplier(StockCategory.Food), 0.96f)
+            && Mathf.Approximately(runReader.GetFacilityShopCostMultiplier(defense), 0.95f)
+            && researchResult.Success
+            && Mathf.Approximately(
+                researchResult.AddedProgress,
+                BlueprintResearchService.CalculateResearchWork(null, researchFacility, 1f) * 1.08f)
+            && MetaProgressionCatalog.All.Count == 9;
+
+        Object.DestroyImmediate(defense);
+        Object.DestroyImmediate(general);
+        Object.DestroyImmediate(researchFacilityObject);
+        Object.DestroyImmediate(researchRuntimeObject);
+        Object.DestroyImmediate(researchBuilding);
+        Object.DestroyImmediate(researchBlueprint);
+        return valid;
+    }
+
+    private static bool VerifyOpenMetaEffectRegistration()
+    {
+        const string UpgradeId = "meta:test:custom-capacity";
+        const string EffectId = "meta:test:custom-capacity-value";
+        try
+        {
+            MetaProgressionCatalog.Register(new MetaUpgradeDefinition(
+                UpgradeId,
+                MetaProgressionBranch.OperationKnowledge,
+                "테스트 수용량",
+                "확장 계약 검증",
+                1,
+                3,
+                new IMetaUpgradeEffect[] { new TestMetaIntegerEffect(EffectId) }));
+
+            MetaProgressionState state = new MetaProgressionState();
+            state.SetUpgradeLevelForDebug(UpgradeId, 2);
+            var idProperty = typeof(MetaUpgradeDefinition).GetProperty("id");
+            bool immutableStableId = idProperty != null
+                && idProperty.PropertyType == typeof(string)
+                && !idProperty.CanWrite;
+            return MetaProgressionEffects.GetIntegerBonus(state, EffectId) == 6
+                && state.UpgradeLevels.ContainsKey(UpgradeId)
+                && immutableStableId;
+        }
+        finally
+        {
+            MetaProgressionCatalog.ResetToBuiltIns();
+        }
+    }
+
+    private static CharacterActor CreateOwner(MetaProgressionRuntime runtime)
     {
         CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
         data.id = 9301;
@@ -215,6 +314,11 @@ public static class MetaProgressionDebugScenarios
         obj.AddComponent<AbilityMove>();
         obj.AddComponent<AbilityWork>();
         obj.AddComponent<AIBrain>();
+        CharacterAiEditorTestDependencies.Inject(obj);
+        character.GetComponent<CharacterStats>()?.ConstructCharacterStats(
+            new NoopStaffDiscontentRuntimeService(),
+            new NoopOwnerRunLifecycleService(),
+            new RuntimeMetaProgressionReader(runtime));
         character.RefreshAbilityCache();
         character.Initialization(data);
         character.SetLifecycleState(CharacterLifecycleState.Active);
@@ -241,9 +345,12 @@ public static class MetaProgressionDebugScenarios
         building.category = defense ? BuildingCategory.Special : BuildingCategory.Shop;
         if (defense)
         {
-            building.Defense.enabled = true;
-            building.Defense.concept = DefenseAttackConcept.Physical;
-            building.Defense.star = 1;
+            building.Defense = new DefenseFacilityData
+            {
+                enabled = true,
+                concept = DefenseAttackConcept.Physical,
+                star = 1
+            };
         }
 
         return building;
@@ -259,6 +366,9 @@ public static class MetaProgressionDebugScenarios
         {
             runtimeObject = new GameObject("Meta Progression Scenario Runtime");
             Runtime = runtimeObject.AddComponent<MetaProgressionRuntime>();
+            Runtime.Construct(
+                new MetaRunResultBuilder(new MissingThreatRuntimeProvider()),
+                new NoopRunResultPanelService());
             Runtime.SetShowRunResultPanel(false);
             Runtime.StartNewRun();
         }
@@ -329,6 +439,109 @@ public static class MetaProgressionDebugScenarios
         public void Dispose()
         {
             this.EventStopListening<EventAlertRequestedEvent>();
+        }
+    }
+
+    private sealed class TestMetaIntegerEffect : IMetaIntegerBonusEffect
+    {
+        public TestMetaIntegerEffect(string effectId)
+        {
+            EffectId = effectId;
+        }
+
+        public string EffectId { get; }
+
+        public int GetBonus(int level)
+        {
+            return level * 3;
+        }
+    }
+
+    private sealed class MissingThreatRuntimeProvider : IInvasionThreatRuntimeProvider
+    {
+        public bool TryGetRuntime(out InvasionThreatRuntime runtime)
+        {
+            runtime = null;
+            return false;
+        }
+    }
+
+    private sealed class NoopRunResultPanelService : IRunResultPanelService
+    {
+        public RunResultPanel Show(RunResultSnapshot result)
+        {
+            return null;
+        }
+    }
+
+    private sealed class NoopStaffDiscontentRuntimeService : IStaffDiscontentRuntimeService
+    {
+        public float GetWorkEfficiencyMultiplier(CharacterActor staff) => 1f;
+
+        public bool ShouldBlockWork(CharacterActor staff, out string reason)
+        {
+            reason = string.Empty;
+            return false;
+        }
+
+        public bool IsRebellionTarget(CharacterActor target) => false;
+        public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender) => false;
+    }
+
+    private sealed class NoopOwnerRunLifecycleService : IOwnerRunLifecycleService
+    {
+        public void HandleOwnerDeath(CharacterActor owner, string reason)
+        {
+        }
+    }
+
+    private sealed class RuntimeMetaProgressionReader : IMetaProgressionRuntimeReader
+    {
+        private readonly MetaProgressionRuntime runtime;
+
+        public RuntimeMetaProgressionReader(MetaProgressionRuntime runtime)
+        {
+            this.runtime = runtime;
+        }
+
+        public int GetStartingFacilityCandidateBonus() => runtime.GetStartingFacilityCandidateBonus();
+        public int GetStartingOwnerTraitCandidateBonus() => runtime.GetStartingOwnerTraitCandidateBonus();
+        public float GetOwnerMaxHealthMultiplier() => runtime.GetOwnerMaxHealthMultiplier();
+        public float GetInvasionWarningThresholdMultiplier() => runtime.GetInvasionWarningThresholdMultiplier();
+        public float GetCommerceStockCostMultiplier(StockCategory category) => runtime.GetCommerceStockCostMultiplier(category);
+        public float GetFortressFacilityCostMultiplier(BuildingSO building) => runtime.GetFortressFacilityCostMultiplier(building);
+        public float GetArcaneResearchWorkMultiplier() => runtime.GetArcaneResearchWorkMultiplier();
+        public bool IsRecipePreserved(string recipeId) => runtime.IsRecipePreserved(recipeId);
+
+        public IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(
+            IEnumerable<BuildingSO> buildings)
+        {
+            return runtime.GetExpandedBasicPurchaseBuildingIds(buildings);
+        }
+    }
+
+    private sealed class EmptyRunVariableRuntimeProvider : IRunVariableRuntimeProvider
+    {
+        public bool TryGetRuntime(out RunVariableRuntime runtime)
+        {
+            runtime = null;
+            return false;
+        }
+    }
+
+    private sealed class FixedBlueprintResearchRuntimeProvider : IBlueprintResearchRuntimeProvider
+    {
+        private readonly BlueprintResearchRuntime runtime;
+
+        public FixedBlueprintResearchRuntimeProvider(BlueprintResearchRuntime runtime)
+        {
+            this.runtime = runtime;
+        }
+
+        public bool TryGetRuntime(out BlueprintResearchRuntime resolved)
+        {
+            resolved = runtime;
+            return resolved != null;
         }
     }
 }

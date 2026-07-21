@@ -14,7 +14,7 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
     private IUiPointerBlocker uiPointerBlocker;
     private CharacterActor selectedActor;
 
-    public CharacterActor SelectedActor => selectedActor;
+    public CharacterActor SelectedActor => selectedActor != null ? selectedActor : null;
 
     private IStaffDiscontentRuntimeService StaffDiscontentRuntimeService => staffDiscontentRuntimeService
         ?? throw new InvalidOperationException($"{nameof(OwnerCommandController)} requires {nameof(IStaffDiscontentRuntimeService)} injection.");
@@ -41,7 +41,13 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
 
     private void Update()
     {
-        if (selectedActor == null || (selectedActor.Stats != null && selectedActor.Stats.IsDead))
+        if (selectedActor == null)
+        {
+            selectedActor = null;
+            return;
+        }
+
+        if (selectedActor.Stats != null && selectedActor.Stats.IsDead)
         {
             return;
         }
@@ -118,7 +124,14 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
 
         if (!WorkCommandResolver.TryResolveFacilityCommand(selectedActor, target, out FacilityWorkType workType, out string errorMessage))
         {
-            selectedActor.AddLog($"우선 지정 실패: {errorMessage}");
+            selectedActor.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Command,
+                CharacterActivityOutcomes.Failed,
+                $"우선 지정 실패: {errorMessage}",
+                target,
+                actionId: "command:priority-work",
+                reasonCode: "unsupported-facility-command",
+                bubbleEligible: true));
             NoticeFeedEvent.Trigger(errorMessage, NoticeFeedEvent.Grade.WARNING);
             message = errorMessage;
             return false;
@@ -130,7 +143,14 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
 
         if (!work.TrySetPriorityWorkTarget(target, workType, searchResult, out errorMessage))
         {
-            selectedActor.AddLog($"우선 지정 실패: {errorMessage}");
+            selectedActor.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Command,
+                CharacterActivityOutcomes.Failed,
+                $"우선 지정 실패: {errorMessage}",
+                target,
+                actionId: "command:priority-work",
+                reasonCode: "priority-target-rejected",
+                bubbleEligible: true));
             NoticeFeedEvent.Trigger(errorMessage, NoticeFeedEvent.Grade.WARNING);
             message = errorMessage;
             return false;
@@ -159,7 +179,10 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
         if (!selectedActor.TryGetAbility(out AbilityWork work))
         {
             message = "선택한 캐릭터는 작업 능력이 없습니다.";
-            selectedActor.AddLog($"우선 지정 실패: {message}");
+            selectedActor.AddActivity(CreateSuppressCommandFailure(
+                target,
+                message,
+                "missing-work-ability"));
             NoticeFeedEvent.Trigger(message, NoticeFeedEvent.Grade.WARNING);
             return false;
         }
@@ -170,7 +193,10 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
 
         if (!work.TrySetPrioritySuppressTarget(target, searchResult, out string errorMessage))
         {
-            selectedActor.AddLog($"우선 지정 실패: {errorMessage}");
+            selectedActor.AddActivity(CreateSuppressCommandFailure(
+                target,
+                errorMessage,
+                "priority-target-rejected"));
             NoticeFeedEvent.Trigger(errorMessage, NoticeFeedEvent.Grade.WARNING);
             message = errorMessage;
             return false;
@@ -182,9 +208,26 @@ public class OwnerCommandController : MonoBehaviour, UtilEventListener<InfoFeedE
         return true;
     }
 
+    private static CharacterActivityEvent CreateSuppressCommandFailure(
+        CharacterActor target,
+        string message,
+        string reasonCode)
+    {
+        return CharacterActivityEvent.Create(
+            CharacterActivityKinds.Command,
+            CharacterActivityOutcomes.Failed,
+            $"우선 지정 실패: {message}",
+            actionId: "command:priority-suppress",
+            targetId: target != null ? $"character:{target.GetInstanceID()}" : string.Empty,
+            targetName: target != null ? target.name : string.Empty,
+            reasonCode: reasonCode,
+            sentiment: -0.7f,
+            bubbleEligible: true);
+    }
+
     public void OnTriggerEvent(InfoFeedEvent eventType)
     {
-        CharacterActor actor = eventType.infoable as CharacterActor;
+        CharacterActor actor = eventType.Target as CharacterActor;
         if (actor != null)
         {
             TrySelectActor(actor, out _);

@@ -5,71 +5,246 @@ using UnityEngine;
 using VContainer;
 
 [Serializable]
-public class FacilityRevenueSummary
+public sealed class FacilityRevenueSummary
 {
-    public string facilityName;
-    public int revenue;
+    public FacilityRevenueSummary(string facilityName, int revenue)
+    {
+        this.facilityName = facilityName ?? string.Empty;
+        this.revenue = Mathf.Max(0, revenue);
+    }
+
+    public string facilityName { get; }
+    public int revenue { get; }
 }
 
 [Serializable]
-public class SpeciesVisitSummary
+public sealed class SpeciesVisitSummary
 {
-    public string speciesTag;
-    public int visitCount;
+    public SpeciesVisitSummary(string speciesTag, int visitCount)
+    {
+        this.speciesTag = speciesTag ?? string.Empty;
+        this.visitCount = Mathf.Max(0, visitCount);
+    }
+
+    public string speciesTag { get; }
+    public int visitCount { get; }
 }
 
 [Serializable]
-public class StockConsumptionSummary
+public sealed class StockConsumptionSummary
 {
-    public StockCategory category;
-    public int amount;
+    public StockConsumptionSummary(StockCategory category, int amount)
+    {
+        this.category = category;
+        this.amount = Mathf.Max(0, amount);
+    }
+
+    public StockCategory category { get; }
+    public int amount { get; }
 }
 
 [Serializable]
-public class WarehouseStockSummary
+public sealed class WarehouseStockSummary
 {
-    public string warehouseName;
-    public int totalStock;
-    public int maxCapacity;
-    public int food;
-    public int general;
-    public int weapon;
-    public int mana;
+    public WarehouseStockSummary(
+        string warehouseName,
+        int totalStock,
+        int maxCapacity,
+        IReadOnlyList<StockConsumptionSummary> stocks)
+    {
+        this.warehouseName = warehouseName ?? string.Empty;
+        this.totalStock = Mathf.Max(0, totalStock);
+        this.maxCapacity = Mathf.Max(0, maxCapacity);
+        this.stocks = EventPayloadSnapshot.Copy(stocks);
+    }
+
+    public string warehouseName { get; }
+    public int totalStock { get; }
+    public int maxCapacity { get; }
+    public IReadOnlyList<StockConsumptionSummary> stocks { get; }
+
+    public string ToSummaryText()
+    {
+        string stockText = stocks == null || stocks.Count == 0
+            ? "비어 있음"
+            : string.Join(", ", stocks.Select((item) =>
+                $"{StockCategoryCatalog.GetDisplayName(item.category)} {item.amount}"));
+        return $"{warehouseName}: {totalStock}/{maxCapacity} ({stockText})";
+    }
 }
 
 [Serializable]
-public class StaffWorkSummary
+public sealed class StaffWorkSummary
 {
-    public int staffCount;
-    public int workingCount;
-    public int offDutyCount;
-    public float averageSleep;
-    public float averageMood;
+    public StaffWorkSummary(
+        int staffCount,
+        int workingCount,
+        int offDutyCount,
+        float averageSleep,
+        float averageMood)
+    {
+        this.staffCount = Mathf.Max(0, staffCount);
+        this.workingCount = Mathf.Max(0, workingCount);
+        this.offDutyCount = Mathf.Max(0, offDutyCount);
+        this.averageSleep = averageSleep;
+        this.averageMood = averageMood;
+    }
+
+    public int staffCount { get; }
+    public int workingCount { get; }
+    public int offDutyCount { get; }
+    public float averageSleep { get; }
+    public float averageMood { get; }
 }
 
 [Serializable]
-public class OperatingDayReport
+public sealed class OperatingDayReport
 {
-    public int day;
-    public int totalRevenue;
-    public int totalVisits;
-    public float averageSatisfaction;
-    public int repairCost;
-    public int restockFailureCount;
-    public List<FacilityRevenueSummary> facilityRevenues = new List<FacilityRevenueSummary>();
-    public List<SpeciesVisitSummary> speciesVisits = new List<SpeciesVisitSummary>();
-    public List<string> incidents = new List<string>();
-    public List<string> damagedFacilities = new List<string>();
-    public List<string> stockShortageFacilities = new List<string>();
-    public List<string> staffComplaintEvents = new List<string>();
-    public List<string> eventLog = new List<string>();
-    public List<string> unlockedCodexInfo = new List<string>();
-    public StaffWorkSummary staffSummary = new StaffWorkSummary();
-    public List<WarehouseStockSummary> warehouseStocks = new List<WarehouseStockSummary>();
-    public List<StockConsumptionSummary> stockConsumed = new List<StockConsumptionSummary>();
-    public List<StockSupplyResult> stockSupplyResults = new List<StockSupplyResult>();
-    public List<StockDeliveryOffer> refreshedDailyShopOffers = new List<StockDeliveryOffer>();
-    public List<FacilityShopOfferSnapshot> refreshedFacilityShopOffers = new List<FacilityShopOfferSnapshot>();
+    private OperatingDayReport(
+        int day,
+        int totalRevenue,
+        int totalVisits,
+        float averageSatisfaction,
+        int repairCost,
+        int restockFailureCount,
+        IReadOnlyList<FacilityRevenueSummary> facilityRevenues,
+        IReadOnlyList<SpeciesVisitSummary> speciesVisits,
+        IReadOnlyList<string> incidents,
+        IReadOnlyList<string> damagedFacilities,
+        IReadOnlyList<string> stockShortageFacilities,
+        IReadOnlyList<string> staffComplaintEvents,
+        IReadOnlyList<string> eventLog,
+        IReadOnlyList<string> unlockedCodexInfo,
+        StaffWorkSummary staffSummary,
+        IReadOnlyList<WarehouseStockSummary> warehouseStocks,
+        IReadOnlyList<StockConsumptionSummary> stockConsumed,
+        IReadOnlyList<StockSupplyResult> stockSupplyResults,
+        IReadOnlyList<StockDeliveryOffer> refreshedDailyShopOffers,
+        IReadOnlyList<FacilityShopOfferSnapshot> refreshedFacilityShopOffers,
+        int maintenanceCost,
+        int payrollCost,
+        int previousDebt,
+        int paidOperatingCost,
+        int unpaidOperatingCost,
+        int closingBalance,
+        int consecutiveShortfallDays)
+    {
+        this.day = Mathf.Max(1, day);
+        this.totalRevenue = Mathf.Max(0, totalRevenue);
+        this.totalVisits = Mathf.Max(0, totalVisits);
+        this.averageSatisfaction = averageSatisfaction;
+        this.repairCost = Mathf.Max(0, repairCost);
+        this.restockFailureCount = Mathf.Max(0, restockFailureCount);
+        this.facilityRevenues = EventPayloadSnapshot.Copy(facilityRevenues);
+        this.speciesVisits = EventPayloadSnapshot.Copy(speciesVisits);
+        this.incidents = EventPayloadSnapshot.Copy(incidents);
+        this.damagedFacilities = EventPayloadSnapshot.Copy(damagedFacilities);
+        this.stockShortageFacilities = EventPayloadSnapshot.Copy(stockShortageFacilities);
+        this.staffComplaintEvents = EventPayloadSnapshot.Copy(staffComplaintEvents);
+        this.eventLog = EventPayloadSnapshot.Copy(eventLog);
+        this.unlockedCodexInfo = EventPayloadSnapshot.Copy(unlockedCodexInfo);
+        this.staffSummary = staffSummary ?? new StaffWorkSummary(0, 0, 0, 0f, 0f);
+        this.warehouseStocks = EventPayloadSnapshot.Copy(warehouseStocks);
+        this.stockConsumed = EventPayloadSnapshot.Copy(stockConsumed);
+        this.stockSupplyResults = EventPayloadSnapshot.Copy(stockSupplyResults);
+        this.refreshedDailyShopOffers = EventPayloadSnapshot.Copy(refreshedDailyShopOffers);
+        this.refreshedFacilityShopOffers = EventPayloadSnapshot.Copy(refreshedFacilityShopOffers);
+        this.maintenanceCost = Mathf.Max(0, maintenanceCost);
+        this.payrollCost = Mathf.Max(0, payrollCost);
+        this.previousDebt = Mathf.Max(0, previousDebt);
+        this.paidOperatingCost = Mathf.Max(0, paidOperatingCost);
+        this.unpaidOperatingCost = Mathf.Max(0, unpaidOperatingCost);
+        this.closingBalance = Mathf.Max(0, closingBalance);
+        this.consecutiveShortfallDays = Mathf.Max(0, consecutiveShortfallDays);
+    }
+
+    public int day { get; }
+    public int totalRevenue { get; }
+    public int totalVisits { get; }
+    public float averageSatisfaction { get; }
+    public int repairCost { get; }
+    public int restockFailureCount { get; }
+    public IReadOnlyList<FacilityRevenueSummary> facilityRevenues { get; }
+    public IReadOnlyList<SpeciesVisitSummary> speciesVisits { get; }
+    public IReadOnlyList<string> incidents { get; }
+    public IReadOnlyList<string> damagedFacilities { get; }
+    public IReadOnlyList<string> stockShortageFacilities { get; }
+    public IReadOnlyList<string> staffComplaintEvents { get; }
+    public IReadOnlyList<string> eventLog { get; }
+    public IReadOnlyList<string> unlockedCodexInfo { get; }
+    public StaffWorkSummary staffSummary { get; }
+    public IReadOnlyList<WarehouseStockSummary> warehouseStocks { get; }
+    public IReadOnlyList<StockConsumptionSummary> stockConsumed { get; }
+    public IReadOnlyList<StockSupplyResult> stockSupplyResults { get; }
+    public IReadOnlyList<StockDeliveryOffer> refreshedDailyShopOffers { get; }
+    public IReadOnlyList<FacilityShopOfferSnapshot> refreshedFacilityShopOffers { get; }
+    public int maintenanceCost { get; }
+    public int payrollCost { get; }
+    public int previousDebt { get; }
+    public int totalOperatingCost => maintenanceCost + payrollCost + previousDebt;
+    public int paidOperatingCost { get; }
+    public int unpaidOperatingCost { get; }
+    public int closingBalance { get; }
+    public int consecutiveShortfallDays { get; }
+
+    public static OperatingDayReport Create(
+        int day,
+        int totalRevenue = 0,
+        int totalVisits = 0,
+        float averageSatisfaction = 0f,
+        int repairCost = 0,
+        int restockFailureCount = 0,
+        IReadOnlyList<FacilityRevenueSummary> facilityRevenues = null,
+        IReadOnlyList<SpeciesVisitSummary> speciesVisits = null,
+        IReadOnlyList<string> incidents = null,
+        IReadOnlyList<string> damagedFacilities = null,
+        IReadOnlyList<string> stockShortageFacilities = null,
+        IReadOnlyList<string> staffComplaintEvents = null,
+        IReadOnlyList<string> eventLog = null,
+        IReadOnlyList<string> unlockedCodexInfo = null,
+        StaffWorkSummary staffSummary = null,
+        IReadOnlyList<WarehouseStockSummary> warehouseStocks = null,
+        IReadOnlyList<StockConsumptionSummary> stockConsumed = null,
+        IReadOnlyList<StockSupplyResult> stockSupplyResults = null,
+        IReadOnlyList<StockDeliveryOffer> refreshedDailyShopOffers = null,
+        IReadOnlyList<FacilityShopOfferSnapshot> refreshedFacilityShopOffers = null,
+        int maintenanceCost = 0,
+        int payrollCost = 0,
+        int previousDebt = 0,
+        int paidOperatingCost = 0,
+        int unpaidOperatingCost = 0,
+        int closingBalance = 0,
+        int consecutiveShortfallDays = 0)
+    {
+        return new OperatingDayReport(
+            day,
+            totalRevenue,
+            totalVisits,
+            averageSatisfaction,
+            repairCost,
+            restockFailureCount,
+            facilityRevenues,
+            speciesVisits,
+            incidents,
+            damagedFacilities,
+            stockShortageFacilities,
+            staffComplaintEvents,
+            eventLog,
+            unlockedCodexInfo,
+            staffSummary,
+            warehouseStocks,
+            stockConsumed,
+            stockSupplyResults,
+            refreshedDailyShopOffers,
+            refreshedFacilityShopOffers,
+            maintenanceCost,
+            payrollCost,
+            previousDebt,
+            paidOperatingCost,
+            unpaidOperatingCost,
+            closingBalance,
+            consecutiveShortfallDays);
+    }
 
     public string ToDetailText()
     {
@@ -80,13 +255,19 @@ public class OperatingDayReport
             $"총 매출: {totalRevenue}",
             $"방문 손님 수: {totalVisits}",
             $"평균 만족도: {averageSatisfaction:0.#}",
+            $"시설 유지비: {maintenanceCost}",
+            $"직원 급여: {payrollCost}",
+            $"이전 미납금: {previousDebt}",
+            $"운영비 납부: {paidOperatingCost}/{totalOperatingCost}",
+            $"새 미납금: {unpaidOperatingCost}",
+            $"마감 자금: {closingBalance}",
             $"수리 비용 예상: {repairCost}",
             $"보충 실패 횟수: {restockFailureCount}",
             string.Empty,
             FormatList("시설별 매출", facilityRevenues.Select((item) => $"{item.facilityName}: {item.revenue}")),
             FormatList("종족별 방문", speciesVisits.Select((item) => $"{TextOrDefault(item.speciesTag, "Unknown")}: {item.visitCount}")),
             FormatList("소비된 재고", stockConsumed.Select((item) => $"{GetStockCategoryName(item.category)}: {item.amount}")),
-            FormatList("창고 재고", warehouseStocks.Select((item) => $"{item.warehouseName}: {item.totalStock}/{item.maxCapacity} (식자재 {item.food}, 잡화 {item.general}, 무기 {item.weapon}, 마력 {item.mana})")),
+            FormatList("창고 재고", warehouseStocks.Select((item) => item.ToSummaryText())),
             FormatList("재고 부족 시설", stockShortageFacilities),
             FormatList("파손 시설", damagedFacilities),
             FormatList("발생한 사고", incidents),
@@ -124,15 +305,9 @@ public class OperatingDayReport
 
     private static string GetStockCategoryName(StockCategory category)
     {
-        return category switch
-        {
-            StockCategory.Food => "식자재",
-            StockCategory.General => "잡화",
-            StockCategory.Weapon => "무기",
-            StockCategory.Mana => "마력",
-            _ => category.ToString()
-        };
+        return StockCategoryCatalog.GetDisplayName(category);
     }
+
 }
 
 public struct OperatingDayStartedEvent
@@ -144,10 +319,9 @@ public struct OperatingDayStartedEvent
         this.day = day;
     }
 
-    private static OperatingDayStartedEvent e;
-
     public static void Trigger(int day)
     {
+        OperatingDayStartedEvent e = new OperatingDayStartedEvent();
         e.day = day;
         EventObserver.TriggerEvent(e);
     }
@@ -162,30 +336,26 @@ public struct OperatingDayEndedEvent
         this.day = day;
     }
 
-    private static OperatingDayEndedEvent e;
-
     public static void Trigger(int day)
     {
+        OperatingDayEndedEvent e = new OperatingDayEndedEvent();
         e.day = day;
         EventObserver.TriggerEvent(e);
     }
 }
 
-public struct OperatingDayReportEvent
+public readonly struct OperatingDayReportEvent
 {
-    public OperatingDayReport report;
+    public OperatingDayReport report { get; }
 
     public OperatingDayReportEvent(OperatingDayReport report)
     {
         this.report = report;
     }
 
-    private static OperatingDayReportEvent e;
-
     public static void Trigger(OperatingDayReport report)
     {
-        e.report = report;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new OperatingDayReportEvent(report));
     }
 }
 
@@ -200,10 +370,9 @@ public struct FacilityVisitEvent
         this.facility = facility;
     }
 
-    private static FacilityVisitEvent e;
-
     public static void Trigger(CharacterActor visitor, BuildableObject facility)
     {
+        FacilityVisitEvent e = new FacilityVisitEvent();
         e.visitorActor = visitor;
         e.facility = facility;
         EventObserver.TriggerEvent(e);
@@ -223,10 +392,9 @@ public struct FacilityRevenueEvent
         this.revenue = revenue;
     }
 
-    private static FacilityRevenueEvent e;
-
     public static void Trigger(CharacterActor customer, BuildableObject facility, int revenue)
     {
+        FacilityRevenueEvent e = new FacilityRevenueEvent();
         e.customerActor = customer;
         e.facility = facility;
         e.revenue = revenue;
@@ -249,10 +417,9 @@ public struct FacilityStockConsumedEvent
         this.amount = amount;
     }
 
-    private static FacilityStockConsumedEvent e;
-
     public static void Trigger(CharacterActor consumer, BuildableObject facility, StockCategory category, int amount)
     {
+        FacilityStockConsumedEvent e = new FacilityStockConsumedEvent();
         e.consumerActor = consumer;
         e.facility = facility;
         e.category = category;
@@ -288,8 +455,6 @@ public struct FacilityCrimeEvent
         this.lossValue = Mathf.Max(0, lossValue);
     }
 
-    private static FacilityCrimeEvent e;
-
     public static void Trigger(
         CharacterActor actor,
         BuildableObject facility,
@@ -297,6 +462,7 @@ public struct FacilityCrimeEvent
         string detail,
         int lossValue)
     {
+        FacilityCrimeEvent e = new FacilityCrimeEvent();
         e.actor = actor;
         e.facility = facility;
         e.kind = kind;
@@ -321,10 +487,9 @@ public struct FacilityRestockEvent
         this.message = message;
     }
 
-    private static FacilityRestockEvent e;
-
     public static void Trigger(BuildableObject facility, int requestedAmount, int restockedAmount, string message)
     {
+        FacilityRestockEvent e = new FacilityRestockEvent();
         e.facility = facility;
         e.requestedAmount = requestedAmount;
         e.restockedAmount = restockedAmount;
@@ -346,6 +511,8 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
 {
     private const int MaxReportHistory = 20;
 
+    [SerializeField] private DungeonEconomySettings economySettings = new DungeonEconomySettings();
+
     private readonly Dictionary<string, int> facilityRevenue = new Dictionary<string, int>();
     private readonly Dictionary<string, int> speciesVisits = new Dictionary<string, int>();
     private readonly Dictionary<StockCategory, int> consumedStock = new Dictionary<StockCategory, int>();
@@ -357,14 +524,30 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
     private int totalVisits;
     private int restockFailureCount;
     private int currentDay = 1;
+    private int outstandingDebt;
+    private int consecutiveShortfallDays;
+    private bool emergencyFundingUsed;
     private OperatingDayReport latestReport;
     private readonly List<OperatingDayReport> reportHistory = new List<OperatingDayReport>();
+    private IReadOnlyList<OperatingDayReport> reportHistoryView;
     private IDungeonSceneComponentQuery sceneQuery;
     private IFacilityShopCatalog facilityShopCatalog;
     private IRunVariableRuntimeReader runVariableReader;
+    private IGameDataProvider gameDataProvider;
 
     public OperatingDayReport LatestReport => latestReport;
-    public IReadOnlyList<OperatingDayReport> ReportHistory => reportHistory;
+    public IReadOnlyList<OperatingDayReport> ReportHistory
+    {
+        get
+        {
+            if (reportHistoryView == null)
+            {
+                reportHistoryView = reportHistory.AsReadOnly();
+            }
+
+            return reportHistoryView;
+        }
+    }
     public int CurrentDay => currentDay;
     public int CurrentRevenue => totalRevenue;
     public int CurrentVisits => totalVisits;
@@ -375,12 +558,86 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
     public float CurrentAverageSatisfaction => visitorMoodSamples.Count > 0
         ? visitorMoodSamples.Average()
         : 0f;
+    public int OutstandingDebt => outstandingDebt;
+    public int ConsecutiveShortfallDays => consecutiveShortfallDays;
+    public bool EmergencyFundingUsed => emergencyFundingUsed;
+    public bool CanTakeEmergencyFunding => !emergencyFundingUsed;
+    public OperatingCostForecast CurrentOperatingCostForecast => BuildOperatingCostForecast();
+
+    public OperatingDaySettlementPersistenceState CapturePersistentState()
+    {
+        return new OperatingDaySettlementPersistenceState(
+            currentDay,
+            totalRevenue,
+            totalVisits,
+            restockFailureCount,
+            facilityRevenue,
+            speciesVisits,
+            consumedStock,
+            visitorMoodSamples,
+            stockSupplyResults,
+            incidents,
+            eventLog,
+            reportHistory,
+            outstandingDebt,
+            consecutiveShortfallDays,
+            emergencyFundingUsed);
+    }
+
+    public void RestorePersistentState(OperatingDaySettlementPersistenceState state)
+    {
+        if (state == null)
+        {
+            throw new ArgumentNullException(nameof(state));
+        }
+
+        ResetLedger();
+        currentDay = Mathf.Max(1, state.CurrentDay);
+        totalRevenue = Mathf.Max(0, state.TotalRevenue);
+        totalVisits = Mathf.Max(0, state.TotalVisits);
+        restockFailureCount = Mathf.Max(0, state.RestockFailureCount);
+        foreach (KeyValuePair<string, int> pair in state.FacilityRevenue)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Key) && pair.Value > 0)
+            {
+                facilityRevenue[pair.Key] = pair.Value;
+            }
+        }
+
+        foreach (KeyValuePair<string, int> pair in state.SpeciesVisits)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Key) && pair.Value > 0)
+            {
+                speciesVisits[pair.Key] = pair.Value;
+            }
+        }
+
+        foreach (KeyValuePair<StockCategory, int> pair in state.ConsumedStock)
+        {
+            if (pair.Value > 0)
+            {
+                consumedStock[pair.Key] = pair.Value;
+            }
+        }
+
+        visitorMoodSamples.AddRange(state.VisitorMoodSamples.Select(value => Mathf.Clamp(value, 0f, 100f)));
+        stockSupplyResults.AddRange(state.StockSupplyResults);
+        incidents.AddRange(state.Incidents.Where(value => !string.IsNullOrWhiteSpace(value)));
+        eventLog.AddRange(state.EventLog.Where(value => !string.IsNullOrWhiteSpace(value)));
+        reportHistory.Clear();
+        reportHistory.AddRange(state.ReportHistory.Take(MaxReportHistory));
+        latestReport = reportHistory.FirstOrDefault();
+        outstandingDebt = Mathf.Max(0, state.OutstandingDebt);
+        consecutiveShortfallDays = Mathf.Max(0, state.ConsecutiveShortfallDays);
+        emergencyFundingUsed = state.EmergencyFundingUsed;
+    }
 
     [Inject]
     public void Construct(
         IDungeonSceneComponentQuery sceneQuery,
         IFacilityShopCatalog facilityShopCatalog,
-        IRunVariableRuntimeReader runVariableReader)
+        IRunVariableRuntimeReader runVariableReader,
+        IGameDataProvider gameDataProvider)
     {
         this.sceneQuery = sceneQuery
             ?? throw new ArgumentNullException(nameof(sceneQuery));
@@ -388,6 +645,18 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
             ?? throw new ArgumentNullException(nameof(facilityShopCatalog));
         this.runVariableReader = runVariableReader
             ?? throw new ArgumentNullException(nameof(runVariableReader));
+        this.gameDataProvider = gameDataProvider
+            ?? throw new ArgumentNullException(nameof(gameDataProvider));
+    }
+
+    public void Construct(
+        IDungeonSceneComponentQuery sceneQuery,
+        IFacilityShopCatalog facilityShopCatalog,
+        IRunVariableRuntimeReader runVariableReader)
+    {
+        this.sceneQuery = sceneQuery ?? throw new ArgumentNullException(nameof(sceneQuery));
+        this.facilityShopCatalog = facilityShopCatalog ?? throw new ArgumentNullException(nameof(facilityShopCatalog));
+        this.runVariableReader = runVariableReader ?? throw new ArgumentNullException(nameof(runVariableReader));
     }
 
     public void OnTriggerEvent(OperatingDayStartedEvent eventType)
@@ -398,7 +667,8 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
 
     public void OnTriggerEvent(OperatingDayEndedEvent eventType)
     {
-        latestReport = BuildReport(Mathf.Max(1, eventType.day));
+        OperatingCostSettlement operatingCosts = SettleOperatingCosts();
+        latestReport = BuildReport(Mathf.Max(1, eventType.day), operatingCosts);
         reportHistory.Insert(0, latestReport);
         if (reportHistory.Count > MaxReportHistory)
         {
@@ -407,6 +677,31 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
 
         OperatingDayReportEvent.Trigger(latestReport);
         ResetLedger();
+    }
+
+    public bool TryTakeEmergencyFunding(out string message)
+    {
+        if (emergencyFundingUsed)
+        {
+            message = "긴급 융자는 이번 런에서 이미 사용했습니다.";
+            return false;
+        }
+
+        if (!TryGetGameData(out GameData gameData))
+        {
+            message = "현재 자금 정보를 찾지 못했습니다.";
+            return false;
+        }
+
+        int funding = Mathf.Max(0, economySettings?.emergencyFundingAmount ?? 0);
+        int debt = Mathf.Max(funding, economySettings?.emergencyFundingDebt ?? funding);
+        gameData.holdingMoney.Value += funding;
+        outstandingDebt += debt;
+        emergencyFundingUsed = true;
+        message = $"긴급 자금 {funding}을 확보했습니다. 상환할 미납금 {debt}이 추가됩니다.";
+        EventAlertService.Raise("긴급 융자", message, EventAlertImportance.Medium, "운영");
+        DungeonEconomyChangedEvent.Trigger(BuildOperatingCostForecast(), "emergency-funding");
+        return true;
     }
 
     public void OnTriggerEvent(FacilityVisitEvent eventType)
@@ -508,102 +803,246 @@ public class OperatingDaySettlementRuntime : MonoBehaviour,
         this.EventStopListening<EventAlertLoggedEvent>();
     }
 
-    private OperatingDayReport BuildReport(int day)
+    private OperatingDayReport BuildReport(int day, OperatingCostSettlement operatingCosts)
     {
         IReadOnlyList<BuildableObject> buildings = RequireSceneQuery().All<BuildableObject>();
         IReadOnlyList<CharacterActor> characters = RequireSceneQuery().All<CharacterActor>();
 
-        OperatingDayReport report = new OperatingDayReport
-        {
-            day = day,
-            totalRevenue = totalRevenue,
-            totalVisits = totalVisits,
-            averageSatisfaction = visitorMoodSamples.Count > 0 ? visitorMoodSamples.Average() : 0f,
-            restockFailureCount = restockFailureCount,
-            facilityRevenues = facilityRevenue
-                .Select((pair) => new FacilityRevenueSummary { facilityName = pair.Key, revenue = pair.Value })
+        BuildingReportData buildingData = BuildBuildingSnapshot(buildings);
+        StaffReportData staffData = BuildStaffSnapshot(characters);
+
+        return OperatingDayReport.Create(
+            day: day,
+            totalRevenue: totalRevenue,
+            totalVisits: totalVisits,
+            averageSatisfaction: visitorMoodSamples.Count > 0 ? visitorMoodSamples.Average() : 0f,
+            repairCost: buildingData.RepairCost,
+            restockFailureCount: restockFailureCount,
+            facilityRevenues: facilityRevenue
+                .Select((pair) => new FacilityRevenueSummary(pair.Key, pair.Value))
                 .OrderByDescending((item) => item.revenue)
                 .ToList(),
-            speciesVisits = speciesVisits
-                .Select((pair) => new SpeciesVisitSummary { speciesTag = pair.Key, visitCount = pair.Value })
+            speciesVisits: speciesVisits
+                .Select((pair) => new SpeciesVisitSummary(pair.Key, pair.Value))
                 .OrderByDescending((item) => item.visitCount)
                 .ToList(),
-            stockConsumed = consumedStock
-                .Select((pair) => new StockConsumptionSummary { category = pair.Key, amount = pair.Value })
+            incidents: incidents,
+            damagedFacilities: buildingData.DamagedFacilities,
+            stockShortageFacilities: buildingData.StockShortageFacilities,
+            staffComplaintEvents: staffData.Complaints,
+            eventLog: eventLog,
+            staffSummary: staffData.Summary,
+            warehouseStocks: buildingData.WarehouseStocks,
+            stockConsumed: consumedStock
+                .Select((pair) => new StockConsumptionSummary(pair.Key, pair.Value))
                 .OrderByDescending((item) => item.amount)
                 .ToList(),
-            incidents = new List<string>(incidents),
-            eventLog = new List<string>(eventLog),
-            stockSupplyResults = new List<StockSupplyResult>(stockSupplyResults),
-            refreshedDailyShopOffers = StockSupplyService.CreateDailyDeliveryOffers(day + 1, RequireRunVariableReader()).ToList(),
-            refreshedFacilityShopOffers = FacilityShopService.CreateDailyOffers(
+            stockSupplyResults: stockSupplyResults,
+            refreshedDailyShopOffers: StockSupplyService.CreateDailyDeliveryOffers(
+                    day + 1,
+                    RequireRunVariableReader())
+                .ToList(),
+            refreshedFacilityShopOffers: FacilityShopService.CreateDailyOffers(
                     day + 1,
                     RequireFacilityShopCatalog(),
                     RequireRunVariableReader())
                 .Select((offer) => offer.ToSnapshot())
-                .ToList()
-        };
-
-        FillBuildingSnapshot(report, buildings);
-        FillStaffSnapshot(report, characters);
-        return report;
+                .ToList(),
+            maintenanceCost: operatingCosts.Forecast.MaintenanceCost,
+            payrollCost: operatingCosts.Forecast.PayrollCost,
+            previousDebt: operatingCosts.Forecast.OutstandingDebt,
+            paidOperatingCost: operatingCosts.PaidAmount,
+            unpaidOperatingCost: operatingCosts.CarriedDebt,
+            closingBalance: operatingCosts.ClosingBalance,
+            consecutiveShortfallDays: operatingCosts.ConsecutiveShortfallDays);
     }
 
-    private void FillBuildingSnapshot(OperatingDayReport report, IEnumerable<BuildableObject> buildings)
+    private static BuildingReportData BuildBuildingSnapshot(IEnumerable<BuildableObject> buildings)
     {
+        BuildingReportData data = new BuildingReportData();
         foreach (BuildableObject building in buildings.Where((building) => building != null && !building.isDestroy))
         {
-            if (building.IsDamaged)
+            BuildingSO definition = building.BuildingData;
+            if (definition != null
+                && !definition.IsStructuralWall
+                && !definition.IsDoor
+                && !definition.IsGridMovement)
             {
-                report.damagedFacilities.Add(GetFacilityName(building));
-                report.repairCost += Mathf.Max(0, building.BuildingData != null ? building.BuildingData.maintenance : 0);
+                data.MaintenanceCost += definition.GetMaintenanceCost();
             }
 
-            if (building is Shop shop
-                && shop.Facility != null
-                && shop.CurrentStock <= shop.Facility.restockRequestThreshold)
+            if (building.IsDamaged)
             {
-                report.stockShortageFacilities.Add(GetFacilityName(building));
+                data.DamagedFacilities.Add(GetFacilityName(building));
+                data.RepairCost += building.BuildingData.GetMaintenanceCost();
+            }
+
+            if (building is IRestockableFacility restockable
+                && building.Facility != null
+                && restockable.CurrentStock <= building.GetRestockRequestThreshold())
+            {
+                data.StockShortageFacilities.Add(GetFacilityName(building));
             }
 
             if (building is IWarehouseFacility warehouse && warehouse.HasWarehouseInventory)
             {
-                report.warehouseStocks.Add(new WarehouseStockSummary
-                {
-                    warehouseName = GetFacilityName(building),
-                    totalStock = warehouse.Inventory.TotalStock,
-                    maxCapacity = warehouse.Inventory.HasCapacityLimit ? warehouse.Inventory.MaxCapacity : 0,
-                    food = warehouse.Inventory.GetStock(StockCategory.Food),
-                    general = warehouse.Inventory.GetStock(StockCategory.General),
-                    weapon = warehouse.Inventory.GetStock(StockCategory.Weapon),
-                    mana = warehouse.Inventory.GetStock(StockCategory.Mana)
-                });
+                data.WarehouseStocks.Add(new WarehouseStockSummary(
+                    GetFacilityName(building),
+                    warehouse.Inventory.TotalStock,
+                    warehouse.Inventory.HasCapacityLimit ? warehouse.Inventory.MaxCapacity : 0,
+                    warehouse.Inventory.EnumerateStock()
+                        .Select((pair) => new StockConsumptionSummary(pair.Key, pair.Value))
+                        .ToList()));
             }
         }
+
+        return data;
     }
 
-    private static void FillStaffSnapshot(OperatingDayReport report, IEnumerable<CharacterActor> characters)
+    private static StaffReportData BuildStaffSnapshot(IEnumerable<CharacterActor> characters)
     {
         List<CharacterActor> staff = characters
             .Where(IsStaffCharacter)
             .ToList();
 
-        report.staffSummary.staffCount = staff.Count;
         if (staff.Count == 0)
+        {
+            return new StaffReportData(
+                new StaffWorkSummary(0, 0, 0, 0f, 0f),
+                Array.Empty<string>());
+        }
+
+        StaffWorkSummary summary = new StaffWorkSummary(
+            staff.Count,
+            staff.Count((actor) =>
+                CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work) && work.isWorking),
+            staff.Count((actor) =>
+                CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work) && work.IsOffDuty),
+            staff.Average((actor) => GetStat(actor, CharacterCondition.SLEEP)),
+            staff.Average((actor) => GetStat(actor, CharacterCondition.MOOD)));
+        List<string> complaints = staff
+            .Where((actor) => GetStat(actor, CharacterCondition.MOOD) <= 25f)
+            .Select((actor) => $"{actor.name}: 기분 낮음")
+            .ToList();
+        return new StaffReportData(summary, complaints);
+    }
+
+    private sealed class BuildingReportData
+    {
+        public int MaintenanceCost;
+        public int RepairCost;
+        public readonly List<string> DamagedFacilities = new List<string>();
+        public readonly List<string> StockShortageFacilities = new List<string>();
+        public readonly List<WarehouseStockSummary> WarehouseStocks = new List<WarehouseStockSummary>();
+    }
+
+    private OperatingCostForecast BuildOperatingCostForecast()
+    {
+        IReadOnlyList<BuildableObject> buildings = RequireSceneQuery().All<BuildableObject>();
+        IReadOnlyList<CharacterActor> characters = RequireSceneQuery().All<CharacterActor>();
+        BuildingReportData buildingData = BuildBuildingSnapshot(buildings);
+        StaffReportData staffData = BuildStaffSnapshot(characters);
+        int payroll = DungeonEconomyCalculator.CalculatePayroll(
+            staffData.Summary.staffCount,
+            staffData.Summary.workingCount,
+            economySettings);
+        int money = TryGetGameData(out GameData gameData)
+            ? gameData.holdingMoney.Value
+            : 0;
+        return new OperatingCostForecast(
+            money,
+            buildingData.MaintenanceCost,
+            payroll,
+            outstandingDebt);
+    }
+
+    private OperatingCostSettlement SettleOperatingCosts()
+    {
+        OperatingCostForecast forecast = BuildOperatingCostForecast();
+        if (!TryGetGameData(out GameData gameData))
+        {
+            return new OperatingCostSettlement(forecast, 0, 0, outstandingDebt, consecutiveShortfallDays);
+        }
+
+        OperatingCostSettlement settlement = DungeonEconomyCalculator.Settle(
+            forecast,
+            consecutiveShortfallDays);
+        gameData.holdingMoney.Value = settlement.ClosingBalance;
+        outstandingDebt = settlement.CarriedDebt;
+        consecutiveShortfallDays = settlement.ConsecutiveShortfallDays;
+
+        if (settlement.UnpaidAmount > 0)
+        {
+            ApplyShortfallConsequences(settlement);
+            EventAlertService.Raise(
+                "운영비 부족",
+                $"운영비 {settlement.Forecast.TotalDue} 중 {settlement.PaidAmount}을 납부했습니다. 미납금 {settlement.CarriedDebt}이 다음 날로 넘어갑니다.",
+                EventAlertImportance.High,
+                "운영");
+        }
+
+        DungeonEconomyChangedEvent.Trigger(BuildOperatingCostForecast(), "day-settlement");
+        return settlement;
+    }
+
+    private void ApplyShortfallConsequences(OperatingCostSettlement settlement)
+    {
+        float moodPenalty = -Mathf.Max(0f, economySettings?.unpaidWageMoodPenaltyPerDay ?? 0f)
+            * Mathf.Clamp(settlement.ConsecutiveShortfallDays, 1, 3);
+        float duration = Mathf.Max(1f, economySettings?.unpaidWageMoodDurationSeconds ?? 180f);
+        foreach (CharacterActor staff in RequireSceneQuery().All<CharacterActor>().Where(IsStaffCharacter))
+        {
+            staff.ApplyMoodFactor(
+                "economy:unpaid-wages",
+                "임금 체불이 불안함",
+                moodPenalty,
+                duration,
+                1);
+        }
+
+        int breakdownThreshold = Mathf.Max(1, economySettings?.breakdownAfterShortfallDays ?? 2);
+        if (settlement.ConsecutiveShortfallDays < breakdownThreshold)
         {
             return;
         }
 
-        report.staffSummary.workingCount = staff.Count((actor) =>
-            CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work) && work.isWorking);
-        report.staffSummary.offDutyCount = staff.Count((actor) =>
-            CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work) && work.IsOffDuty);
-        report.staffSummary.averageSleep = staff.Average((actor) => GetStat(actor, CharacterCondition.SLEEP));
-        report.staffSummary.averageMood = staff.Average((actor) => GetStat(actor, CharacterCondition.MOOD));
-        report.staffComplaintEvents = staff
-            .Where((actor) => GetStat(actor, CharacterCondition.MOOD) <= 25f)
-            .Select((actor) => $"{actor.name}: 기분 낮음")
-            .ToList();
+        BuildableObject breakdown = RequireSceneQuery().All<BuildableObject>()
+            .Where(building => building != null
+                && !building.isDestroy
+                && !building.IsDamaged
+                && building.BuildingData != null
+                && !building.BuildingData.IsStructuralWall
+                && !building.BuildingData.IsDoor
+                && !building.BuildingData.IsGridMovement
+                && building.BuildingData.GetMaintenanceCost() > 0)
+            .OrderByDescending(building => building.BuildingData.GetMaintenanceCost())
+            .ThenBy(building => building.GetInstanceID())
+            .FirstOrDefault();
+        if (breakdown != null)
+        {
+            breakdown.SetDamaged(true);
+            incidents.Add($"{GetFacilityName(breakdown)}: 유지비 미납으로 고장");
+        }
+    }
+
+    private bool TryGetGameData(out GameData gameData)
+    {
+        gameData = null;
+        return gameDataProvider != null
+            && gameDataProvider.TryGetGameData(out gameData)
+            && gameData?.holdingMoney != null;
+    }
+
+    private sealed class StaffReportData
+    {
+        public StaffReportData(StaffWorkSummary summary, IReadOnlyList<string> complaints)
+        {
+            Summary = summary;
+            Complaints = complaints;
+        }
+
+        public StaffWorkSummary Summary { get; }
+        public IReadOnlyList<string> Complaints { get; }
     }
 
     private void ResetLedger()

@@ -72,7 +72,11 @@ public sealed class CharacterAiSchedulingService : ICharacterAiSchedulingService
 
     private bool TryResolveScheduler(out CharacterAiScheduler resolvedScheduler)
     {
-        scheduler ??= sceneQuery.First<CharacterAiScheduler>(includeInactive: true);
+        if (scheduler == null)
+        {
+            scheduler = sceneQuery.First<CharacterAiScheduler>(includeInactive: true);
+        }
+
         resolvedScheduler = scheduler;
         return resolvedScheduler != null;
     }

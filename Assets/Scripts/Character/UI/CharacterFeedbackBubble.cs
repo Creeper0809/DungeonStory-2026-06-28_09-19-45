@@ -59,9 +59,20 @@ public class CharacterFeedbackBubble : MonoBehaviour
 
     private void OnEnable()
     {
-        actor ??= GetComponent<CharacterActor>();
-        characterStats ??= GetComponent<CharacterStats>();
-        characterLog ??= GetComponent<CharacterLog>();
+        if (actor == null)
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        if (characterStats == null)
+        {
+            characterStats = GetComponent<CharacterStats>();
+        }
+
+        if (characterLog == null)
+        {
+            characterLog = GetComponent<CharacterLog>();
+        }
 
         if (characterLog != null)
         {
@@ -94,7 +105,13 @@ public class CharacterFeedbackBubble : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!RequireAiSchedulingService().ShouldShowCharacterFeedback(actor))
+        if (aiSchedulingService == null || bubbleViewFactory == null)
+        {
+            HideView();
+            return;
+        }
+
+        if (!aiSchedulingService.ShouldShowCharacterFeedback(actor))
         {
             HideView();
             return;
@@ -112,7 +129,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
 
     public void Show(CharacterFeedbackState state)
     {
-        if (!RequireAiSchedulingService().ShouldShowCharacterFeedback(actor))
+        if (aiSchedulingService == null || !aiSchedulingService.ShouldShowCharacterFeedback(actor))
         {
             return;
         }
@@ -123,7 +140,11 @@ public class CharacterFeedbackBubble : MonoBehaviour
 
     public CharacterFeedbackState EvaluatePersistentState()
     {
-        characterStats ??= GetComponent<CharacterStats>();
+        if (characterStats == null)
+        {
+            characterStats = GetComponent<CharacterStats>();
+        }
+
         if (characterStats == null || characterStats.Stats == null)
         {
             return CharacterFeedbackState.None;
@@ -161,34 +182,48 @@ public class CharacterFeedbackBubble : MonoBehaviour
         return CharacterFeedbackState.None;
     }
 
-    public static CharacterFeedbackState ClassifyLogTag(string tag)
+    public static CharacterFeedbackState ClassifyActivity(CharacterActivityEvent activity)
     {
-        if (string.IsNullOrWhiteSpace(tag))
+        if (activity == null || !activity.BubbleEligible)
         {
             return CharacterFeedbackState.None;
         }
 
-        if (ContainsAny(tag, "만족", "완료", "회복", "근무 복귀"))
+        if (activity.Sentiment >= 0.35f
+            || activity.OutcomeId == CharacterActivityOutcomes.Completed
+            || activity.OutcomeId == CharacterActivityOutcomes.Returned)
         {
             return CharacterFeedbackState.Joy;
         }
 
-        if (ContainsAny(tag, "위험", "사망", "사고", "분노"))
+        if (activity.Sentiment <= -0.75f
+            || activity.OutcomeId == CharacterActivityOutcomes.Defeated
+            || (activity.KindId == CharacterActivityKinds.Combat
+                && activity.OutcomeId == CharacterActivityOutcomes.Damaged))
         {
             return CharacterFeedbackState.Anger;
         }
 
-        if (ContainsAny(tag, "피로", "비번", "휴식"))
+        if (activity.KindId == CharacterActivityKinds.Duty
+            && (activity.OutcomeId == CharacterActivityOutcomes.Blocked
+                || activity.OutcomeId == CharacterActivityOutcomes.Cancelled))
         {
             return CharacterFeedbackState.Fatigue;
         }
 
-        if (ContainsAny(tag, "길 막힘", "재고 부족", "시설 파손", "목적지", "혼잡함", "돈 부족"))
+        if ((activity.KindId == CharacterActivityKinds.Shopping
+                || activity.KindId == CharacterActivityKinds.Stock
+                || activity.KindId == CharacterActivityKinds.Wait)
+            && (activity.OutcomeId == CharacterActivityOutcomes.Failed
+                || activity.OutcomeId == CharacterActivityOutcomes.Blocked))
         {
             return CharacterFeedbackState.Confused;
         }
 
-        if (ContainsAny(tag, "실패", "보류", "불만"))
+        if (activity.Sentiment < 0f
+            || activity.OutcomeId == CharacterActivityOutcomes.Failed
+            || activity.OutcomeId == CharacterActivityOutcomes.Blocked
+            || activity.OutcomeId == CharacterActivityOutcomes.Cancelled)
         {
             return CharacterFeedbackState.Discontent;
         }
@@ -217,7 +252,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
             return;
         }
 
-        CharacterFeedbackState state = ClassifyLogTag(entry.Tag);
+        CharacterFeedbackState state = ClassifyActivity(entry.Activity);
         if (state != CharacterFeedbackState.None)
         {
             nextLogFeedbackTime = Time.time + logFeedbackCooldown;
@@ -225,7 +260,7 @@ public class CharacterFeedbackBubble : MonoBehaviour
         }
     }
 
-    private void OnStatChanged(System.Collections.Generic.Dictionary<CharacterCondition, float> stats)
+    private void OnStatChanged(System.Collections.Generic.IReadOnlyDictionary<CharacterCondition, float> stats)
     {
         if (CurrentState == CharacterFeedbackState.None || Time.time > visibleUntil)
         {
@@ -265,7 +300,12 @@ public class CharacterFeedbackBubble : MonoBehaviour
             return;
         }
 
-        text = RequireBubbleViewFactory().Acquire(transform, GetLocalOffset());
+        if (bubbleViewFactory == null)
+        {
+            return;
+        }
+
+        text = bubbleViewFactory.Acquire(transform, GetLocalOffset());
     }
 
     private void ReleaseView()
@@ -275,13 +315,24 @@ public class CharacterFeedbackBubble : MonoBehaviour
             return;
         }
 
-        RequireBubbleViewFactory().Release(text);
+        if (bubbleViewFactory == null)
+        {
+            text.gameObject.SetActive(false);
+            text = null;
+            return;
+        }
+
+        bubbleViewFactory.Release(text);
         text = null;
     }
 
     private Vector3 GetLocalOffset()
     {
-        characterVisual ??= GetComponent<CharacterVisual>();
+        if (characterVisual == null)
+        {
+            characterVisual = GetComponent<CharacterVisual>();
+        }
+
         if (characterVisual == null)
         {
             return localOffset;
@@ -326,16 +377,4 @@ public class CharacterFeedbackBubble : MonoBehaviour
         };
     }
 
-    private static bool ContainsAny(string value, params string[] patterns)
-    {
-        foreach (string pattern in patterns)
-        {
-            if (value.Contains(pattern, System.StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

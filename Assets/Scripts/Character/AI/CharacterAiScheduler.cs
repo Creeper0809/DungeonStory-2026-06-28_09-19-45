@@ -5,6 +5,9 @@ using BehaviorDesigner.Runtime;
 using Unity.Profiling;
 using UnityEngine;
 using VContainer;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public sealed class CharacterAiScheduler : MonoBehaviour
 {
@@ -13,7 +16,7 @@ public sealed class CharacterAiScheduler : MonoBehaviour
 
     [SerializeField] private bool driveCharacterUpdates = true;
     [SerializeField] private bool driveBehaviorDesignerTrees = true;
-    [SerializeField] private bool requireBehaviorTreeOnCharacters = true;
+    [SerializeField] private bool registerExistingSceneCharacters = true;
     [SerializeField] private ExternalBehaviorTree characterAiExternalBehavior;
     [SerializeField] private bool limitPathSearches = true;
     [SerializeField] private bool limitFeedbackToVisibleCharacters = true;
@@ -66,7 +69,10 @@ public sealed class CharacterAiScheduler : MonoBehaviour
     private void OnEnable()
     {
         ConfigureBehaviorManagerForManualTick();
-        RegisterExistingCharactersIfInjected();
+        if (registerExistingSceneCharacters)
+        {
+            RegisterExistingCharactersIfInjected();
+        }
     }
 
     [Inject]
@@ -82,7 +88,7 @@ public sealed class CharacterAiScheduler : MonoBehaviour
         this.behaviorTreeConfigurator = behaviorTreeConfigurator
             ?? throw new ArgumentNullException(nameof(behaviorTreeConfigurator));
 
-        if (isActiveAndEnabled)
+        if (isActiveAndEnabled && registerExistingSceneCharacters)
         {
             RegisterExistingCharacters();
         }
@@ -90,7 +96,10 @@ public sealed class CharacterAiScheduler : MonoBehaviour
 
     private void Start()
     {
-        RegisterExistingCharacters();
+        if (registerExistingSceneCharacters)
+        {
+            RegisterExistingCharacters();
+        }
     }
 
     private void Update()
@@ -227,7 +236,6 @@ public sealed class CharacterAiScheduler : MonoBehaviour
                     inspected++;
 
                     BehaviorTree behaviorTree = ConfigureCharacterBehaviorTree(actor);
-                    behaviorTree?.DungeonStoryRefreshVisualStatus(actor);
                     bool needsInitialTreeTick = behaviorTree != null
                         && behaviorTree.ExternalBehavior != null
                         && behaviorTree.DungeonStoryTickCount == 0;
@@ -270,22 +278,22 @@ public sealed class CharacterAiScheduler : MonoBehaviour
 #if UNITY_EDITOR
     private void RefreshBehaviorDesignerVisualsForEditor()
     {
-        if (!driveBehaviorDesignerTrees)
+        if (!driveBehaviorDesignerTrees || !Application.isPlaying)
         {
             return;
         }
 
-        for (int i = 0; i < actors.Count; i++)
+        GameObject selectedObject = Selection.activeGameObject;
+        CharacterActor selectedActor = selectedObject != null
+            ? selectedObject.GetComponent<CharacterActor>() ?? selectedObject.GetComponentInParent<CharacterActor>()
+            : null;
+        if (selectedActor == null || !actors.Contains(selectedActor))
         {
-            CharacterActor actor = actors[i];
-            if (actor == null)
-            {
-                continue;
-            }
-
-            BehaviorTree behaviorTree = ConfigureCharacterBehaviorTree(actor);
-            behaviorTree?.DungeonStoryRefreshVisualStatus(actor);
+            return;
         }
+
+        BehaviorTree behaviorTree = ConfigureCharacterBehaviorTree(selectedActor);
+        behaviorTree?.DungeonStoryRefreshVisualStatus(selectedActor);
     }
 #endif
 

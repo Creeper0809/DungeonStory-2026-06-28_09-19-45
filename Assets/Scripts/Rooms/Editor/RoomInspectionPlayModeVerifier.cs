@@ -18,6 +18,46 @@ public static class RoomInspectionPlayModeVerifier
     public const string CameraBaselinePath = "Temp/room-inspection-camera-baseline.png";
     public const string CameraOverlayPath = "Temp/room-inspection-camera-overlay.png";
     public const string ScreenCapturePath = "Temp/room-inspection-hud.png";
+    public static int LastMcpOverlayCellCount { get; private set; }
+    public static int LastMcpRoomId { get; private set; } = -1;
+
+    public static int PrepareMcpCapture()
+    {
+        if (!EditorApplication.isPlaying)
+        {
+            return -1;
+        }
+
+        DungeonRuntimeLifetimeScope scope = UnityEngine.Object.FindFirstObjectByType<DungeonRuntimeLifetimeScope>();
+        if (scope == null
+            || !scope.Container.Resolve<IGridSystemProvider>().TryGetGrid(out Grid grid))
+        {
+            return -1;
+        }
+
+        IRoomLayoutCache cache = scope.Container.Resolve<IRoomLayoutCache>();
+        RoomInstance room = cache.GetLayout(grid).Rooms
+            .Where(candidate => candidate != null && !candidate.IsSelfContained)
+            .OrderByDescending(candidate => candidate.IsUsable)
+            .ThenByDescending(candidate => (candidate.Roles & FacilityRole.Research) != 0)
+            .ThenByDescending(candidate => candidate.Doors.Count > 0 && candidate.Walls.Count > 0)
+            .ThenByDescending(candidate => candidate.Furniture.Count)
+            .ThenByDescending(candidate => candidate.Cells.Count)
+            .FirstOrDefault();
+        IRoomInspectionService inspection = scope.Container.Resolve<IRoomInspectionService>();
+        if (room == null || !inspection.ShowRoom(grid, room))
+        {
+            return -1;
+        }
+
+        LastMcpRoomId = room.Id;
+        LastMcpOverlayCellCount = inspection.OverlayCellCount;
+
+        Camera camera = Camera.main != null
+            ? Camera.main
+            : UnityEngine.Object.FindFirstObjectByType<Camera>();
+        return camera != null ? camera.gameObject.GetInstanceID() : -1;
+    }
 
     [MenuItem("DungeonStory/Debug/QA/Run Room Inspection PlayMode Verification")]
     public static void RunFromMenu()
@@ -42,6 +82,13 @@ public static class RoomInspectionPlayModeVerifier
 
 public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
 {
+    private sealed class DoorRegistration
+    {
+        public BuildableObject Door;
+        public GridBuildingPlacement Placement;
+        public List<Vector2Int> Positions;
+    }
+
     private readonly List<string> report = new List<string>();
     private readonly List<string> failures = new List<string>();
     private readonly List<string> capturedErrors = new List<string>();
@@ -60,6 +107,7 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
     private CharacterActor moodActor;
     private Mouse originalMouse;
     private Mouse verificationMouse;
+    private int verificationMouseSerial;
     private float originalTimeScale;
     private InputSettings.EditorInputBehaviorInPlayMode originalEditorInputBehavior;
     private bool inputBehaviorCaptured;
@@ -69,6 +117,7 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
     private IEnumerator Start()
     {
         Directory.CreateDirectory("Temp");
+        PlayModeVerificationPersistenceSnapshot.CaptureCurrent("room-inspection");
         Application.logMessageReceived += OnLogMessageReceived;
         originalEditorInputBehavior = InputSystem.settings.editorInputBehaviorInPlayMode;
         inputBehaviorCaptured = true;
@@ -79,14 +128,16 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
         {
             InputSystem.DisableDevice(originalMouse);
         }
-        verificationMouse = InputSystem.AddDevice<Mouse>("RoomInspectionVerificationMouse");
+        CreateVerificationMouse();
+        originalTimeScale = Time.timeScale;
+
+        yield return null;
+        yield return null;
+        yield return null;
+
+        yield return EnsurePlayableRun();
         originalTimeScale = Time.timeScale;
         Time.timeScale = 0f;
-
-        yield return null;
-        yield return null;
-        yield return null;
-
         ResolveRuntimeServices();
         Check(mainCamera != null, "MAIN_CAMERA", "main camera resolved");
         Check(gridManager != null && grid != null, "GRID", "runtime grid resolved");
@@ -136,6 +187,7 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
         Color32[] baselinePixels = CaptureCamera(mainCamera, RoomInspectionPlayModeVerifier.CameraBaselinePath);
         Vector2 togglePoint = GetScreenCenter(toggle.GetComponent<RectTransform>());
         Check(IsInsideScreen(togglePoint), "TOGGLE_ON_SCREEN", $"screen={togglePoint}");
+        AppendUiRaycastDiagnostics("TOGGLE_RAYCAST", togglePoint);
         yield return ClickMouse(togglePoint);
         Check(inspection.IsEnabled, "TOGGLE_ACTUAL_CLICK", "physical Input System click enabled the room view");
         Image toggleImage = toggle.targetGraphic as Image ?? toggle.GetComponent<Image>();
@@ -222,6 +274,70 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
         Finish();
     }
 
+    private IEnumerator EnsurePlayableRun()
+    {
+        GameObject modal = FindSceneObject("SaveModal");
+        if (modal != null && modal.activeInHierarchy)
+        {
+            Button continueButton = FindActiveSceneButton("ContinueLatestButton");
+            if (continueButton != null && continueButton.interactable)
+            {
+                yield return ClickMouse(GetScreenCenter(continueButton.GetComponent<RectTransform>()));
+                yield return new WaitForSecondsRealtime(0.25f);
+            }
+
+            if (modal.activeInHierarchy)
+            {
+                Button startNewButton = FindActiveSceneButton("StartNewRunButton");
+                yield return ClickMouse(GetScreenCenter(startNewButton?.GetComponent<RectTransform>()));
+                if (modal.activeInHierarchy)
+                {
+                    yield return ClickMouse(GetScreenCenter(startNewButton?.GetComponent<RectTransform>()));
+                }
+
+                yield return null;
+            }
+        }
+
+        Button ownerButton = Resources.FindObjectsOfTypeAll<Button>()
+            .FirstOrDefault(candidate => candidate != null
+                && candidate.gameObject.scene.IsValid()
+                && candidate.gameObject.activeInHierarchy
+                && candidate.name.StartsWith("OwnerOption_", StringComparison.Ordinal));
+        if (ownerButton != null)
+        {
+            yield return ClickMouse(GetScreenCenter(ownerButton.GetComponent<RectTransform>()));
+            yield return StartPartyPlayModeTestDriver.CompleteIfVisible();
+            yield return new WaitForSecondsRealtime(0.25f);
+        }
+
+        bool ownerSelectionVisible = Resources.FindObjectsOfTypeAll<OwnerSelectionPanel>()
+            .Any(panel => panel != null
+                && panel.gameObject.scene.IsValid()
+                && panel.gameObject.activeInHierarchy);
+        bool modalVisible = modal != null && modal.activeInHierarchy;
+        Check(!modalVisible && !ownerSelectionVisible,
+            "PLAYABLE_RUN",
+            "title and any legacy owner-selection flow closed before room inspection");
+    }
+
+    private static Button FindActiveSceneButton(string name)
+    {
+        return Resources.FindObjectsOfTypeAll<Button>()
+            .FirstOrDefault(candidate => candidate != null
+                && candidate.gameObject.scene.IsValid()
+                && candidate.gameObject.activeInHierarchy
+                && candidate.name == name);
+    }
+
+    private static GameObject FindSceneObject(string name)
+    {
+        return Resources.FindObjectsOfTypeAll<Transform>()
+            .Where(candidate => candidate != null && candidate.gameObject.scene.IsValid())
+            .Select(candidate => candidate.gameObject)
+            .FirstOrDefault(candidate => candidate.name == name);
+    }
+
     private void ResolveRuntimeServices()
     {
         mainCamera = Camera.main;
@@ -255,7 +371,7 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
         IEnumerable<RoomInstance> candidates = roomCache.GetLayout(grid).Rooms
             .Where(room => room != null && !room.IsSelfContained)
             .OrderByDescending(room => room.IsUsable)
-            .ThenByDescending(room => (room.Roles & RoomRole.Research) != 0)
+            .ThenByDescending(room => (room.Roles & FacilityRole.Research) != 0)
             .ThenByDescending(room => room.Doors.Count > 0 && room.Walls.Count > 0)
             .ThenByDescending(room => room.Furniture.Count)
             .ThenByDescending(room => room.Cells.Count);
@@ -491,11 +607,22 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
         }
 
         restored = inspection.CurrentSnapshot;
-        BuildableObject door = restored?.Room.Doors.FirstOrDefault(IsRegisteredBoundary);
-        if (door != null)
+        List<DoorRegistration> doors = restored?.Room.Doors
+            .Where(IsRegisteredBoundary)
+            .Distinct()
+            .Select(door => new DoorRegistration
+            {
+                Door = door,
+                Placement = door.BuildingData.Placement,
+                Positions = new List<Vector2Int>(door.buildPoses)
+            })
+            .ToList();
+        if (doors != null && doors.Count > 0)
         {
-            List<Vector2Int> doorPositions = new List<Vector2Int>(door.buildPoses);
-            GridBuildingPlacement doorPlacement = door.BuildingData.Placement;
+            List<Vector2Int> doorPositions = doors
+                .SelectMany(item => item.Positions)
+                .Distinct()
+                .ToList();
             BuildableObject substituteWall = CreateTemporaryWall(doorPositions[0]);
             GridBuildingPlacement wallPlacement = substituteWall.BuildingData.Placement;
             Dictionary<Vector2Int, IGridOccupant> hallwayByPosition = doorPositions
@@ -506,7 +633,14 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
                 })
                 .Where(item => item.Occupant != null)
                 .ToDictionary(item => item.Position, item => item.Occupant);
-            bool removed = grid.RemoveOccupant(doorPlacement.Layer, doorPositions, doorPlacement.IsMovement);
+            bool removed = true;
+            foreach (DoorRegistration item in doors)
+            {
+                removed &= grid.RemoveOccupant(
+                    item.Placement.Layer,
+                    item.Positions,
+                    item.Placement.IsMovement);
+            }
             foreach (Vector2Int position in hallwayByPosition.Keys)
             {
                 grid.RemoveOccupant(GridLayer.Hallway, new[] { position }, false);
@@ -517,7 +651,7 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
                 wallPlacement.Layer,
                 doorPositions,
                 false);
-            Check(closedWithWall, "DOOR_REMOVE_SETUP", $"door={door.name}; cells={doorPositions.Count}");
+            Check(closedWithWall, "DOOR_REMOVE_SETUP", $"doors={doors.Count}; cells={doorPositions.Count}");
             if (closedWithWall)
             {
                 yield return MoveMouse(roomPoint, 0.4f);
@@ -567,12 +701,16 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
                         false);
                 }
 
-                bool restoredDoor = grid.RegisterOccupant(
-                    door,
-                    doorPlacement.Layer,
-                    doorPositions,
-                    doorPlacement.IsMovement);
-                Check(restoredDoor, "DOOR_RESTORE", $"door={door.name}");
+                bool restoredDoor = true;
+                foreach (DoorRegistration item in doors)
+                {
+                    restoredDoor &= grid.RegisterOccupant(
+                        item.Door,
+                        item.Placement.Layer,
+                        item.Positions,
+                        item.Placement.IsMovement);
+                }
+                Check(restoredDoor, "DOOR_RESTORE", $"doors={doors.Count}");
                 yield return MoveMouse(roomPoint, 0.4f);
             }
             else if (removed)
@@ -585,7 +723,14 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
                         new[] { hallway.Key },
                         false);
                 }
-                grid.RegisterOccupant(door, doorPlacement.Layer, doorPositions, doorPlacement.IsMovement);
+                foreach (DoorRegistration item in doors)
+                {
+                    grid.RegisterOccupant(
+                        item.Door,
+                        item.Placement.Layer,
+                        item.Positions,
+                        item.Placement.IsMovement);
+                }
                 yield return MoveMouse(roomPoint, 0.4f);
             }
         }
@@ -690,8 +835,8 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
         temporaryWallData.layer = GridLayer.Building;
         temporaryWallData.category = BuildingCategory.Wall;
         temporaryWallData.type = typeof(BuildableObject);
-        temporaryWallData.facility = new FacilityData();
-        temporaryWallData.evolution = new FacilityEvolutionContributionData();
+        temporaryWallData.Facility = new FacilityData();
+        temporaryWallData.Evolution = new FacilityEvolutionContributionData();
 
         temporaryWallObject = new GameObject("Room Inspection Temporary Wall");
         BuildableObject wall = temporaryWallObject.AddComponent<BuildableObject>();
@@ -703,28 +848,58 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
     private IEnumerator ClickMouse(Vector2 screenPoint)
     {
         EnsureVerificationMouseReady();
-        Mouse mouse = verificationMouse;
-        InputSystem.QueueStateEvent(mouse, new MouseState
+        MouseState pressed = new MouseState
         {
             position = screenPoint
-        }.WithButton(MouseButton.Left, true));
+        }.WithButton(MouseButton.Left, true);
+        ApplyMouseState(pressed);
         yield return null;
         yield return null;
         EnsureVerificationMouseReady();
-        InputSystem.QueueStateEvent(mouse, new MouseState
+        MouseState released = new MouseState
         {
             position = screenPoint
-        });
+        };
+        ApplyMouseState(released);
         yield return null;
         yield return null;
-        Check(Vector2.Distance(mouse.position.ReadValue(), screenPoint) <= 0.1f,
-            "POINTER_POSITION", $"expected={screenPoint}; actual={mouse.position.ReadValue()}");
+        Check(Vector2.Distance(verificationMouse.position.ReadValue(), screenPoint) <= 0.1f,
+            "POINTER_POSITION", $"expected={screenPoint}; actual={verificationMouse.position.ReadValue()}");
+    }
+
+    private void AppendUiRaycastDiagnostics(string label, Vector2 screenPoint)
+    {
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null)
+        {
+            report.Add(label + "=missing EventSystem");
+            return;
+        }
+
+        PointerEventData pointer = new PointerEventData(eventSystem)
+        {
+            position = screenPoint
+        };
+        List<RaycastResult> hits = new List<RaycastResult>();
+        eventSystem.RaycastAll(pointer, hits);
+        report.Add(label + "=" + string.Join(" > ", hits.Select(hit => GetTransformPath(hit.gameObject.transform))));
+    }
+
+    private static string GetTransformPath(Transform target)
+    {
+        string path = target != null ? target.name : "null";
+        while (target != null && target.parent != null)
+        {
+            target = target.parent;
+            path = target.name + "/" + path;
+        }
+
+        return path;
     }
 
     private IEnumerator MoveMouse(Vector2 screenPoint, float waitSeconds)
     {
-        EnsureVerificationMouseReady();
-        InputSystem.QueueStateEvent(verificationMouse, new MouseState
+        ApplyMouseState(new MouseState
         {
             position = screenPoint
         });
@@ -741,6 +916,7 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
     {
         if (verificationMouse == null || !verificationMouse.added)
         {
+            CreateVerificationMouse();
             return;
         }
 
@@ -749,6 +925,41 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
             InputSystem.EnableDevice(verificationMouse);
         }
         verificationMouse.MakeCurrent();
+    }
+
+    private void CreateVerificationMouse()
+    {
+        if (verificationMouse != null && verificationMouse.added)
+        {
+            InputSystem.RemoveDevice(verificationMouse);
+        }
+
+        verificationMouse = InputSystem.AddDevice<Mouse>($"RoomInspectionVerificationMouse{++verificationMouseSerial}");
+        InputSystem.EnableDevice(verificationMouse);
+        verificationMouse.MakeCurrent();
+    }
+
+    private void ApplyMouseState(MouseState state)
+    {
+        EnsureVerificationMouseReady();
+        if (verificationMouse == null || !verificationMouse.added)
+        {
+            return;
+        }
+
+        verificationMouse.MakeCurrent();
+        InputState.Change(verificationMouse, state);
+        InputSystem.QueueStateEvent(verificationMouse, state);
+        InputSystem.Update();
+        if (Vector2.Distance(verificationMouse.position.ReadValue(), state.position) <= 0.1f)
+        {
+            return;
+        }
+
+        CreateVerificationMouse();
+        InputState.Change(verificationMouse, state);
+        InputSystem.QueueStateEvent(verificationMouse, state);
+        InputSystem.Update();
     }
 
     private IEnumerator CaptureScreen()
@@ -863,6 +1074,7 @@ public sealed class RoomInspectionPlayModeVerificationRunner : MonoBehaviour
         }
 
         Destroy(gameObject);
+        EditorApplication.ExitPlaymode();
     }
 
     private void Cleanup()

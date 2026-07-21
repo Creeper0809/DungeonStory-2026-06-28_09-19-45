@@ -38,8 +38,7 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
 
     public void OnTriggerEvent(InfoFeedEvent eventType)
     {
-        if (eventType.infoable == null || eventType.infoable.GetInfoType() != InfoFeedEvent.Type.BUILDING) return;
-        if (eventType.infoable is not BuildingInfoTarget buildingInfo || buildingInfo.Building == null) return;
+        if (eventType.Target is not BuildingInfoTarget buildingInfo || buildingInfo.Building == null) return;
 
         BuildableObject building = buildingInfo.Building;
         GameObject uiRoot = RequireUiRoot();
@@ -91,7 +90,7 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         objectName.fontSizeMin = 17f;
         objectName.fontSizeMax = 26f;
         objectName.textWrappingMode = TextWrappingModes.NoWrap;
-        objectName.overflowMode = TextOverflowModes.Ellipsis;
+        objectName.overflowMode = TextOverflowModes.Truncate;
         SetStretch(objectName.rectTransform, new Vector2(18f, 6f), new Vector2(-92f, -6f));
 
         Button closeButton = CreateButton("CloseButton", header, "닫기");
@@ -243,7 +242,7 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
     }
 }
 
-public class BuildingInfoTarget : IInfoable
+public sealed class BuildingInfoTarget : IInfoable
 {
     public BuildableObject Building { get; }
 
@@ -251,29 +250,19 @@ public class BuildingInfoTarget : IInfoable
     {
         Building = building;
     }
-
-    public InfoFeedEvent.Type GetInfoType()
-    {
-        return InfoFeedEvent.Type.BUILDING;
-    }
 }
 
-public struct InfoFeedEvent
+public readonly struct InfoFeedEvent
 {
-    public IInfoable infoable;
-    public enum Type
+    public InfoFeedEvent(IInfoable target)
     {
-        BUILDING,
-        CHARACTER
+        Target = target;
     }
-    public InfoFeedEvent(IInfoable infoable)
+
+    public IInfoable Target { get; }
+
+    public static void Trigger(IInfoable target)
     {
-        this.infoable = infoable;
-    }
-    static InfoFeedEvent e;
-    public static void Trigger(IInfoable infoable)
-    {
-        e.infoable = infoable;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new InfoFeedEvent(target));
     }
 }

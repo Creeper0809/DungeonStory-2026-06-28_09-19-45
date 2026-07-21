@@ -194,6 +194,7 @@ public static class PriorityCommandDebugScenarios
         obj.AddComponent<AbilityWork>();
         obj.AddComponent<AIBrain>();
 
+        CharacterAiEditorTestDependencies.Inject(obj);
         CharacterActor character = obj.GetComponent<CharacterActor>();
         InvokeAwake(character);
         character.RefreshAbilityCache();
@@ -212,6 +213,7 @@ public static class PriorityCommandDebugScenarios
         obj.AddComponent<SpriteRenderer>();
         obj.AddComponent<CharacterActor>();
 
+        CharacterAiEditorTestDependencies.Inject(obj);
         CharacterActor character = obj.GetComponent<CharacterActor>();
         InvokeAwake(character);
         character.Initialization(data);
@@ -261,6 +263,11 @@ public static class PriorityCommandDebugScenarios
             GridBuildingFactory factory = new GridBuildingFactory();
             BuildableObject building = factory.Create(Grid, buildingData, position);
             objects.Add(building.gameObject);
+            CharacterAiEditorTestDependencies.Inject(building);
+            if (building is Shop shop)
+            {
+                CharacterAiEditorTestDependencies.InjectShop(shop);
+            }
             building.SetGrid(Grid);
             building.Initialization(buildingData, position);
             Grid.RegisterOccupant(

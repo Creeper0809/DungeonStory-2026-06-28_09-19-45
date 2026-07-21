@@ -47,11 +47,12 @@ public class EventAlertRequest
 
     private static IReadOnlyList<EventAlertChoice> NormalizeChoices(IEnumerable<EventAlertChoice> choices)
     {
-        return choices?
+        EventAlertChoice[] normalized = choices?
             .Where((choice) => choice != null)
             .Take(3)
-            .ToList()
-            ?? new List<EventAlertChoice>();
+            .ToArray()
+            ?? Array.Empty<EventAlertChoice>();
+        return Array.AsReadOnly(normalized);
     }
 }
 
@@ -67,6 +68,11 @@ public class EventAlertRecord
 
     public EventAlertRecord(int id, EventAlertRequest request)
     {
+        if (request == null)
+        {
+            throw new ArgumentNullException(nameof(request));
+        }
+
         Id = id;
         Title = request.Title;
         Detail = request.Detail;
@@ -76,9 +82,34 @@ public class EventAlertRecord
         Count = 1;
     }
 
+    public EventAlertRecord(
+        int id,
+        string title,
+        string detail,
+        EventAlertImportance importance,
+        string category,
+        int count,
+        IEnumerable<EventAlertChoice> choices = null)
+        : this(id, new EventAlertRequest(title, detail, importance, category, choices))
+    {
+        Count = Math.Max(1, count);
+    }
+
     public void Increment()
     {
         Count++;
+    }
+
+    public EventAlertRecordSnapshot CreateSnapshot()
+    {
+        return new EventAlertRecordSnapshot(
+            Id,
+            Title,
+            Detail,
+            Importance,
+            Category,
+            Count,
+            Choices);
     }
 
     public string ButtonText => Count > 1 ? $"{Title} x{Count}" : Title;
@@ -132,4 +163,34 @@ public class EventAlertRecord
             _ => importance.ToString()
         };
     }
+}
+
+public sealed class EventAlertRecordSnapshot
+{
+    public EventAlertRecordSnapshot(
+        int id,
+        string title,
+        string detail,
+        EventAlertImportance importance,
+        string category,
+        int count,
+        IReadOnlyList<EventAlertChoice> choices)
+    {
+        Id = id;
+        Title = title ?? string.Empty;
+        Detail = detail ?? string.Empty;
+        Importance = importance;
+        Category = category ?? string.Empty;
+        Count = Math.Max(1, count);
+        Choices = EventPayloadSnapshot.Copy(choices);
+    }
+
+    public int Id { get; }
+    public string Title { get; }
+    public string Detail { get; }
+    public EventAlertImportance Importance { get; }
+    public string Category { get; }
+    public int Count { get; }
+    public IReadOnlyList<EventAlertChoice> Choices { get; }
+    public string ButtonText => Count > 1 ? $"{Title} x{Count}" : Title;
 }

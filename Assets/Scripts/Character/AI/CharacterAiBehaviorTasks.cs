@@ -563,79 +563,60 @@ namespace BehaviorDesigner.Runtime.Tasks.DungeonStory
                 FriendlyName);
             return result.Handled ? TaskStatus.Success : TaskStatus.Failure;
         }
-
-        protected abstract bool MatchesAction(AIActionSet actionSet);
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectExitDungeonAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.ExitDungeon;
-        protected override bool MatchesAction(AIActionSet actionSet) => actionSet is AIExitDungeon;
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectEatAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.Eat;
-        protected override bool MatchesAction(AIActionSet actionSet) => actionSet is AIEat;
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectRestAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.Rest;
-        protected override bool MatchesAction(AIActionSet actionSet) => actionSet is AIRest;
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectToiletAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.Toilet;
-        protected override bool MatchesAction(AIActionSet actionSet)
-        {
-            return actionSet is AIFacilityRoleAction roleAction
-                && roleAction.Role == FacilityRole.Toilet;
-        }
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectHygieneAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.Hygiene;
-        protected override bool MatchesAction(AIActionSet actionSet)
-        {
-            return actionSet is AIFacilityRoleAction roleAction
-                && roleAction.Role == FacilityRole.Hygiene;
-        }
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectWorkAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.Work;
-        protected override bool MatchesAction(AIActionSet actionSet) => actionSet is AIWork;
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectShoppingAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.Shopping;
-        protected override bool MatchesAction(AIActionSet actionSet) => actionSet is AIShopping;
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectLookAroundAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.LookAround;
-        protected override bool MatchesAction(AIActionSet actionSet) => actionSet is AILookAround;
     }
 
     [TaskCategory("DungeonStory/Character AI")]
     public sealed class SelectWaitAction : SelectCharacterActionBase
     {
         protected override CharacterAiBranch Branch => CharacterAiBranch.Wait;
-        protected override bool MatchesAction(AIActionSet actionSet) => actionSet is AIWait;
     }
 
     [TaskCategory("DungeonStory/Character AI")]

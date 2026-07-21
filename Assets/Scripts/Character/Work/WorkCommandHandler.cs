@@ -18,8 +18,8 @@ public sealed class WorkCommandHandler
         this.targetSelector = targetSelector;
     }
 
-    public BuildableObject PriorityWorkTarget => priorityWorkTarget;
-    public CharacterActor PrioritySuppressActor => prioritySuppressTarget;
+    public BuildableObject PriorityWorkTarget => priorityWorkTarget != null ? priorityWorkTarget : null;
+    public CharacterActor PrioritySuppressActor => prioritySuppressTarget != null ? prioritySuppressTarget : null;
     public bool HasPrioritySuppressTarget => prioritySuppressTarget != null && !prioritySuppressTarget.IsDead;
     public FacilityWorkType PriorityWorkType => priorityWorkType;
 
@@ -53,7 +53,12 @@ public sealed class WorkCommandHandler
         priorityWorkType = candidate.WorkType;
         work.AssignWork(building, candidate.WorkType);
         work.WorkerActor?.Brain?.RequestImmediateReplan(clearFailures: true);
-        work.WorkerActor?.AddLog($"우선 작업 지정: {building.name} - {WorkTaskCatalog.GetDisplayName(candidate.WorkType)}");
+        work.WorkerActor?.AddActivity(CharacterActivityEvent.Work(
+            candidate.WorkType,
+            CharacterActivityOutcomes.Changed,
+            $"우선 작업 지정: {building.name} - {WorkTaskCatalog.GetDisplayName(candidate.WorkType)}",
+            building,
+            reasonCode: "priority-command"));
         errorMessage = string.Empty;
         return true;
     }
@@ -84,7 +89,13 @@ public sealed class WorkCommandHandler
         work.AssignWork(null, FacilityWorkType.Guard);
         work.SetDutyState(AbilityWork.DutyState.OnDuty);
         work.WorkerActor?.Brain?.RequestImmediateReplan(clearFailures: true);
-        work.WorkerActor?.AddLog($"우선 제압 지정: {target.name}");
+        work.WorkerActor?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Command,
+            CharacterActivityOutcomes.Changed,
+            $"우선 제압 지정: {target.name}",
+            actionId: "command:suppress",
+            targetId: $"character:{target.GetInstanceID()}",
+            targetName: target.name));
         errorMessage = string.Empty;
         return true;
     }
@@ -154,7 +165,16 @@ public sealed class WorkCommandHandler
                 work.StaffDiscontentRuntimeService.IsRebellionTarget,
                 out string errorMessage))
         {
-            actor.AddLog($"제압 실패: {errorMessage}");
+            actor.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Combat,
+                CharacterActivityOutcomes.Failed,
+                $"제압 실패: {errorMessage}",
+                actionId: "combat:suppress",
+                targetId: target != null ? $"character:{target.GetInstanceID()}" : string.Empty,
+                targetName: target != null ? target.name : string.Empty,
+                reasonCode: errorMessage,
+                sentiment: -0.7f,
+                bubbleEligible: true));
             ClearPriorityWorkTarget();
             actor.Brain.isBestActionEnd = true;
             yield break;
@@ -163,13 +183,26 @@ public sealed class WorkCommandHandler
         Grid activeGrid = work.WorkGridResolver.ResolveActiveGrid(work, null, prioritySuppressGrid);
         if (move == null || activeGrid == null)
         {
-            actor.AddLog("제압 실패: 이동 정보 없음");
+            actor.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Combat,
+                CharacterActivityOutcomes.Failed,
+                "제압 실패: 이동 정보 없음",
+                actionId: "combat:suppress",
+                reasonCode: "missing-movement",
+                sentiment: -0.7f,
+                bubbleEligible: true));
             ClearPriorityWorkTarget();
             actor.Brain.isBestActionEnd = true;
             yield break;
         }
 
-        actor.AddLog($"제압 시작: {target.name}");
+        actor.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Combat,
+            CharacterActivityOutcomes.Started,
+            $"제압 시작: {target.name}",
+            actionId: "combat:suppress",
+            targetId: $"character:{target.GetInstanceID()}",
+            targetName: target.name));
         while (target != null && !target.IsDead && actor != null && !actor.IsDead)
         {
             Vector2Int targetPos = work.WorkGridResolver.GetGridPosition(activeGrid, target);
@@ -179,7 +212,16 @@ public sealed class WorkCommandHandler
                 Queue<GridMoveStep> path = activeGrid.GetMovePath(actorPos, (pos) => pos == targetPos);
                 if (path == null || path.Count == 0)
                 {
-                    actor.AddLog("제압 실패: 도달할 수 없는 대상");
+                    actor.AddActivity(CharacterActivityEvent.Create(
+                        CharacterActivityKinds.Combat,
+                        CharacterActivityOutcomes.Blocked,
+                        "제압 실패: 도달할 수 없는 대상",
+                        actionId: "combat:suppress",
+                        targetId: $"character:{target.GetInstanceID()}",
+                        targetName: target.name,
+                        reasonCode: "target-unreachable",
+                        sentiment: -0.7f,
+                        bubbleEligible: true));
                     break;
                 }
 
@@ -189,9 +231,17 @@ public sealed class WorkCommandHandler
 
             float damage = Mathf.Max(1f, work.SuppressBaseDamage * actor.GetCombatPowerMultiplier());
             target.ApplyDamage(damage, $"제압: {actor.name}");
-            actor.AddLog(target.IsDead
-                ? $"제압 완료: {target.name}"
-                : $"제압 공격: {target.name}");
+            actor.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Combat,
+                target.IsDead ? CharacterActivityOutcomes.Completed : CharacterActivityOutcomes.Progress,
+                target.IsDead
+                    ? $"제압 완료: {target.name}"
+                    : $"제압 공격: {target.name}",
+                actionId: "combat:suppress",
+                targetId: $"character:{target.GetInstanceID()}",
+                targetName: target.name,
+                value: damage,
+                sentiment: target.IsDead ? 0.2f : -0.3f));
 
             if (target.IsDead)
             {

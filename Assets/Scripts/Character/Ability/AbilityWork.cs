@@ -5,16 +5,8 @@ using VContainer;
 
 public class AbilityWork : CharacterAbility
 {
-    private static readonly IBlueprintResearchWorkService FallbackBlueprintResearchWorkService =
-        new AbilityWorkNoopBlueprintResearchWorkService();
-    private static readonly IStaffDiscontentRuntimeService FallbackStaffDiscontentRuntimeService =
-        new AbilityWorkNoopStaffDiscontentRuntimeService();
     private static readonly IFloatingIconFeedbackService FallbackFloatingIconFeedbackService =
         new AbilityWorkNoopFloatingIconFeedbackService();
-    private static readonly IWorkGridResolver FallbackWorkGridResolver =
-        new AbilityWorkFallbackGridResolver();
-    private static readonly IFacilityCandidateCache FallbackFacilityCandidateCache =
-        new FacilityCandidateCacheStore();
 
     public enum DutyState
     {
@@ -53,6 +45,7 @@ public class AbilityWork : CharacterAbility
     private IFloatingIconFeedbackService floatingIconFeedbackService;
     private IWorkGridResolver workGridResolver;
     private IFacilityCandidateCache facilityCandidateCache;
+    private IRoomEnvironmentQuery roomEnvironmentQuery;
     private bool isScheduleBound;
     private float routineOperateCooldownUntil;
     private Coroutine activeWorkRoutine;
@@ -73,20 +66,20 @@ public class AbilityWork : CharacterAbility
     public CharacterActor WorkerActor => actor;
     public AbilityMove WorkerMove => move;
     public Grid CachedGrid => grid;
-    internal IBlueprintResearchWorkService BlueprintResearchWorkService => blueprintResearchWorkService
-        ?? FallbackBlueprintResearchWorkService;
-    internal IStaffDiscontentRuntimeService StaffDiscontentRuntimeService => staffDiscontentRuntimeService
-        ?? GetFallbackStaffDiscontentRuntimeService();
+    internal IBlueprintResearchWorkService BlueprintResearchWorkService =>
+        RuntimeDependency.Require(blueprintResearchWorkService, this);
+    internal IStaffDiscontentRuntimeService StaffDiscontentRuntimeService =>
+        RuntimeDependency.Require(staffDiscontentRuntimeService, this);
     internal IFloatingIconFeedbackService FloatingIconFeedbackService => floatingIconFeedbackService
         ?? FallbackFloatingIconFeedbackService;
-    internal IWorkGridResolver WorkGridResolver => workGridResolver
-        ?? FallbackWorkGridResolver;
-    internal IFacilityCandidateCache FacilityCandidateCacheService => facilityCandidateCache
-        ?? FallbackFacilityCandidateCache;
+    internal IWorkGridResolver WorkGridResolver => RuntimeDependency.Require(workGridResolver, this);
+    internal IFacilityCandidateCache FacilityCandidateCacheService =>
+        RuntimeDependency.Require(facilityCandidateCache, this);
+    internal IRoomEnvironmentQuery RoomEnvironmentQuery => roomEnvironmentQuery;
 
-    private static IStaffDiscontentRuntimeService GetFallbackStaffDiscontentRuntimeService()
+    internal float GetWorkEnvironmentDurationMultiplier(FacilityWorkType workType)
     {
-        return FallbackStaffDiscontentRuntimeService;
+        return roomEnvironmentQuery?.GetWorkDurationMultiplier(assignedShop, workType) ?? 1f;
     }
 
     internal float RestProtectionSleepThreshold => restProtectionSleepThreshold;
@@ -104,6 +97,7 @@ public class AbilityWork : CharacterAbility
     internal float SuppressBaseDamage => suppressBaseDamage;
     internal float SuppressAttackInterval => suppressAttackInterval;
     internal float RoutineOperateShiftSeconds => routineOperateShiftSeconds;
+    internal bool LastWorkRunCompleted => DutyController.LastWorkRunCompleted;
 
     private WorkTargetSelector TargetSelector
     {
@@ -154,7 +148,8 @@ public class AbilityWork : CharacterAbility
         IStaffDiscontentRuntimeService staffDiscontentRuntimeService,
         IFloatingIconFeedbackService floatingIconFeedbackService,
         IWorkGridResolver workGridResolver,
-        IFacilityCandidateCache facilityCandidateCache)
+        IFacilityCandidateCache facilityCandidateCache,
+        IRoomEnvironmentQuery roomEnvironmentQuery)
     {
         this.blueprintResearchWorkService = blueprintResearchWorkService
             ?? throw new ArgumentNullException(nameof(blueprintResearchWorkService));
@@ -166,6 +161,7 @@ public class AbilityWork : CharacterAbility
             ?? throw new ArgumentNullException(nameof(workGridResolver));
         this.facilityCandidateCache = facilityCandidateCache
             ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
+        this.roomEnvironmentQuery = roomEnvironmentQuery;
     }
 
     public override void Initializtion(CharacterSO data)
@@ -251,7 +247,13 @@ public class AbilityWork : CharacterAbility
         {
             if (actor != null && actor.Brain != null)
             {
-                actor.AddLog("작업 실패: 작업장 없음");
+                actor.AddActivity(CharacterActivityEvent.Work(
+                    requestedWorkType,
+                    CharacterActivityOutcomes.Failed,
+                    "작업 실패: 작업장 없음",
+                    preferredTarget,
+                    reasonCode: "no-workplace",
+                    bubbleEligible: true));
                 actor.Brain.isBestActionEnd = true;
             }
             return;
@@ -310,7 +312,16 @@ public class AbilityWork : CharacterAbility
 
     public void SetWorkPriority(FacilityWorkType workType, WorkPriorityLevel priority)
     {
+        SetWorkPriority(workType, priority, null);
+    }
+
+    public void SetWorkPriority(
+        FacilityWorkType workType,
+        WorkPriorityLevel priority,
+        GridPathSearchResult searchResult)
+    {
         workPriorities ??= WorkPriorityProfile.CreateDefault();
+        WorkPriorityLevel previousPriority = workPriorities.GetPriority(workType);
         workPriorities.SetPriority(workType, priority);
 
         bool currentWorkDisabled = assignedWorkType != FacilityWorkType.None
@@ -328,9 +339,68 @@ public class AbilityWork : CharacterAbility
         else
         {
             MarkFacilityDynamicStateDirty();
+            AIBrain brain = actor?.Brain;
+            brain?.InvalidateQueuedActionForNextDecision();
+            if (IsPriorityRaised(previousPriority, priority)
+                && ShouldReplanForRaisedPriority(workType, brain, searchResult))
+            {
+                string reason = $"{WorkTaskCatalog.GetDisplayName(workType)} 우선순위 상향";
+                if (!brain.StopCurrentActionForReplan(reason))
+                {
+                    StopAssignedWork(reason, false);
+                }
+
+                brain.RequestImmediateReplan(clearFailures: true);
+            }
         }
 
-        actor?.AddLog($"{WorkTaskCatalog.GetDisplayName(workType)} 우선순위: {priority.ToDisplayText()}");
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            workType,
+            CharacterActivityOutcomes.Changed,
+            $"{WorkTaskCatalog.GetDisplayName(workType)} 우선순위: {priority.ToDisplayText()}",
+            reasonCode: $"priority:{(int)priority}",
+            value: (int)priority));
+    }
+
+    private bool ShouldReplanForRaisedPriority(
+        FacilityWorkType workType,
+        AIBrain brain,
+        GridPathSearchResult searchResult)
+    {
+        if (brain == null
+            || actor == null
+            || workType == FacilityWorkType.None
+            || workType == assignedWorkType)
+        {
+            return false;
+        }
+
+        WorkPriorityLevel requestedPriority = workPriorities.GetPriority(workType);
+        WorkPriorityLevel currentPriority = workPriorities.GetPriority(assignedWorkType);
+        if (requestedPriority == WorkPriorityLevel.Off
+            || (currentPriority != WorkPriorityLevel.Off && requestedPriority > currentPriority))
+        {
+            return false;
+        }
+
+        searchResult ??= brain.GetPathSearch(actor);
+        if (!CanStartWorkAction(workType, searchResult)
+            || !TryGetBestWorkCandidate(workType, searchResult, out WorkTargetCandidate requestedCandidate)
+            || !TryGetBestWorkCandidate(FacilityWorkType.None, searchResult, out WorkTargetCandidate bestCandidate))
+        {
+            return false;
+        }
+
+        return bestCandidate.WorkType == workType
+            && bestCandidate.Building == requestedCandidate.Building;
+    }
+
+    private static bool IsPriorityRaised(
+        WorkPriorityLevel previousPriority,
+        WorkPriorityLevel currentPriority)
+    {
+        return currentPriority != WorkPriorityLevel.Off
+            && (previousPriority == WorkPriorityLevel.Off || currentPriority < previousPriority);
     }
 
     public bool ShouldUseRestProtection()
@@ -459,6 +529,8 @@ public class AbilityWork : CharacterAbility
 
     private void StopAssignedWork(string reason, bool requestImmediateReplan)
     {
+        FacilityWorkType stoppedWorkType = assignedWorkType;
+        BuildableObject stoppedTarget = assignedShop;
         InvalidateActiveWorkRun();
         WorkerMove?.CancelActiveMovement();
 
@@ -477,7 +549,12 @@ public class AbilityWork : CharacterAbility
         MarkFacilityDynamicStateDirty();
         if (!string.IsNullOrWhiteSpace(reason))
         {
-            actor?.AddLog($"작업 종료: {reason}");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                stoppedWorkType,
+                CharacterActivityOutcomes.Cancelled,
+                $"작업 종료: {reason}",
+                stoppedTarget,
+                reasonCode: reason));
         }
 
         if (actor != null && actor.Brain != null)
@@ -557,7 +634,7 @@ public class AbilityWork : CharacterAbility
 
     private void TryBindScheduleEvents()
     {
-        CacheCommonReferences();
+        CacheLocalReferences();
 
         if (abilityCache == null
             || !abilityCache.TryGetAbility(out AbilitySchedule nextSchedule)
@@ -680,75 +757,9 @@ public class AbilityWork : CharacterAbility
             out bestCandidate);
     }
 
-    private sealed class AbilityWorkNoopBlueprintResearchWorkService : IBlueprintResearchWorkService
-    {
-        public bool HasResearchWorkFor(BuildableObject facility) => false;
-
-        public BlueprintResearchWorkResult ApplyResearchWork(
-            CharacterActor researcher,
-            BuildableObject researchFacility,
-            float seconds)
-        {
-            return new BlueprintResearchWorkResult(
-                false,
-                null,
-                0f,
-                0f,
-                1f,
-                false,
-                "Blueprint research runtime is not available.");
-        }
-    }
-
-    private sealed class AbilityWorkNoopStaffDiscontentRuntimeService : IStaffDiscontentRuntimeService
-    {
-        public float GetWorkEfficiencyMultiplier(CharacterActor staff) => 1f;
-
-        public bool ShouldBlockWork(CharacterActor staff, out string reason)
-        {
-            reason = string.Empty;
-            return false;
-        }
-
-        public bool IsRebellionTarget(CharacterActor target) => false;
-        public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender) => false;
-    }
-
     private sealed class AbilityWorkNoopFloatingIconFeedbackService : IFloatingIconFeedbackService
     {
         public bool Show(Component target, Sprite sprite, float maxWorldSize) => false;
     }
 
-    private sealed class AbilityWorkFallbackGridResolver : IWorkGridResolver
-    {
-        public Grid ResolveActiveGrid(
-            AbilityWork work,
-            GridPathSearchResult searchResult,
-            Grid priorityGrid = null)
-        {
-            if (searchResult != null && searchResult.sourceGrid != null)
-            {
-                return searchResult.sourceGrid;
-            }
-
-            if (priorityGrid != null)
-            {
-                return priorityGrid;
-            }
-
-            work?.EnsureWorkReferences();
-            return work != null ? work.CachedGrid : null;
-        }
-
-        public Vector2Int GetGridPosition(Grid activeGrid, CharacterActor actor)
-        {
-            if (activeGrid == null || actor == null)
-            {
-                return Vector2Int.zero;
-            }
-
-            Vector2Int position = activeGrid.GetXY(actor.transform.position);
-            return activeGrid.IsValidGridPos(position) ? position : Vector2Int.zero;
-        }
-    }
 }

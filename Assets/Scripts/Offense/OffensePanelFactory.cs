@@ -78,9 +78,9 @@ public sealed class OffensePanelFactory : IOffensePanelFactory
         GameObject panelObject = OffensePanelUiFactory.CreatePanel(
             canvasObject.transform,
             "OffenseExpeditionPanel",
-            new Vector2(0.16f, 0.14f),
-            new Vector2(0.84f, 0.84f),
-            new Color(0.04f, 0.045f, 0.052f, 0.94f));
+            new Vector2(0.1f, 0.06f),
+            new Vector2(0.9f, 0.94f),
+            new Color(0.075f, 0.07f, 0.085f, 0.97f));
 
         GameObject header = OffensePanelUiFactory.CreateText(panelObject.transform, "OffenseExpeditionHeader", 24f, TextAlignmentOptions.Left, tmpKoreanFontService);
         RectTransform headerRect = header.GetComponent<RectTransform>();
@@ -94,15 +94,15 @@ public sealed class OffensePanelFactory : IOffensePanelFactory
             panelObject.transform,
             "OffenseExpeditionMembers",
             new Vector2(0f, 0f),
-            new Vector2(0.42f, 0.86f),
+            new Vector2(0.43f, 0.88f),
             new Vector2(24f, 24f),
             new Vector2(-12f, -24f),
             8f);
 
         GameObject detail = OffensePanelUiFactory.CreateText(panelObject.transform, "OffenseExpeditionDetail", 19f, TextAlignmentOptions.TopLeft, tmpKoreanFontService);
         RectTransform detailRect = detail.GetComponent<RectTransform>();
-        detailRect.anchorMin = new Vector2(0.44f, 0f);
-        detailRect.anchorMax = new Vector2(1f, 0.86f);
+        detailRect.anchorMin = new Vector2(0.45f, 0f);
+        detailRect.anchorMax = new Vector2(1f, 0.88f);
         detailRect.offsetMin = new Vector2(12f, 24f);
         detailRect.offsetMax = new Vector2(-24f, -24f);
 

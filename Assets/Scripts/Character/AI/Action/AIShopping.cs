@@ -5,6 +5,12 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Shopping", order = 0)]
 public class AIShopping : AIActionSet
 {
+    private static readonly CharacterAiActionDescriptor ActionDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.Shopping,
+        "쇼핑",
+        CharacterAiActionTags.Shopping);
+
+    public override CharacterAiActionDescriptor Descriptor => ActionDescriptor;
     public override bool CanStart(CharacterActor actor)
     {
         return CanUseVisitorAction(actor);
@@ -55,17 +61,19 @@ public class AIShopping : AIActionSet
             FacilityScoringContext.RequireFromActor(actor));
     }
 
-    public override bool TryResolveDestination(
+    public override bool TryResolveDestinationWithFailure(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
-        out string failureReason)
+        out AIActionFailure failure)
     {
         AbilityShopping shopping = actor != null ? actor.GetAbility<AbilityShopping>() : null;
         if (shopping == null)
         {
             destination = null;
-            failureReason = "쇼핑 능력 없음";
+            failure = AIActionFailure.Create(
+                AIActionFailureKind.Unsupported,
+                "쇼핑 능력 없음");
             return false;
         }
 
@@ -76,11 +84,11 @@ public class AIShopping : AIActionSet
             FacilityScoringContext.RequireFromActor(actor),
             out destination))
         {
-            failureReason = string.Empty;
+            failure = AIActionFailure.None;
             return true;
         }
 
-        failureReason = "목적지 없음";
+        failure = AIActionFailure.Create(AIActionFailureKind.NoDestination);
         return false;
     }
 
@@ -100,9 +108,9 @@ public class AIShopping : AIActionSet
             return true;
         }
 
-        failure = AIActionFailure.FromReason(
-            failureReason,
+        failure = AIActionFailure.Create(
             AIActionFailureKind.DestinationOccupied,
+            failureReason,
             destination);
         return false;
     }

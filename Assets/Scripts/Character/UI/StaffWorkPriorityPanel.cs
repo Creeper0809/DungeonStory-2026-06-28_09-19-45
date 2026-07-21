@@ -13,11 +13,6 @@ public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<I
     private const float RowHeight = 78f;
     private const float HeaderHeight = 56f;
     private const float PanelPadding = 16f;
-    private static readonly IDungeonSceneComponentQuery FallbackSceneQuery =
-        new DungeonSceneComponentQuery();
-    private static readonly IStaffWorkPriorityPanelUiFactory FallbackUiFactory =
-        new StaffWorkPriorityPanelUiFactory(new StaffWorkPriorityPanelNoopFontService());
-
     [SerializeField] private GameObject panelRoot;
     [SerializeField] private Transform rowRoot;
     [SerializeField] private Button rowButtonPrefab;
@@ -54,7 +49,6 @@ public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<I
     private void Awake()
     {
         panelRoot ??= gameObject;
-        EnsureFallbackServices();
     }
 
     private void Start()
@@ -80,7 +74,7 @@ public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<I
 
     public void OnTriggerEvent(InfoFeedEvent eventType)
     {
-        CharacterActor actor = eventType.infoable as CharacterActor;
+        CharacterActor actor = eventType.Target as CharacterActor;
         if (actor != null && actor.TryGetAbility(out AbilityWork _))
         {
             selectedCharacter = actor;
@@ -203,8 +197,9 @@ public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<I
         for (int i = host.childCount - 1; i >= 0; i--)
         {
             Transform child = host.GetChild(i);
-            if (child == rowButtonPrefab?.transform
-                || child == selectedCharacterText?.transform)
+            Transform rowButtonTransform = rowButtonPrefab != null ? rowButtonPrefab.transform : null;
+            Transform selectedTextTransform = selectedCharacterText != null ? selectedCharacterText.transform : null;
+            if (child == rowButtonTransform || child == selectedTextTransform)
             {
                 child.gameObject.SetActive(false);
                 continue;
@@ -410,7 +405,7 @@ public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<I
         label.text = text;
         label.alignment = alignment;
         label.textWrappingMode = allowAutoSize ? TextWrappingModes.Normal : TextWrappingModes.NoWrap;
-        label.overflowMode = TextOverflowModes.Ellipsis;
+        label.overflowMode = TextOverflowModes.Truncate;
         label.enableAutoSizing = allowAutoSize;
         label.fontSizeMin = 14f;
         label.fontSizeMax = 32f;
@@ -425,18 +420,7 @@ public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<I
 
     private static string GetWorkTypeLabel(FacilityWorkType workType)
     {
-        return workType switch
-        {
-            FacilityWorkType.Operate => "운영",
-            FacilityWorkType.Restock => "보충",
-            FacilityWorkType.Repair => "수리",
-            FacilityWorkType.Clean => "청소",
-            FacilityWorkType.Research => "연구",
-            FacilityWorkType.Guard => "경비",
-            FacilityWorkType.Rescue => "구조",
-            FacilityWorkType.Rest => "휴식",
-            _ => workType.ToString()
-        };
+        return WorkTaskCatalog.GetDisplayName(workType);
     }
 
     private static string GetPriorityLabel(WorkPriorityLevel priority)
@@ -530,28 +514,11 @@ public partial class StaffWorkPriorityPanel : MonoBehaviour, UtilEventListener<I
 
     private IStaffWorkPriorityPanelModelBuilder RequireModelBuilder()
     {
-        EnsureFallbackServices();
-        return modelBuilder;
+        return RuntimeDependency.Require(modelBuilder, this);
     }
 
     private IStaffWorkPriorityPanelUiFactory RequireUiFactory()
     {
-        EnsureFallbackServices();
-        return uiFactory;
-    }
-
-    private void EnsureFallbackServices()
-    {
-        sceneQuery ??= FallbackSceneQuery;
-        modelBuilder ??= new StaffWorkPriorityPanelModelBuilder(
-            new StaffWorkforceRuntimeQueryService(sceneQuery));
-        uiFactory ??= FallbackUiFactory;
-    }
-
-    private sealed class StaffWorkPriorityPanelNoopFontService : ITmpKoreanFontService
-    {
-        public TMP_FontAsset Resolve() => null;
-        public void Apply(TMP_Text text) { }
-        public void ApplyToChildren(Transform root, bool includeInactive = true) { }
+        return RuntimeDependency.Require(uiFactory, this);
     }
 }

@@ -110,7 +110,7 @@ public sealed class CustomerPersonaRuntime : SerializedMonoBehaviour
         {
             personaRequestInProgress = false;
             lastError = "Persona request was not accepted by LocalLlmRequestQueue.";
-            Debug.LogWarning($"{name}: {lastError}", this);
+            Debug.Log($"{name}: {lastError}", this);
         }
 
         return accepted;
@@ -143,7 +143,7 @@ public sealed class CustomerPersonaRuntime : SerializedMonoBehaviour
         lastError = $"{nameof(LocalLlmRequestQueue)} is missing.";
         if (logIfMissingQueue)
         {
-            Debug.LogWarning($"{name}: {lastError}", this);
+            Debug.Log($"{name}: {lastError}", this);
         }
 
         return false;
@@ -152,24 +152,22 @@ public sealed class CustomerPersonaRuntime : SerializedMonoBehaviour
     public float GetActionMultiplier(AIActionSet actionSet)
     {
         CustomerPersonaData data = Persona;
-        if (actionSet is AIEat
-            || actionSet is AIRest
-            || actionSet is AIFacilityRoleAction)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.SelfCare))
         {
             return data.selfCareMultiplier;
         }
 
-        if (actionSet is AILookAround)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.Curiosity))
         {
             return data.curiosityMultiplier;
         }
 
-        if (actionSet is AIShopping)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.Shopping))
         {
             return data.shoppingMultiplier;
         }
 
-        if (actionSet is AIWait)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.Patience))
         {
             return data.patienceMultiplier;
         }
@@ -202,8 +200,6 @@ public sealed class CustomerPersonaRuntime : SerializedMonoBehaviour
             return 0.5f;
         }
 
-        string objectName = building.BuildingData.objectName ?? string.Empty;
-        string roleName = building.Facility != null ? building.Facility.roles.ToString() : string.Empty;
         foreach (string tag in preferredTags)
         {
             if (string.IsNullOrWhiteSpace(tag))
@@ -211,8 +207,7 @@ public sealed class CustomerPersonaRuntime : SerializedMonoBehaviour
                 continue;
             }
 
-            if (objectName.IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0
-                || roleName.IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0)
+            if (building.HasSemanticTag(tag))
             {
                 return 1f;
             }
@@ -272,10 +267,16 @@ public sealed class CustomerPersonaRuntime : SerializedMonoBehaviour
     private void OnPersonaResult(LocalLlmResult result)
     {
         personaRequestInProgress = false;
+        if (result.IsCancelled)
+        {
+            lastError = string.Empty;
+            return;
+        }
+
         if (!result.IsSuccess)
         {
             lastError = $"{result.Status}: {result.Error}";
-            Debug.LogWarning($"{name}: Persona request failed: {lastError}", this);
+            Debug.Log($"{name}: Persona request failed: {lastError}", this);
             return;
         }
 

@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 public enum AIActionFailureKind
@@ -21,8 +20,7 @@ public enum AIActionFailureKind
     Unknown
 }
 
-[Serializable]
-public struct AIActionFailure
+public readonly struct AIActionFailure
 {
     public AIActionFailure(AIActionFailureKind kind, string reason, BuildableObject target = null)
     {
@@ -46,100 +44,9 @@ public struct AIActionFailure
         return new AIActionFailure(kind, reason ?? GetDefaultReason(kind), target);
     }
 
-    public static AIActionFailure FromReason(
-        string reason,
-        AIActionFailureKind defaultKind = AIActionFailureKind.Unknown,
-        BuildableObject target = null)
-    {
-        return new AIActionFailure(ClassifyKind(reason, defaultKind), reason ?? string.Empty, target);
-    }
-
-    public static AIActionFailureKind ClassifyKind(
-        string reason,
-        AIActionFailureKind defaultKind = AIActionFailureKind.Unknown)
-    {
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            return defaultKind;
-        }
-
-        string normalized = reason.Trim();
-        if (ContainsAny(normalized, "cooldown", "쿨다운"))
-        {
-            return AIActionFailureKind.Cooldown;
-        }
-        if (ContainsAny(normalized, "path search deferred", "경로 탐색 지연"))
-        {
-            return AIActionFailureKind.PathSearchDeferred;
-        }
-        if (ContainsAny(normalized, "no action", "행동 없음"))
-        {
-            return AIActionFailureKind.NoAction;
-        }
-        if (ContainsAny(normalized, "no score", "점수 없음"))
-        {
-            return AIActionFailureKind.NoScore;
-        }
-        if (ContainsAny(normalized, "AI 또는 그리드 없음", "그리드 없음"))
-        {
-            return AIActionFailureKind.NoGrid;
-        }
-        if (ContainsAny(normalized, "이미 근무자", "수용 인원", "혼잡", "occupied", "capacity"))
-        {
-            return AIActionFailureKind.DestinationOccupied;
-        }
-        if (ContainsAny(normalized, "경로 없음", "도달할 수 없는", "길 막힘", "no path"))
-        {
-            return AIActionFailureKind.NoPath;
-        }
-        if (ContainsAny(normalized, "목적지 선택 실패", "destination selection"))
-        {
-            return AIActionFailureKind.DestinationSelectionFailed;
-        }
-        if (ContainsAny(normalized, "목적지 없음", "no destination"))
-        {
-            return AIActionFailureKind.NoDestination;
-        }
-        if (ContainsAny(normalized, "작업 보류: 비번", "비번"))
-        {
-            return AIActionFailureKind.OffDuty;
-        }
-        if (ContainsAny(normalized, "지원하지", "지원하는 작업이 없습니다", "작업 가능한 시설이 아닙니다"))
-        {
-            return AIActionFailureKind.Unsupported;
-        }
-        if (ContainsAny(normalized, "시설 파괴", "destroy"))
-        {
-            return AIActionFailureKind.Destroyed;
-        }
-        if (ContainsAny(normalized, "작업", "근무"))
-        {
-            return AIActionFailureKind.NoWork;
-        }
-        if (ContainsAny(normalized, "cannot start", "시작 조건"))
-        {
-            return AIActionFailureKind.CannotStart;
-        }
-
-        return defaultKind;
-    }
-
     public override string ToString()
     {
         return string.IsNullOrWhiteSpace(Reason) ? GetDefaultReason(Kind) : Reason;
-    }
-
-    private static bool ContainsAny(string value, params string[] patterns)
-    {
-        foreach (string pattern in patterns)
-        {
-            if (value.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static string GetDefaultReason(AIActionFailureKind kind)
@@ -162,6 +69,26 @@ public struct AIActionFailure
             AIActionFailureKind.Unsupported => "지원하지 않음",
             AIActionFailureKind.Destroyed => "시설 파괴됨",
             _ => "알 수 없음"
+        };
+    }
+}
+
+public static class FacilityAssignmentFailureExtensions
+{
+    public static AIActionFailureKind ToAiActionFailureKind(
+        this FacilityAssignmentFailureKind failureKind)
+    {
+        return failureKind switch
+        {
+            FacilityAssignmentFailureKind.None => AIActionFailureKind.None,
+            FacilityAssignmentFailureKind.MissingWorker => AIActionFailureKind.CannotStart,
+            FacilityAssignmentFailureKind.Destroyed => AIActionFailureKind.Destroyed,
+            FacilityAssignmentFailureKind.UnsupportedWork => AIActionFailureKind.Unsupported,
+            FacilityAssignmentFailureKind.WorkNotNeeded => AIActionFailureKind.NoWork,
+            FacilityAssignmentFailureKind.Damaged => AIActionFailureKind.NoWork,
+            FacilityAssignmentFailureKind.Occupied => AIActionFailureKind.DestinationOccupied,
+            FacilityAssignmentFailureKind.Reserved => AIActionFailureKind.DestinationOccupied,
+            _ => AIActionFailureKind.Unknown
         };
     }
 }

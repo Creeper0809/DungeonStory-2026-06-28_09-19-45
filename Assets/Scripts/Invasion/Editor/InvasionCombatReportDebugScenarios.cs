@@ -21,6 +21,7 @@ public static class InvasionCombatReportDebugScenarios
         List<string> errors = new List<string>();
         RunScenario("전투 발동 피드와 결과 요약", VerifyCombatFeedbackAndSummary, errors);
         RunScenario("추천 대응 미표시", VerifySummaryHasNoRecommendation, errors);
+        RunScenario("완료 보고서 씬 참조 격리", VerifyCompletedReportSceneIsolation, errors);
 
         if (errors.Count > 0)
         {
@@ -83,7 +84,7 @@ public static class InvasionCombatReportDebugScenarios
         world.TriggerFacilityDamaged(damaged);
         world.Resolve(true, 1f);
 
-        InvasionCombatReport report = reports.LastReport;
+        InvasionCombatReportSnapshot report = reports.LastReport;
         EventAlertRequest alert = alerts.LastRequest;
         string detail = report != null ? report.ToDetailText() : string.Empty;
 
@@ -130,6 +131,52 @@ public static class InvasionCombatReportDebugScenarios
 
         reports.Dispose();
         return valid;
+    }
+
+    private static bool VerifyCompletedReportSceneIsolation()
+    {
+        InvasionCombatReportSnapshot report;
+        CountingCombatReportListener reports = new CountingCombatReportListener();
+        using (CombatReportScenarioWorld world = new CombatReportScenarioWorld())
+        {
+            world.StartInvasion();
+            DefenseActivationReport defense = world.CreateDefenseReport(
+                "격리 함정",
+                DefenseAttackConcept.Physical,
+                5f,
+                0f,
+                "격리");
+            world.TriggerDefense(defense);
+            BuildableObject damaged = world.CreateFacility("격리 대상", DefenseAttackConcept.None);
+            damaged.SetDamaged(true);
+            world.TriggerFacilityDamaged(damaged);
+            world.Resolve(true, 0f);
+            report = reports.LastReport;
+        }
+
+        reports.Dispose();
+        bool mutationRejected = false;
+        if (report?.Observations is IList<string> observations && observations.Count > 0)
+        {
+            try
+            {
+                observations[0] = "mutated";
+            }
+            catch (NotSupportedException)
+            {
+                mutationRejected = true;
+            }
+        }
+
+        return report != null
+            && mutationRejected
+            && report.DamagedFacilities.Count == 1
+            && report.DamagedFacilities[0].Name == "격리 대상"
+            && report.DefenseContributions.Count == 1
+            && report.DefenseContributions[0].FacilityName == "격리 함정"
+            && report.ToDetailText().Contains("격리 대상")
+            && typeof(InvasionCombatReportSnapshot).GetProperty("Intruder") == null
+            && typeof(InvasionFacilitySnapshot).GetProperty("Facility") == null;
     }
 
     private sealed class CombatReportScenarioWorld : IDisposable
@@ -209,12 +256,12 @@ public static class InvasionCombatReportDebugScenarios
             data.layer = GridLayer.Building;
             data.category = BuildingCategory.Special;
             data.type = typeof(DefenseFacility);
-            data.facility = new FacilityData
+            data.Facility = new FacilityData
             {
                 supportedWorkTypes = FacilityWorkType.Repair,
                 disabledWhenDamaged = true
             };
-            data.defense = new DefenseFacilityData
+            data.Defense = new DefenseFacilityData
             {
                 enabled = concept != DefenseAttackConcept.None,
                 concept = concept,
@@ -226,6 +273,7 @@ public static class InvasionCombatReportDebugScenarios
 
             GameObject buildingObject = new GameObject(buildingName);
             DefenseFacility facility = buildingObject.AddComponent<DefenseFacility>();
+            CharacterAiEditorTestDependencies.Inject(facility);
             facility.Initialization(data, Vector2Int.zero);
             objects.Add(buildingObject);
             return facility;
@@ -255,7 +303,7 @@ public static class InvasionCombatReportDebugScenarios
     private sealed class CountingCombatReportListener : UtilEventListener<InvasionCombatReportReadyEvent>, IDisposable
     {
         public int Count { get; private set; }
-        public InvasionCombatReport LastReport { get; private set; }
+        public InvasionCombatReportSnapshot LastReport { get; private set; }
 
         public CountingCombatReportListener()
         {

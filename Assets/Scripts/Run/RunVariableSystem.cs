@@ -14,13 +14,17 @@ public class RunVariableRuntime :
     [SerializeField] private bool raiseAlerts = true;
 
     private readonly RunVariableState state = new RunVariableState();
+    private readonly List<int> randomDrawMaxima = new List<int>();
     private System.Random random;
     private int currentDay = 1;
     private IOwnerRunDataProvider ownerRunDataProvider;
     private IInvasionThreatRuntimeProvider invasionThreatRuntimeProvider;
     private IRunStartVariableSelector runStartVariableSelector;
 
-    public RunVariableState State => state;
+    public IRunVariableStateView State => state;
+    public int RunSeed => runSeed;
+    public int CurrentDay => currentDay;
+    public IReadOnlyList<int> RandomDrawMaxima => randomDrawMaxima;
 
     [Inject]
     public void Construct(
@@ -46,10 +50,11 @@ public class RunVariableRuntime :
         random = new System.Random(runSeed);
     }
 
-    public void StartRun(int seed, CharacterSO ownerData = null, InvasionThreatDifficulty difficulty = InvasionThreatDifficulty.Normal)
+    public void StartRun(int seed, CharacterSO ownerData = null, DungeonDifficulty difficulty = DungeonDifficulty.Normal)
     {
         runSeed = seed != 0 ? seed : Environment.TickCount;
         random = new System.Random(runSeed);
+        randomDrawMaxima.Clear();
         RunStartVariableSnapshot snapshot = ResolveRunStartVariableSelector().Create(runSeed, ownerData, difficulty);
         state.SetStartVariables(snapshot);
         RunStartVariablesSelectedEvent.Trigger(snapshot);
@@ -62,6 +67,11 @@ public class RunVariableRuntime :
                 EventAlertImportance.Low,
                 "런 변수");
         }
+    }
+
+    public void StartRun(int seed, CharacterSO ownerData, InvasionThreatDifficulty difficulty)
+    {
+        StartRun(seed, ownerData, DungeonDifficultyRules.FromLegacy(difficulty));
     }
 
     public void OnTriggerEvent(OperatingDayStartedEvent eventType)
@@ -95,7 +105,7 @@ public class RunVariableRuntime :
         state.ClearInvasionVariable();
     }
 
-    public ActiveRunVariable ActivateOperationVariable(RunVariableId id, int day = -1, bool alert = true)
+    public ActiveRunVariable ActivateOperationVariable(string id, int day = -1, bool alert = true)
     {
         RunVariableDefinition definition = RunVariableCatalog.Get(id);
         ActiveRunVariable active = state.ActivateOperationVariable(definition, day > 0 ? day : currentDay);
@@ -117,7 +127,7 @@ public class RunVariableRuntime :
         return active;
     }
 
-    public RunVariableDefinition SelectInvasionVariable(RunVariableId id, bool alert = true)
+    public RunVariableDefinition SelectInvasionVariable(string id, bool alert = true)
     {
         RunVariableDefinition definition = RunVariableCatalog.Get(id);
         if (definition == null || definition.category != RunVariableCategory.Invasion)
@@ -182,7 +192,7 @@ public class RunVariableRuntime :
             return;
         }
 
-        RunVariableDefinition selected = definitions[random.Next(definitions.Count)];
+        RunVariableDefinition selected = definitions[NextRandomIndex(definitions.Count)];
         ActivateOperationVariable(selected.id, day);
     }
 
@@ -196,7 +206,42 @@ public class RunVariableRuntime :
             return;
         }
 
-        SelectInvasionVariable(definitions[random.Next(definitions.Count)].id);
+        SelectInvasionVariable(definitions[NextRandomIndex(definitions.Count)].id);
+    }
+
+    public void RestoreRun(
+        int savedSeed,
+        int savedCurrentDay,
+        RunStartVariableSnapshot startVariables,
+        IEnumerable<ActiveRunVariable> operationVariables,
+        RunVariableDefinition invasionVariable,
+        IEnumerable<int> savedRandomDrawMaxima)
+    {
+        runSeed = savedSeed != 0 ? savedSeed : Environment.TickCount;
+        currentDay = Mathf.Max(1, savedCurrentDay);
+        random = new System.Random(runSeed);
+        randomDrawMaxima.Clear();
+
+        foreach (int maximum in savedRandomDrawMaxima ?? Array.Empty<int>())
+        {
+            if (maximum <= 0)
+            {
+                continue;
+            }
+
+            random.Next(maximum);
+            randomDrawMaxima.Add(maximum);
+        }
+
+        state.Restore(startVariables, operationVariables, invasionVariable);
+    }
+
+    private int NextRandomIndex(int maximum)
+    {
+        EnsureRandom();
+        int safeMaximum = Mathf.Max(1, maximum);
+        randomDrawMaxima.Add(safeMaximum);
+        return random.Next(safeMaximum);
     }
 
     private void EnsureRunStarted()
@@ -219,15 +264,15 @@ public class RunVariableRuntime :
         }
     }
 
-    private InvasionThreatDifficulty ResolveDifficulty()
+    private DungeonDifficulty ResolveDifficulty()
     {
         InvasionThreatRuntime threatRuntime = ResolveInvasionThreatRuntimeProvider()
             .TryGetRuntime(out InvasionThreatRuntime resolvedRuntime)
             ? resolvedRuntime
             : null;
         return threatRuntime != null && threatRuntime.Settings != null
-            ? threatRuntime.Settings.difficulty
-            : InvasionThreatDifficulty.Normal;
+            ? DungeonDifficultyRules.FromLegacy(threatRuntime.Settings.difficulty)
+            : DungeonDifficulty.Normal;
     }
 
     private CharacterSO ResolveSelectedOwnerData()

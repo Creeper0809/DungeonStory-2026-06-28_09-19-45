@@ -12,25 +12,23 @@ public class CharacterAiPersonality
 
     public float GetActionMultiplier(AIActionSet actionSet)
     {
-        if (actionSet is AIWork)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.Work))
         {
             return ClampMultiplier(diligence);
         }
-        if (actionSet is AILookAround)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.Curiosity))
         {
             return ClampMultiplier(curiosity);
         }
-        if (actionSet is AIEat
-            || actionSet is AIRest
-            || actionSet is AIFacilityRoleAction)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.SelfCare))
         {
             return ClampMultiplier(selfCare);
         }
-        if (actionSet is AIShopping)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.Shopping))
         {
             return ClampMultiplier(shoppingInterest);
         }
-        if (actionSet is AIWait)
+        if (actionSet != null && actionSet.HasSemanticTag(CharacterAiActionTags.Patience))
         {
             return ClampMultiplier(patience);
         }

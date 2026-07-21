@@ -1,8 +1,10 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public readonly struct FacilityCrimeRiskContext
 {
-    public readonly FacilityData facility;
+    public readonly BuildableObject building;
     public readonly CharacterActor actor;
     public readonly bool hasServingWorker;
     public readonly bool hasWaitingCheckout;
@@ -13,7 +15,7 @@ public readonly struct FacilityCrimeRiskContext
     public readonly bool isDamaged;
 
     public FacilityCrimeRiskContext(
-        FacilityData facility,
+        BuildableObject building,
         CharacterActor actor,
         bool hasServingWorker,
         bool hasWaitingCheckout,
@@ -23,7 +25,7 @@ public readonly struct FacilityCrimeRiskContext
         int currentStock,
         bool isDamaged)
     {
-        this.facility = facility;
+        this.building = building;
         this.actor = actor;
         this.hasServingWorker = hasServingWorker;
         this.hasWaitingCheckout = hasWaitingCheckout;
@@ -33,39 +35,57 @@ public readonly struct FacilityCrimeRiskContext
         this.currentStock = Mathf.Max(0, currentStock);
         this.isDamaged = isDamaged;
     }
+
+    public FacilityData Facility => building != null ? building.Facility : null;
 }
 
-public static class FacilityCrimeRiskUtility
+public interface IFacilityCrimeRiskEvaluator
 {
-    public static float CalculateShopliftingChance(FacilityCrimeRiskContext context)
+    float CalculateShopliftingChance(FacilityCrimeRiskContext context);
+    float CalculateOperationalRisk(FacilityCrimeRiskContext context);
+    bool ShouldTriggerCrime(float chance, float roll);
+}
+
+public sealed class FacilityCrimeRiskEvaluator : IFacilityCrimeRiskEvaluator
+{
+    private readonly IFacilityCrimeSettingsProvider settingsProvider;
+
+    public FacilityCrimeRiskEvaluator(IFacilityCrimeSettingsProvider settingsProvider)
     {
-        FacilityData facility = context.facility;
+        this.settingsProvider = settingsProvider
+            ?? throw new ArgumentNullException(nameof(settingsProvider));
+    }
+
+    public float CalculateShopliftingChance(FacilityCrimeRiskContext context)
+    {
+        FacilityData facility = context.Facility;
         if (facility == null || context.cartItemCount <= 0 || context.currentStock <= 0)
         {
             return 0f;
         }
 
-        float pressure = Mathf.Max(0f, facility.baseCrimePressure);
-        pressure += GetSupervisionPressure(context);
-        pressure += GetNeedPressure(context);
-        pressure += GetCrowdPressure(context);
-        pressure += GetCartValuePressure(context);
-        pressure += GetFacilityStatePressure(context);
-
-        pressure *= GetActorIncidentMultiplier(context.actor);
+        FacilityCrimeSettingsSO settings = GetSettings();
+        float pressure = settings.BaseCrimePressure;
+        pressure += GetSupervisionPressure(context, settings);
+        pressure += GetNeedPressure(context, settings);
+        pressure += GetCrowdPressure(context, settings);
+        pressure += GetCartValuePressure(context, settings);
+        pressure += GetFacilityStatePressure(context, settings);
+        pressure = ApplyBuildingModifiers(context, pressure);
+        pressure *= context.actor != null ? context.actor.GetCrimeRiskMultiplier() : 1f;
         return Mathf.Clamp01(pressure);
     }
 
-    public static float CalculateOperationalRisk(FacilityCrimeRiskContext context)
+    public float CalculateOperationalRisk(FacilityCrimeRiskContext context)
     {
-        FacilityData facility = context.facility;
+        FacilityData facility = context.Facility;
         if (facility == null || context.currentStock <= 0)
         {
             return 0f;
         }
 
         FacilityCrimeRiskContext baselineContext = new FacilityCrimeRiskContext(
-            facility,
+            context.building,
             context.actor,
             context.hasServingWorker,
             context.hasWaitingCheckout,
@@ -75,28 +95,39 @@ public static class FacilityCrimeRiskUtility
             context.currentStock,
             context.isDamaged);
 
-        float chance = CalculateShopliftingChance(baselineContext);
-        float risk = chance * 10f;
+        FacilityCrimeSettingsSO settings = GetSettings();
+        float risk = CalculateShopliftingChance(baselineContext) * settings.OperationalRiskScale;
         if (context.hasWaitingCheckout && !context.hasServingWorker)
         {
-            risk += facility.crowdCrimeRiskWeight;
+            risk += settings.CrowdCrimeRiskWeight;
         }
 
         return Mathf.Max(0f, risk);
     }
 
-    private static float GetSupervisionPressure(FacilityCrimeRiskContext context)
+    public bool ShouldTriggerCrime(float chance, float roll)
     {
-        FacilityData facility = context.facility;
-        if (context.hasServingWorker)
-        {
-            return -Mathf.Max(0f, facility.staffedSupervisionReduction);
-        }
-
-        return Mathf.Max(0f, facility.unstaffedSupervisionRisk);
+        return chance > 0f && Mathf.Clamp01(roll) < Mathf.Clamp01(chance);
     }
 
-    private static float GetNeedPressure(FacilityCrimeRiskContext context)
+    private FacilityCrimeSettingsSO GetSettings()
+    {
+        return settingsProvider.Settings
+            ?? throw new InvalidOperationException("Facility crime settings provider returned no settings.");
+    }
+
+    private static float GetSupervisionPressure(
+        FacilityCrimeRiskContext context,
+        FacilityCrimeSettingsSO settings)
+    {
+        return context.hasServingWorker
+            ? -settings.StaffedSupervisionReduction
+            : settings.UnstaffedSupervisionRisk;
+    }
+
+    private static float GetNeedPressure(
+        FacilityCrimeRiskContext context,
+        FacilityCrimeSettingsSO settings)
     {
         CharacterStats stats = context.actor != null ? context.actor.Stats : null;
         if (stats == null)
@@ -111,9 +142,9 @@ public static class FacilityCrimeRiskUtility
         float excretion = GetStat(stats, CharacterCondition.EXCRETION, 50f);
         float hygiene = GetStat(stats, CharacterCondition.HYGIENE, 50f);
 
-        float lowMoodPressure = context.facility.lowMoodCrimeRiskWeight
+        float lowMoodPressure = settings.LowMoodCrimeRiskWeight
             * LowStatPressure(mood, comfortable: 65f, critical: 15f);
-        float unmetNeedPressure = context.facility.unmetNeedCrimeRiskWeight
+        float unmetNeedPressure = settings.UnmetNeedCrimeRiskWeight
             * Mathf.Max(
                 LowStatPressure(hunger, comfortable: 45f, critical: 5f),
                 LowStatPressure(fun, comfortable: 40f, critical: 0f) * 0.6f,
@@ -123,20 +154,24 @@ public static class FacilityCrimeRiskUtility
         return lowMoodPressure + unmetNeedPressure;
     }
 
-    private static float GetCrowdPressure(FacilityCrimeRiskContext context)
+    private static float GetCrowdPressure(
+        FacilityCrimeRiskContext context,
+        FacilityCrimeSettingsSO settings)
     {
-        FacilityData facility = context.facility;
-        if (facility.capacity <= 0)
+        FacilityData facility = context.Facility;
+        if (facility == null || facility.capacity <= 0)
         {
             return 0f;
         }
 
         float crowdRatio = Mathf.Clamp01((float)context.currentUserCount / Mathf.Max(1, facility.capacity));
         float waitPressure = context.hasWaitingCheckout && !context.hasServingWorker ? 0.5f : 0f;
-        return facility.crowdCrimeRiskWeight * Mathf.Clamp01(crowdRatio + waitPressure);
+        return settings.CrowdCrimeRiskWeight * Mathf.Clamp01(crowdRatio + waitPressure);
     }
 
-    private static float GetCartValuePressure(FacilityCrimeRiskContext context)
+    private static float GetCartValuePressure(
+        FacilityCrimeRiskContext context,
+        FacilityCrimeSettingsSO settings)
     {
         if (context.cartValue <= 0)
         {
@@ -145,37 +180,49 @@ public static class FacilityCrimeRiskUtility
 
         float valuePressure = Mathf.Clamp01(context.cartValue / 500f);
         float countPressure = Mathf.Clamp01((context.cartItemCount - 1f) / 3f) * 0.5f;
-        return context.facility.highValueCrimeRiskWeight * Mathf.Clamp01(valuePressure + countPressure);
+        return settings.HighValueCrimeRiskWeight * Mathf.Clamp01(valuePressure + countPressure);
     }
 
-    private static float GetFacilityStatePressure(FacilityCrimeRiskContext context)
+    private static float GetFacilityStatePressure(
+        FacilityCrimeRiskContext context,
+        FacilityCrimeSettingsSO settings)
     {
-        float pressure = 0f;
-        if (context.isDamaged)
+        FacilityData facility = context.Facility;
+        if (facility == null)
         {
-            pressure += context.facility.damagedFacilityCrimeRiskWeight;
+            return 0f;
         }
 
-        if (context.currentStock <= context.facility.restockRequestThreshold)
+        float pressure = context.isDamaged ? settings.DamagedFacilityCrimeRiskWeight : 0f;
+        if (context.currentStock <= context.building.GetRestockRequestThreshold())
         {
-            pressure += context.facility.highValueCrimeRiskWeight * 0.25f;
+            pressure += settings.HighValueCrimeRiskWeight * 0.25f;
         }
 
         return pressure;
     }
 
-    private static float GetActorIncidentMultiplier(CharacterActor actor)
+    private static float ApplyBuildingModifiers(FacilityCrimeRiskContext context, float pressure)
     {
-        CharacterSpeciesIncidentType incidentType = actor != null
-            ? actor.GetIncidentType()
-            : CharacterSpeciesIncidentType.None;
-        return incidentType switch
+        IReadOnlyList<BuildingAbility> abilities = context.building != null
+            && context.building.BuildingData != null
+                ? context.building.BuildingData.Abilities
+                : null;
+        if (abilities == null)
         {
-            CharacterSpeciesIncidentType.OrcRampage => 1.2f,
-            CharacterSpeciesIncidentType.VampireFear => 1.1f,
-            CharacterSpeciesIncidentType.SlimeContamination => 1.05f,
-            _ => 1f
-        };
+            return Mathf.Max(0f, pressure);
+        }
+
+        float result = pressure;
+        foreach (BuildingAbility ability in abilities)
+        {
+            if (ability is IBuildingCrimeRiskModifier modifier)
+            {
+                result = modifier.ModifyCrimePressure(result, context);
+            }
+        }
+
+        return Mathf.Max(0f, result);
     }
 
     private static float GetStat(CharacterStats stats, CharacterCondition condition, float defaultValue)
@@ -187,15 +234,5 @@ public static class FacilityCrimeRiskUtility
     {
         float range = Mathf.Max(1f, comfortable - critical);
         return Mathf.Clamp01((comfortable - value) / range);
-    }
-
-    public static bool ShouldTriggerCrime(float chance, float roll)
-    {
-        if (chance <= 0f)
-        {
-            return false;
-        }
-
-        return Mathf.Clamp01(roll) < Mathf.Clamp01(chance);
     }
 }

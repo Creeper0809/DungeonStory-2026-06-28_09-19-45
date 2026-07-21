@@ -7,9 +7,6 @@ using VContainer;
 [DrawWithUnity]
 public class CharacterAbility : SerializedMonoBehaviour
 {
-    private static readonly IGridSystemProvider FallbackGridSystemProvider =
-        new GridSystemProvider(new DungeonSceneComponentQuery());
-
     protected CharacterActor actor;
     protected CharacterIdentity identity;
     protected CharacterAbilityCache abilityCache;
@@ -41,6 +38,12 @@ public class CharacterAbility : SerializedMonoBehaviour
 
     protected void CacheCommonReferences()
     {
+        CacheLocalReferences();
+        grid = TryGetGrid(out Grid resolvedGrid) ? resolvedGrid : null;
+    }
+
+    protected void CacheLocalReferences()
+    {
         if (actor == null)
         {
             actor = GetComponent<CharacterActor>();
@@ -48,22 +51,16 @@ public class CharacterAbility : SerializedMonoBehaviour
 
         CacheSplitComponents();
 
-        if (this is AbilityMove selfMove)
+        move = null;
+        if (abilityCache != null)
         {
-            move = selfMove;
+            abilityCache.TryGetAbility(out move);
         }
-        else if (abilityCache != null)
-        {
-            move = abilityCache.GetAbility<AbilityMove>();
-        }
-
-        grid = TryGetGrid(out Grid resolvedGrid) ? resolvedGrid : null;
     }
 
     protected bool TryGetGrid(out Grid resolvedGrid)
     {
-        IGridSystemProvider provider = gridSystemProvider ?? FallbackGridSystemProvider;
-        return provider.TryGetGrid(out resolvedGrid);
+        return RuntimeDependency.Require(gridSystemProvider, this).TryGetGrid(out resolvedGrid);
     }
 
     private void CacheSplitComponents()

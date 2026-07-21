@@ -9,6 +9,8 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.UI;
 using VContainer;
 using VContainer.Unity;
@@ -206,6 +208,13 @@ public static class P0FeatureSurfacePlayModeVerifier
         private readonly List<string> capturedWarnings = new List<string>();
         private readonly List<UnityEngine.Object> tempObjects = new List<UnityEngine.Object>();
         private bool capturingLogs;
+        private InputSettings.EditorInputBehaviorInPlayMode originalInputBehavior;
+        private Mouse originalMouse;
+        private Mouse verificationMouse;
+        private bool inputConfigured;
+        private string metaProfilePath;
+        private byte[] metaProfileBackup;
+        private bool metaProfileExisted;
 
         private IEnumerator Start()
         {
@@ -223,6 +232,7 @@ public static class P0FeatureSurfacePlayModeVerifier
 
             ClearConsole();
             StartLogCapture();
+            ConfigureInput();
 
             float originalTimeScale = Time.timeScale;
             try
@@ -235,13 +245,16 @@ public static class P0FeatureSurfacePlayModeVerifier
                     lines.Add($"activeScene={activeScene.path}");
                     manager = FindActiveSceneComponent<UITabManager>();
                     lines.Add($"tabManager={manager != null}");
-                    PrepareGameState(lines);
                 });
                 if (manager == null)
                 {
                     yield break;
                 }
 
+                PlayModeVerificationPersistenceSnapshot.CaptureCurrent("p0-ui-surface");
+                BackupMetaProfile();
+                yield return DismissStartupAndSelectOwner(lines);
+                RunStep("PREPARE", lines, () => PrepareGameState(lines));
                 yield return null;
 
                 RunStep("SHOP", lines, () =>
@@ -276,11 +289,8 @@ public static class P0FeatureSurfacePlayModeVerifier
                     CaptureTab("Temp/p0-ui-warehouse-actions.png", lines));
                 yield return null;
 
-                RunStep("OPERATION", lines, () =>
-                {
-                    VerifyOperationRecruitmentMeta(manager, lines);
-                    CaptureTab("Temp/p0-ui-operation.png", lines);
-                });
+                yield return VerifyOperationRecruitmentMeta(manager, lines);
+                yield return CaptureTabAtEndOfFrame("Temp/p0-ui-operation.png", lines);
                 yield return null;
 
                 RunStep("RECRUITMENT-VISUAL", lines, () =>
@@ -294,18 +304,35 @@ public static class P0FeatureSurfacePlayModeVerifier
 
                 RunStep("META-VISUAL", lines, () =>
                 {
-                    ScrollActiveP0Panel(0f);
+                    ScrollContainingButton(
+                        FindActiveButton($"P0Action_MetaUpgrade_{MetaUpgradeIds.CommerceSupplyNetwork}"));
                 });
                 yield return null;
                 RunStep("META-CAPTURE", lines, () =>
                     CaptureTab("Temp/p0-ui-meta.png", lines));
                 yield return null;
 
+                yield return ConfigureResearchPriorityThroughUi(manager, lines);
+
                 RunStep("RESEARCH", lines, () =>
                 {
                     VerifyResearch(manager, lines);
-                    CaptureTab("Temp/p0-ui-research.png", lines);
                 });
+                yield return VerifyNaturalResearchProgress(lines);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                yield return CaptureTabAtEndOfFrame("Temp/p0-ui-research.png", lines);
+                yield return null;
+
+                RunStep("RESEARCH-REWARDS-VISUAL", lines, () =>
+                {
+                    ScrollActiveP0Panel(0.55f);
+                });
+                yield return null;
+                yield return CaptureTabAtEndOfFrame("Temp/p0-ui-research-rewards.png", lines);
+                yield return null;
+
+                yield return VerifyResearchConstructionUnlockThroughUi(lines);
                 yield return null;
 
                 RunStep("VISUAL", lines, () =>
@@ -318,6 +345,8 @@ public static class P0FeatureSurfacePlayModeVerifier
             finally
             {
                 Time.timeScale = originalTimeScale;
+                RestoreMetaProfile();
+                TeardownInput();
                 DestroyTempObjects();
                 Finish(lines);
             }
@@ -345,6 +374,44 @@ public static class P0FeatureSurfacePlayModeVerifier
             lines.Add($"tabCapture={path}");
         }
 
+        private static IEnumerator CaptureTabAtEndOfFrame(string path, List<string> lines)
+        {
+            Canvas.ForceUpdateCanvases();
+            yield return null;
+            yield return new WaitForEndOfFrame();
+
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            ScreenCapture.CaptureScreenshot(path);
+            const int maxWaitFrames = 120;
+            int waitedFrames = 0;
+            while ((!File.Exists(path) || new FileInfo(path).Length == 0)
+                && waitedFrames < maxWaitFrames)
+            {
+                waitedFrames++;
+                yield return null;
+            }
+
+            yield return null;
+
+            int pixelCount = 0;
+            if (File.Exists(path))
+            {
+                Texture2D capture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (capture.LoadImage(File.ReadAllBytes(path), markNonReadable: false))
+                {
+                    pixelCount = capture.width * capture.height;
+                }
+
+                UnityEngine.Object.Destroy(capture);
+            }
+
+            lines.Add($"tabCapture={path}; pixels={pixelCount}; waitFrames={waitedFrames}");
+        }
+
         private static void ScrollActiveP0Panel(float normalizedPosition)
         {
             P0FeatureSurfacePanel panel = UnityEngine.Object.FindObjectsByType<P0FeatureSurfacePanel>(
@@ -360,11 +427,13 @@ public static class P0FeatureSurfacePlayModeVerifier
             }
 
             Canvas.ForceUpdateCanvases();
-            scroll.verticalNormalizedPosition = Mathf.Clamp01(normalizedPosition);
             if (scroll.content != null)
             {
                 LayoutRebuilder.ForceRebuildLayoutImmediate(scroll.content);
             }
+
+            Canvas.ForceUpdateCanvases();
+            scroll.verticalNormalizedPosition = Mathf.Clamp01(normalizedPosition);
             Canvas.ForceUpdateCanvases();
         }
 
@@ -499,8 +568,9 @@ public static class P0FeatureSurfacePlayModeVerifier
             {
                 int beforeWarehouse = warehouse.Inventory.TotalStock;
                 int removed = 0;
-                foreach (StockCategory category in Enum.GetValues(typeof(StockCategory)))
+                foreach (StockCategoryDefinition definition in StockCategoryCatalog.All)
                 {
+                    StockCategory category = definition.Category;
                     removed += warehouse.Inventory.Withdraw(category, 10);
                     if (removed >= 30)
                     {
@@ -575,31 +645,198 @@ public static class P0FeatureSurfacePlayModeVerifier
                 $"WAREHOUSE visible={IsTabActive(4)}; warehouses={warehouses.Count}; shops={shops.Count}; restockClicked={restockClicked}; deliveryClicked={deliveryClicked}; warehouseStock={beforeWarehouse}->{afterWarehouse}; shopStock={beforeShopStock}->{afterShopStock}; money={beforeMoney}->{afterMoney}; stateChanged={beforeWarehouse != afterWarehouse || beforeShopStock != afterShopStock || beforeMoney != afterMoney}");
         }
 
-        private void VerifyOperationRecruitmentMeta(UITabManager manager, List<string> lines)
+        private IEnumerator VerifyOperationRecruitmentMeta(UITabManager manager, List<string> lines)
         {
             OperatingDaySettlementRuntime settlement = FindActiveSceneComponent<OperatingDaySettlementRuntime>();
             RegularCustomerRuntime regularCustomer = FindActiveSceneComponent<RegularCustomerRuntime>();
             MetaProgressionRuntime meta = FindActiveSceneComponent<MetaProgressionRuntime>();
 
-            int beforeDay = GetCurrentDay();
+            int beforeMoney = GetHoldingMoney();
+            int beforeDebt = settlement != null ? settlement.OutstandingDebt : -1;
+            bool beforeFundingUsed = settlement != null && settlement.EmergencyFundingUsed;
             int beforeRecruited = regularCustomer != null ? regularCustomer.State.RecruitedCharacters.Count : -1;
             int beforeCurrency = meta != null ? meta.State.AvailableCurrency : -1;
             int beforeLevels = meta != null ? meta.State.UpgradeLevels.Values.Sum() : -1;
 
             manager.ToggleSelectButton(5);
             Canvas.ForceUpdateCanvases();
-            bool settleClicked = ClickFirstExact("P0Action_OperationSettleDay");
+            yield return null;
+            Button fundingButton = FindActiveButton("P0Action_OperationEmergencyFunding");
+            bool fundingClickable = fundingButton != null && fundingButton.interactable;
+            yield return ClickWithInput(fundingButton);
+            bool fundingClicked = fundingClickable
+                && settlement != null
+                && !beforeFundingUsed
+                && settlement.EmergencyFundingUsed;
             bool recruitClicked = ClickFirst("P0Action_Recruit_");
-            bool metaClicked = ClickFirst("P0Action_MetaUpgrade_");
+            string[] strategyUpgradeIds =
+            {
+                MetaUpgradeIds.CommerceSupplyNetwork,
+                MetaUpgradeIds.FortressEngineering,
+                MetaUpgradeIds.ArcaneResearchMethod
+            };
+            bool strategyCardsPresent = strategyUpgradeIds.All(id =>
+                FindActiveButton($"P0Action_MetaUpgrade_{id}") != null);
+            Button strategyMetaButton = FindActiveButton(
+                $"P0Action_MetaUpgrade_{MetaUpgradeIds.CommerceSupplyNetwork}");
+            if (strategyMetaButton != null)
+            {
+                ScrollContainingButton(strategyMetaButton);
+                yield return null;
+                strategyMetaButton = FindActiveButton(
+                    $"P0Action_MetaUpgrade_{MetaUpgradeIds.CommerceSupplyNetwork}");
+            }
 
-            int afterDay = GetCurrentDay();
+            int beforeStrategyLevel = meta != null
+                ? meta.State.GetUpgradeLevel(MetaUpgradeIds.CommerceSupplyNetwork)
+                : -1;
+            yield return ClickWithInput(strategyMetaButton);
+            int afterStrategyLevel = meta != null
+                ? meta.State.GetUpgradeLevel(MetaUpgradeIds.CommerceSupplyNetwork)
+                : -1;
+            bool metaClicked = afterStrategyLevel > beforeStrategyLevel;
+
+            int afterMoney = GetHoldingMoney();
+            int afterDebt = settlement != null ? settlement.OutstandingDebt : -1;
+            bool afterFundingUsed = settlement != null && settlement.EmergencyFundingUsed;
             int afterRecruited = regularCustomer != null ? regularCustomer.State.RecruitedCharacters.Count : -1;
             int afterCurrency = meta != null ? meta.State.AvailableCurrency : -1;
             int afterLevels = meta != null ? meta.State.UpgradeLevels.Values.Sum() : -1;
             OperatingDayReport report = settlement != null ? settlement.LatestReport : null;
 
             lines.Add(
-                $"OPERATION visible={IsTabActive(5)}; settleClicked={settleClicked}; report={(report != null)}; day={beforeDay}->{afterDay}; recruitClicked={recruitClicked}; recruited={beforeRecruited}->{afterRecruited}; metaClicked={metaClicked}; metaCurrency={beforeCurrency}->{afterCurrency}; metaLevels={beforeLevels}->{afterLevels}; stateChanged={(report != null) || beforeDay != afterDay || beforeRecruited != afterRecruited || beforeLevels != afterLevels}");
+                $"OPERATION visible={IsTabActive(5)}; fundingClicked={fundingClicked}; fundingUsed={beforeFundingUsed}->{afterFundingUsed}; money={beforeMoney}->{afterMoney}; debt={beforeDebt}->{afterDebt}; report={(report != null)}; recruitClicked={recruitClicked}; recruited={beforeRecruited}->{afterRecruited}; strategyCards={strategyCardsPresent}; commerceMetaClicked={metaClicked}; commerceLevel={beforeStrategyLevel}->{afterStrategyLevel}; metaCurrency={beforeCurrency}->{afterCurrency}; metaLevels={beforeLevels}->{afterLevels}; stateChanged={beforeFundingUsed != afterFundingUsed || beforeMoney != afterMoney || beforeDebt != afterDebt || beforeRecruited != afterRecruited || beforeLevels != afterLevels}");
+        }
+
+        private IEnumerator DismissStartupAndSelectOwner(List<string> lines)
+        {
+            yield return null;
+            GameObject modal = FindSceneObject("SaveModal");
+            Button startNewButton = FindActiveButton("StartNewRunButton");
+            bool startupWasVisible = modal != null && modal.activeInHierarchy;
+            if (startupWasVisible)
+            {
+                yield return ClickWithInput(startNewButton);
+                if (modal != null && modal.activeInHierarchy)
+                {
+                    yield return ClickWithInput(startNewButton);
+                }
+            }
+
+            lines.Add($"startupModal={startupWasVisible}->{(modal != null && modal.activeInHierarchy)}; newGamePointer={startNewButton != null}");
+
+            OwnerRunManager ownerManager = FindActiveSceneComponent<OwnerRunManager>();
+            if (ownerManager != null && ownerManager.CurrentOwnerActor == null)
+            {
+                Button ownerButton = UnityEngine.Object.FindObjectsByType<Button>(
+                        FindObjectsInactive.Exclude,
+                        FindObjectsSortMode.None)
+                    .FirstOrDefault(candidate => candidate != null
+                        && candidate.gameObject.activeInHierarchy
+                        && candidate.name.StartsWith("OwnerOption_", StringComparison.Ordinal));
+                yield return ClickWithInput(ownerButton);
+                yield return StartPartyPlayModeTestDriver.CompleteIfVisible();
+            }
+
+            lines.Add($"ownerSelected={ownerManager != null && ownerManager.CurrentOwnerActor != null}; timeScale={Time.timeScale:0.##}");
+        }
+
+        private IEnumerator ClickWithInput(Button button)
+        {
+            if (button == null || !button.gameObject.activeInHierarchy || !button.interactable || verificationMouse == null)
+            {
+                yield break;
+            }
+
+            RectTransform rect = button.GetComponent<RectTransform>();
+            Vector2 point = RectTransformUtility.WorldToScreenPoint(
+                null,
+                rect.TransformPoint(rect.rect.center));
+            verificationMouse.MakeCurrent();
+            InputSystem.QueueStateEvent(
+                verificationMouse,
+                new MouseState { position = point }.WithButton(MouseButton.Left, true));
+            yield return null;
+            yield return null;
+            verificationMouse.MakeCurrent();
+            InputSystem.QueueStateEvent(verificationMouse, new MouseState { position = point });
+            yield return null;
+            yield return null;
+        }
+
+        private static void ScrollContainingButton(Button button)
+        {
+            ScrollRect scroll = button != null ? button.GetComponentInParent<ScrollRect>() : null;
+            RectTransform target = button != null ? button.transform as RectTransform : null;
+            if (scroll == null || scroll.content == null || scroll.viewport == null || target == null)
+            {
+                return;
+            }
+
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(scroll.content);
+
+            Canvas.ForceUpdateCanvases();
+            float overflow = Mathf.Max(0f, scroll.content.rect.height - scroll.viewport.rect.height);
+            Bounds targetBounds = RectTransformUtility.CalculateRelativeRectTransformBounds(
+                scroll.viewport,
+                target);
+            if (overflow > 0.1f)
+            {
+                scroll.verticalNormalizedPosition = Mathf.Clamp01(
+                    scroll.verticalNormalizedPosition + targetBounds.center.y / overflow);
+            }
+
+            Canvas.ForceUpdateCanvases();
+        }
+
+        private static Button FindActiveButton(string name)
+        {
+            return UnityEngine.Object.FindObjectsByType<Button>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None)
+                .FirstOrDefault(candidate => candidate != null
+                    && candidate.gameObject.activeInHierarchy
+                    && candidate.name == name);
+        }
+
+        private static Button FindActiveTabButton(TabId tabId)
+        {
+            return UnityEngine.Object.FindObjectsByType<Button>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None)
+                .FirstOrDefault(candidate => candidate != null
+                    && candidate.gameObject.activeInHierarchy
+                    && candidate.TryGetComponent(out UITabButtonBinding binding)
+                    && binding.Id == tabId);
+        }
+
+        private static UIBuildingSelectButton FindBuildingSelectButton(
+            GridConstructTab constructTab,
+            int buildingId)
+        {
+            return constructTab != null
+                ? constructTab.GetComponentsInChildren<UIBuildingSelectButton>(true)
+                    .FirstOrDefault(candidate => candidate != null && candidate.id == buildingId)
+                : null;
+        }
+
+        private static Button FindCategoryButton(GridConstructTab constructTab, BuildingSO building)
+        {
+            if (constructTab == null || building == null)
+            {
+                return null;
+            }
+
+            BuildingCategory category = building.IsInteriorDoor
+                ? BuildingCategory.Wall
+                : building.category;
+            string categoryName = BuildingCategoryCatalog.GetDisplayName(category, string.Empty);
+            return constructTab.GetComponentsInChildren<Button>(true)
+                .FirstOrDefault(candidate => candidate != null
+                    && candidate.gameObject.activeInHierarchy
+                    && candidate.GetComponent<UIBuildingSelectButton>() == null
+                    && candidate.GetComponentInChildren<TMP_Text>(true)?.text == categoryName);
         }
 
         private void VerifyResearch(UITabManager manager, List<string> lines)
@@ -626,13 +863,310 @@ public static class P0FeatureSurfacePlayModeVerifier
             Canvas.ForceUpdateCanvases();
             bool startClicked = ClickFirst("P0Action_ResearchStart_");
             Canvas.ForceUpdateCanvases();
-            bool progressClicked = ClickFirstExact("P0Action_ResearchProgress");
+            bool progressShortcutPresent = FindActiveButton("P0Action_ResearchProgress") != null;
+            GameObject researchState = FindSceneObject("P0State_ResearchWorkSource");
+            bool researchStateVisible = researchState != null && researchState.activeInHierarchy;
             int afterTasks = research != null ? research.State.Tasks.Count : -1;
             int afterCompleted = research != null ? research.State.CompletedBlueprintIds.Count : -1;
             float afterProgress = GetActiveResearchProgress(research);
 
             lines.Add(
-                $"RESEARCH visible={IsTabActive(8)}; runtime={research != null}; progressClicked={progressClicked}; cancelClicked={cancelClicked}; startClicked={startClicked}; tasks={beforeTasks}->{afterTasks}; completed={beforeCompleted}->{afterCompleted}; progress={beforeProgress:0.##}->{afterProgress:0.##}; stateChanged={beforeTasks != afterTasks || beforeCompleted != afterCompleted || !Mathf.Approximately(beforeProgress, afterProgress)}");
+                $"RESEARCH visible={IsTabActive(8)}; runtime={research != null}; naturalStateVisible={researchStateVisible}; progressShortcutPresent={progressShortcutPresent}; cancelClicked={cancelClicked}; startClicked={startClicked}; tasks={beforeTasks}->{afterTasks}; completed={beforeCompleted}->{afterCompleted}; progress={beforeProgress:0.##}->{afterProgress:0.##}; queueChanged={beforeTasks != afterTasks}");
+        }
+
+        private IEnumerator VerifyNaturalResearchProgress(List<string> lines)
+        {
+            BlueprintResearchRuntime research = FindActiveSceneComponent<BlueprintResearchRuntime>();
+            float progressBefore = GetActiveResearchProgress(research);
+            int completedBefore = research?.State.CompletedBlueprintIds.Count ?? -1;
+            AppendResearchWorkerDiagnostics(lines, "before");
+            float originalScale = Time.timeScale;
+            bool changed = false;
+            const float naturalProgressionTimeoutSeconds = 15f;
+            float deadline = Time.realtimeSinceStartup + naturalProgressionTimeoutSeconds;
+
+            Time.timeScale = 5f;
+            try
+            {
+                while (Time.realtimeSinceStartup < deadline)
+                {
+                    yield return null;
+                    float currentProgress = GetActiveResearchProgress(research);
+                    int currentCompleted = research?.State.CompletedBlueprintIds.Count ?? -1;
+                    if (currentProgress > progressBefore + 0.001f || currentCompleted > completedBefore)
+                    {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                Time.timeScale = originalScale;
+            }
+
+            float progressAfter = GetActiveResearchProgress(research);
+            int completedAfter = research?.State.CompletedBlueprintIds.Count ?? -1;
+            int assignedResearchers = FindActiveWorkers()
+                .Count((work) => work != null && work.AssignedWorkType == FacilityWorkType.Research);
+            AppendResearchWorkerDiagnostics(lines, "after");
+            lines.Add(
+                $"NATURAL_RESEARCH changed={changed}; progress={progressBefore:0.##}->{progressAfter:0.##}; completed={completedBefore}->{completedAfter}; assignedResearchers={assignedResearchers}; publicProgressShortcut={FindActiveButton("P0Action_ResearchProgress") != null}");
+        }
+
+        private IEnumerator VerifyResearchConstructionUnlockThroughUi(List<string> lines)
+        {
+            BlueprintResearchRuntime research = FindActiveSceneComponent<BlueprintResearchRuntime>();
+            LifetimeScope scope = FindActiveSceneLifetimeScope();
+            IFacilityShopCatalog shopCatalog = scope?.Container?.Resolve(typeof(IFacilityShopCatalog))
+                as IFacilityShopCatalog;
+            IDataCatalog dataCatalog = scope?.Container?.Resolve(typeof(IDataCatalog)) as IDataCatalog;
+            IDungeonGridBuildingControllerProvider controllerProvider = scope?.Container?.Resolve(
+                    typeof(IDungeonGridBuildingControllerProvider))
+                as IDungeonGridBuildingControllerProvider;
+            GameManager gameManager = FindActiveSceneComponent<GameManager>();
+            GameData gameData = gameManager != null ? gameManager.gameData : null;
+
+            if (research == null
+                || shopCatalog == null
+                || dataCatalog == null
+                || controllerProvider?.Controller == null
+                || gameData == null)
+            {
+                Debug.LogError("Research construction unlock UI verification setup is incomplete.");
+                yield break;
+            }
+
+            IReadOnlyDictionary<int, BuildingSO> buildings = dataCatalog.GetData<BuildingSO>();
+            int currentPhase = FacilityProgression.GetCurrentPhase(gameData);
+            int unlockCountBefore = research.State.UnlockedBuildingIds.Count;
+            FacilityBlueprintSO blueprint = shopCatalog.Blueprints
+                .Where(candidate => candidate != null && !research.State.IsCompleted(candidate))
+                .FirstOrDefault(candidate => candidate.Unlocks
+                    .OfType<IBlueprintBuildingUnlock>()
+                    .Any(unlock => buildings.TryGetValue(unlock.BuildingId, out BuildingSO building)
+                        && building != null
+                        && building.IsModularFacility()
+                        && building.GetUnlockPhase() > currentPhase));
+            IBlueprintBuildingUnlock buildingUnlock = blueprint?.Unlocks
+                .OfType<IBlueprintBuildingUnlock>()
+                .FirstOrDefault(unlock => buildings.TryGetValue(
+                    unlock.BuildingId,
+                    out BuildingSO building)
+                    && building != null
+                    && building.IsModularFacility()
+                    && building.GetUnlockPhase() > currentPhase);
+            BuildingSO targetBuilding = buildingUnlock != null
+                && buildings.TryGetValue(buildingUnlock.BuildingId, out BuildingSO resolved)
+                    ? resolved
+                    : null;
+            Button constructionTabButton = FindActiveTabButton(TabId.Construction);
+
+            if (blueprint == null || targetBuilding == null || constructionTabButton == null)
+            {
+                string mappingSummary = string.Join(" || ", shopCatalog.Blueprints
+                    .OrderBy(candidate => candidate != null ? candidate.id : int.MaxValue)
+                    .Select(candidate =>
+                    {
+                        if (candidate == null)
+                        {
+                            return "null";
+                        }
+
+                        string rewards = string.Join(",", candidate.Unlocks
+                            .OfType<IBlueprintBuildingUnlock>()
+                            .Select(unlock => buildings.TryGetValue(
+                                    unlock.BuildingId,
+                                    out BuildingSO building)
+                                ? $"{unlock.BuildingId}:{building.objectName}:mod={building.IsModularFacility()}:p={building.GetUnlockPhase()}"
+                                : $"{unlock.BuildingId}:missing"));
+                        return $"{candidate.id}:{candidate.DisplayName}[{rewards}]";
+                    }));
+                lines.Add(
+                    $"RESEARCH_CONSTRUCTION_UI setupFailed=true; day={gameData.day.Value}; phase={currentPhase}; stateUnlocks={unlockCountBefore}; blueprints={shopCatalog.Blueprints.Count}; buildings={buildings.Count}");
+                lines.Add($"RESEARCH_CONSTRUCTION_MAPPINGS {mappingSummary}");
+                Debug.LogError("No locked modular research reward is available for public UI verification.");
+                yield break;
+            }
+
+            yield return ClickWithInput(constructionTabButton);
+            yield return null;
+
+            GridConstructTab constructTab = FindActiveSceneComponent<GridConstructTab>();
+            Button lockedCategoryButton = FindCategoryButton(constructTab, targetBuilding);
+            yield return ClickWithInput(lockedCategoryButton);
+            yield return null;
+
+            constructTab = FindActiveSceneComponent<GridConstructTab>();
+            bool lockedBefore = !FacilityProgression.IsUnlocked(targetBuilding, gameData, research.State);
+            UIBuildingSelectButton lockedSelectButton = FindBuildingSelectButton(
+                constructTab,
+                targetBuilding.id);
+            Button lockedUnityButton = lockedSelectButton != null
+                ? lockedSelectButton.GetComponent<Button>()
+                : null;
+            bool buttonDisabledBefore = lockedUnityButton != null && !lockedUnityButton.interactable;
+
+            constructionTabButton = FindActiveTabButton(TabId.Construction);
+            yield return ClickWithInput(constructionTabButton);
+            yield return null;
+
+            foreach (BlueprintResearchTask queued in research.State.Tasks.ToArray())
+            {
+                if (queued?.Blueprint != null && !queued.IsCompleted)
+                {
+                    research.TryCancelBlueprint(queued.Blueprint, out _);
+                }
+            }
+
+            research.ShopUnlockState.MarkBlueprintAcquired(blueprint);
+            bool queuedTarget = research.EnqueueBlueprint(blueprint);
+            BuildableObject researchFacility = FindActiveSceneComponents<BuildableObject>()
+                .FirstOrDefault(candidate => candidate != null
+                    && candidate.gameObject.activeInHierarchy
+                    && candidate.SupportsWork(FacilityWorkType.Research));
+            CharacterActor researcher = FindActiveWorkers()
+                .Select(worker => worker?.WorkerActor)
+                .FirstOrDefault(actor => actor != null && !actor.IsDead);
+            BlueprintResearchWorkResult completion = researchFacility != null
+                ? research.ApplyResearchWork(researcher, researchFacility, 999f)
+                : default;
+            yield return null;
+            yield return null;
+
+            bool unlockedAfter = research.State.IsBuildingUnlocked(targetBuilding.id)
+                && FacilityProgression.IsUnlocked(targetBuilding, gameData, research.State);
+            constructionTabButton = FindActiveTabButton(TabId.Construction);
+            yield return ClickWithInput(constructionTabButton);
+            yield return null;
+
+            constructTab = FindActiveSceneComponent<GridConstructTab>();
+            Button categoryButton = FindCategoryButton(constructTab, targetBuilding);
+            yield return ClickWithInput(categoryButton);
+            yield return null;
+
+            constructTab = FindActiveSceneComponent<GridConstructTab>();
+            UIBuildingSelectButton selectButton = FindBuildingSelectButton(constructTab, targetBuilding.id);
+            Button unitySelectButton = selectButton != null ? selectButton.GetComponent<Button>() : null;
+            bool buttonVisibleAfter = unitySelectButton != null
+                && unitySelectButton.gameObject.activeInHierarchy
+                && unitySelectButton.interactable;
+            yield return ClickWithInput(unitySelectButton);
+            yield return null;
+
+            DungeonStoryGridBuildingController controller = controllerProvider.Controller;
+            bool pointerSelected = controller.GridSystem.Mode == GridMode.Build
+                && controller.SelectedBuilding != null
+                && controller.SelectedBuilding.id == targetBuilding.id;
+            yield return CaptureTabAtEndOfFrame(
+                "Temp/p0-ui-research-construction-unlock.png",
+                lines);
+            bool passed = lockedBefore
+                && buttonDisabledBefore
+                && queuedTarget
+                && completion.Completed
+                && unlockedAfter
+                && categoryButton != null
+                && buttonVisibleAfter
+                && pointerSelected;
+
+            lines.Add(
+                $"RESEARCH_CONSTRUCTION_UI passed={passed}; blueprint={blueprint.DisplayName}; target={targetBuilding.objectName}#{targetBuilding.id}; day={gameData.day.Value}; phase={currentPhase}; stateUnlocks={unlockCountBefore}; lockedBefore={lockedBefore}; buttonDisabledBefore={buttonDisabledBefore}; queued={queuedTarget}; completed={completion.Completed}; unlockedAfter={unlockedAfter}; categoryPointer={categoryButton != null}; buttonVisibleAfter={buttonVisibleAfter}; selected={controller.SelectedBuilding?.id}; mode={controller.GridSystem.Mode}; pointerSelected={pointerSelected}");
+            if (!passed)
+            {
+                Debug.LogError("Research completion did not unlock and select its modular construction reward through public UI.");
+            }
+        }
+
+        private IEnumerator ConfigureResearchPriorityThroughUi(UITabManager manager, List<string> lines)
+        {
+            manager.ToggleSelectButton(2);
+            yield return null;
+
+            StaffWorkPriorityPanel panel = UnityEngine.Object.FindObjectsByType<StaffWorkPriorityPanel>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None)
+                .FirstOrDefault((candidate) => candidate != null && candidate.gameObject.activeInHierarchy);
+            panel?.Refresh();
+            yield return null;
+
+            AbilityWork target = FindActiveWorkers()
+                .Where((work) => work != null
+                    && work.WorkerActor != null
+                    && !work.WorkerActor.IsDead
+                    && work.WorkPriorities.IsEnabled(FacilityWorkType.Research))
+                .OrderByDescending((work) => work.WorkPriorities.GetPriority(FacilityWorkType.Research))
+                .FirstOrDefault();
+            WorkPriorityLevel before = target != null
+                ? target.WorkPriorities.GetPriority(FacilityWorkType.Research)
+                : WorkPriorityLevel.Off;
+            int pointerClicks = 0;
+            while (target != null
+                && target.WorkPriorities.GetPriority(FacilityWorkType.Research) != WorkPriorityLevel.Priority1
+                && pointerClicks < 4)
+            {
+                Button cell = FindActiveButton($"Cell_{target.WorkerActor.GetInstanceID()}_{FacilityWorkType.Research}");
+                if (cell == null)
+                {
+                    break;
+                }
+
+                yield return ClickWithInput(cell);
+                pointerClicks++;
+                panel?.Refresh();
+                yield return null;
+            }
+
+            WorkPriorityLevel after = target != null
+                ? target.WorkPriorities.GetPriority(FacilityWorkType.Research)
+                : WorkPriorityLevel.Off;
+            lines.Add(
+                $"RESEARCH_PRIORITY_UI panel={panel != null}; actor={target?.WorkerActor?.name ?? "none"}; priority={before}->{after}; pointerClicks={pointerClicks}; configured={after == WorkPriorityLevel.Priority1}");
+        }
+
+        private static void AppendResearchWorkerDiagnostics(List<string> lines, string phase)
+        {
+            foreach (AbilityWork work in FindActiveWorkers())
+            {
+                if (work == null)
+                {
+                    continue;
+                }
+
+                CharacterActor actor = work.WorkerActor;
+                GridPathSearchResult search = actor != null && actor.Brain != null
+                    ? actor.Brain.GetPathSearch(actor)
+                    : null;
+                bool found = work.TryGetBestWorkCandidate(
+                    FacilityWorkType.Research,
+                    search,
+                    out WorkTargetCandidate candidate);
+                bool foundClean = work.TryGetBestWorkCandidate(
+                    FacilityWorkType.Clean,
+                    search,
+                    out WorkTargetCandidate cleanCandidate);
+                bool foundAny = work.TryGetBestWorkCandidate(
+                    FacilityWorkType.None,
+                    search,
+                    out WorkTargetCandidate anyCandidate);
+                string rejected = work.TryGetLastRejectedWorkCandidate(out WorkTargetCandidate failure)
+                    ? $"{failure.FailureKind}:{failure.FailureReason}"
+                    : "none";
+                AIBrain brain = actor != null ? actor.Brain : null;
+                AIAction action = brain != null ? brain.bestAction : null;
+                BuildableObject assignedTarget = work.assignedShop;
+                lines.Add(
+                    $"RESEARCH_WORKER {phase}; actor={actor?.name ?? work.name}; active={work.gameObject.activeInHierarchy}; canRunAi={actor != null && actor.CanRunAi}; pos={(actor != null ? actor.GetNowXY().ToString() : "none")}; offDuty={work.IsOffDuty}; working={work.isWorking}; assigned={work.AssignedWorkType}:{assignedTarget?.name ?? "none"}@{(assignedTarget != null ? assignedTarget.centerPos.ToString() : "none")}; priority={work.WorkPriorities?.GetPriority(FacilityWorkType.Research)}; research={found}:{candidate.Building?.name ?? "none"}:{candidate.Score:0.##}; clean={foundClean}:{cleanCandidate.Building?.name ?? "none"}:{cleanCandidate.Score:0.##}; best={foundAny}:{anyCandidate.WorkType}:{anyCandidate.Building?.name ?? "none"}:{anyCandidate.Score:0.##}; action={brain?.CurrentActionDebugLabel ?? "none"}/{brain?.CurrentActionPhase ?? "none"}; running={(action != null ? action.RunningSeconds : -1f):0.##}; plan={(action != null ? action.planKind.ToString() : "none")}:{(action != null ? action.pathSteps.Count : -1)}; moveBlocked={work.WorkerMove != null && work.WorkerMove.LastGridMoveWasBlocked}; rejected={rejected}");
+            }
+        }
+
+        private static IReadOnlyList<AbilityWork> FindActiveWorkers()
+        {
+            return Resources.FindObjectsOfTypeAll<AbilityWork>()
+                .Where((work) => work != null
+                    && work.gameObject.scene.IsValid()
+                    && work.gameObject.activeInHierarchy)
+                .ToArray();
         }
 
         private FacilityBlueprintSO FindFirstBlueprint()
@@ -833,6 +1367,87 @@ public static class P0FeatureSurfacePlayModeVerifier
                 ?? scopes.FirstOrDefault((scope) => scope != null && scope.Container != null);
         }
 
+        private static GameObject FindSceneObject(string name)
+        {
+            return Resources.FindObjectsOfTypeAll<Transform>()
+                .Where(candidate => candidate != null && candidate.gameObject.scene.IsValid())
+                .Select(candidate => candidate.gameObject)
+                .FirstOrDefault(candidate => candidate.name == name);
+        }
+
+        private void ConfigureInput()
+        {
+            originalInputBehavior = InputSystem.settings.editorInputBehaviorInPlayMode;
+            InputSystem.settings.editorInputBehaviorInPlayMode =
+                InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+            originalMouse = Mouse.current;
+            if (originalMouse != null)
+            {
+                InputSystem.DisableDevice(originalMouse);
+            }
+
+            verificationMouse = InputSystem.AddDevice<Mouse>("P0FeatureSurfaceVerificationMouse");
+            verificationMouse.MakeCurrent();
+            inputConfigured = true;
+        }
+
+        private void BackupMetaProfile()
+        {
+            LifetimeScope scope = FindActiveSceneLifetimeScope();
+            IMetaProfileStore store = scope?.Container?.Resolve(typeof(IMetaProfileStore)) as IMetaProfileStore;
+            metaProfilePath = store?.ProfilePath;
+            metaProfileExisted = !string.IsNullOrWhiteSpace(metaProfilePath) && File.Exists(metaProfilePath);
+            metaProfileBackup = metaProfileExisted ? File.ReadAllBytes(metaProfilePath) : null;
+        }
+
+        private void RestoreMetaProfile()
+        {
+            if (string.IsNullOrWhiteSpace(metaProfilePath))
+            {
+                return;
+            }
+
+            if (!metaProfileExisted)
+            {
+                if (File.Exists(metaProfilePath))
+                {
+                    File.Delete(metaProfilePath);
+                }
+
+                return;
+            }
+
+            string directory = Path.GetDirectoryName(metaProfilePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllBytes(metaProfilePath, metaProfileBackup ?? Array.Empty<byte>());
+        }
+
+        private void TeardownInput()
+        {
+            if (!inputConfigured)
+            {
+                return;
+            }
+
+            if (verificationMouse != null && verificationMouse.added)
+            {
+                InputSystem.RemoveDevice(verificationMouse);
+            }
+
+            if (originalMouse != null && originalMouse.added)
+            {
+                InputSystem.EnableDevice(originalMouse);
+                originalMouse.MakeCurrent();
+            }
+
+            InputSystem.settings.editorInputBehaviorInPlayMode = originalInputBehavior;
+            inputConfigured = false;
+        }
+
         private void StartLogCapture()
         {
             capturedErrors.Clear();
@@ -883,21 +1498,32 @@ public static class P0FeatureSurfacePlayModeVerifier
             {
                 File.Delete(RequestPath);
             }
+
+            EditorApplication.ExitPlaymode();
         }
 
         private void DestroyTempObjects()
         {
             foreach (UnityEngine.Object obj in tempObjects.Where((item) => item != null).Reverse())
             {
-                if (Application.isPlaying)
+                if (obj == null)
                 {
-                    Destroy(obj);
+                    continue;
                 }
-                else
+
+                UnityEngine.Object target = obj is Component component ? component.gameObject : obj;
+                if (target is GameObject gameObject)
                 {
-                    DestroyImmediate(obj);
+                    gameObject.SetActive(false);
+                }
+
+                if (target != null)
+                {
+                    DestroyImmediate(target);
                 }
             }
+
+            tempObjects.Clear();
         }
 
         private static string CompactList(IReadOnlyList<string> values)

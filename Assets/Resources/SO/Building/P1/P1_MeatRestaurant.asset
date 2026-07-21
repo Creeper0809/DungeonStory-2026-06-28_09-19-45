@@ -40,6 +40,15 @@ MonoBehaviour:
   objectName: "\uACE0\uAE30 \uC2DD\uB2F9"
   sprite: {fileID: 21300000, guid: 379a1456b5d38ff13b1c19ba060791c4, type: 3}
   icon: {fileID: 21300000, guid: 379a1456b5d38ff13b1c19ba060791c4, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562978982527569
+    - rid: 7302562985835495557
+    - rid: 7302562985835495558
+    - rid: 7302562985835495559
+    - rid: 7302562985835495560
+    - rid: 7302562987322638438
+    - rid: 7302562987322638829
   width: 4
   height: 1
   layer: 1
@@ -48,62 +57,70 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 0
-  facility:
-    roles: 1
-    capacity: 2
-    useDuration: 1.6
-    internalStockMax: 16
-    restockRequestThreshold: 4
-    requiredWorkers: 1
-    supportedWorkTypes: 7
-    preferredSpeciesTags:
-    - Orc
-    dislikedSpeciesTags:
-    - Slime
-    disabledWhenDamaged: 1
-    requiresStock: 1
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 1
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Dining
-    - Cooking
-    - Meat
-    scores:
-    - key: Dining
-      value: 30
-    - key: Cooking
-      value: 24
-    - key: Meat
-      value: 24
-    - key: Service
-      value: 6
-    metrics:
-    - key: SeatCount
-      value: 4
-    - key: TableCount
-      value: 1
+  facilityAnchors:
+    slots: []
   unlocked: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562978982527569
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 1
+          capacity: 2
+          useDuration: 1.6
+          requiredWorkers: 1
+          supportedWorkTypes: 7
+          disabledWhenDamaged: 1
+    - rid: 7302562985835495557
+      type: {class: BuildingInternalStockAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingInternalStockAbility
+        capacity: 16
+        restockRequestThreshold: 4
+    - rid: 7302562985835495558
+      type: {class: BuildingRequiresStockAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRequiresStockAbility
+    - rid: 7302562985835495559
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562985835495560
+      type: {class: BuildingSelfContainedRoomAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSelfContainedRoomAbility
+    - rid: 7302562987322638438
+      type: {class: BuildingSpeciesAffinityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSpeciesAffinityAbility
+        preferredTags:
+        - Orc
+        dislikedTags:
+        - Slime
+    - rid: 7302562987322638829
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Dining
+          - Cooking
+          - Meat
+          scores:
+          - key: Dining
+            value: 30
+          - key: Cooking
+            value: 24
+          - key: Meat
+            value: 24
+          - key: Service
+            value: 6
+          metrics:
+          - key: SeatCount
+            value: 4
+          - key: TableCount
+            value: 1

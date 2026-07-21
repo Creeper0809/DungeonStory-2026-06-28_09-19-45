@@ -6,6 +6,7 @@ public sealed class MetaRunProgressTracker
 {
     private readonly HashSet<int> discoveredFacilityIds = new HashSet<int>();
     private readonly HashSet<string> unlockedRecipeIds = new HashSet<string>();
+    private readonly IReadOnlyCollection<string> unlockedRecipeIdsView;
 
     private float runStartTime;
     private int currentDay = 1;
@@ -15,7 +16,20 @@ public sealed class MetaRunProgressTracker
     private float finalInvasionThreat;
     private int offenseSuccessCount;
 
-    public IReadOnlyCollection<string> UnlockedRecipeIds => unlockedRecipeIds;
+    public MetaRunProgressTracker()
+    {
+        unlockedRecipeIdsView = ReadOnlyView.Collection(unlockedRecipeIds);
+    }
+
+    public IReadOnlyCollection<string> UnlockedRecipeIds => unlockedRecipeIdsView;
+    public IReadOnlyCollection<int> DiscoveredFacilityIds => discoveredFacilityIds;
+    public float ElapsedSeconds => Mathf.Max(0f, Time.time - runStartTime);
+    public int CurrentDay => currentDay;
+    public int SettlementCount => settlementCount;
+    public int DefendedInvasionCount => defendedInvasionCount;
+    public InvasionThreatStage MaxThreatStage => maxThreatStage;
+    public float FinalInvasionThreat => finalInvasionThreat;
+    public int OffenseSuccessCount => offenseSuccessCount;
 
     public void StartNewRun(float startTime)
     {
@@ -107,7 +121,10 @@ public sealed class MetaRunProgressTracker
         offenseSuccessCount++;
     }
 
-    public MetaRunResultBuildContext CreateResultContext(CharacterActor owner, string reason)
+    public MetaRunResultBuildContext CreateResultContext(
+        CharacterActor owner,
+        string reason,
+        DungeonRunOutcome outcome = DungeonRunOutcome.Defeat)
     {
         return new MetaRunResultBuildContext(
             owner,
@@ -120,7 +137,43 @@ public sealed class MetaRunProgressTracker
             finalInvasionThreat,
             discoveredFacilityIds.Count,
             unlockedRecipeIds.Count,
-            offenseSuccessCount);
+            offenseSuccessCount,
+            outcome);
+    }
+
+    public void Restore(
+        float elapsedSeconds,
+        int savedCurrentDay,
+        int savedSettlementCount,
+        int savedDefendedInvasionCount,
+        InvasionThreatStage savedMaxThreatStage,
+        float savedFinalInvasionThreat,
+        int savedOffenseSuccessCount,
+        IEnumerable<int> savedDiscoveredFacilityIds,
+        IEnumerable<string> savedUnlockedRecipeIds)
+    {
+        runStartTime = Time.time - Mathf.Max(0f, elapsedSeconds);
+        currentDay = Mathf.Max(1, savedCurrentDay);
+        settlementCount = Mathf.Max(0, savedSettlementCount);
+        defendedInvasionCount = Mathf.Max(0, savedDefendedInvasionCount);
+        maxThreatStage = savedMaxThreatStage;
+        finalInvasionThreat = Mathf.Max(0f, savedFinalInvasionThreat);
+        offenseSuccessCount = Mathf.Max(0, savedOffenseSuccessCount);
+        discoveredFacilityIds.Clear();
+        unlockedRecipeIds.Clear();
+
+        foreach (int id in savedDiscoveredFacilityIds ?? Array.Empty<int>())
+        {
+            if (id >= 0)
+            {
+                discoveredFacilityIds.Add(id);
+            }
+        }
+
+        foreach (string recipeId in savedUnlockedRecipeIds ?? Array.Empty<string>())
+        {
+            RecordRecipe(recipeId);
+        }
     }
 
     private void RecordRecipe(string recipeId)

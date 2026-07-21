@@ -1,56 +1,59 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
-public struct InvasionCombatFeedbackEvent
+public readonly struct InvasionCombatFeedbackEvent
 {
-    public string message;
-    public DefenseActivationReport defenseReport;
+    public string message { get; }
+    public DefenseActivationSnapshot defenseReport { get; }
 
-    public InvasionCombatFeedbackEvent(string message, DefenseActivationReport defenseReport)
+    public InvasionCombatFeedbackEvent(string message, DefenseActivationSnapshot defenseReport)
     {
         this.message = message ?? string.Empty;
         this.defenseReport = defenseReport;
     }
 
-    private static InvasionCombatFeedbackEvent e;
-
-    public static void Trigger(string message, DefenseActivationReport defenseReport)
+    public static void Trigger(string message, DefenseActivationSnapshot defenseReport)
     {
-        e.message = message ?? string.Empty;
-        e.defenseReport = defenseReport;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new InvasionCombatFeedbackEvent(message, defenseReport));
     }
 }
-public struct InvasionCombatReportReadyEvent
+public readonly struct InvasionCombatReportReadyEvent
 {
-    public InvasionCombatReport report;
+    public InvasionCombatReportSnapshot report { get; }
 
-    public InvasionCombatReportReadyEvent(InvasionCombatReport report)
+    public InvasionCombatReportReadyEvent(InvasionCombatReportSnapshot report)
     {
         this.report = report;
     }
 
-    private static InvasionCombatReportReadyEvent e;
-
-    public static void Trigger(InvasionCombatReport report)
+    public static void Trigger(InvasionCombatReportSnapshot report)
     {
-        e.report = report;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new InvasionCombatReportReadyEvent(report));
     }
 }
 
-public class InvasionCombatReport
+internal sealed class InvasionCombatReport
 {
     private readonly List<DefenseContribution> defenseContributions = new List<DefenseContribution>();
     private readonly List<BuildableObject> damagedFacilities = new List<BuildableObject>();
     private readonly List<string> observations = new List<string>();
     private readonly List<string> synergyLogs = new List<string>();
     private readonly List<string> activationLogs = new List<string>();
+    private readonly IReadOnlyList<DefenseContribution> defenseContributionsView;
+    private readonly IReadOnlyList<BuildableObject> damagedFacilitiesView;
+    private readonly IReadOnlyList<string> observationsView;
+    private readonly IReadOnlyList<string> synergyLogsView;
+    private readonly IReadOnlyList<string> activationLogsView;
 
     public InvasionCombatReport(InvasionThreatSnapshot snapshot)
     {
+        defenseContributionsView = defenseContributions.AsReadOnly();
+        damagedFacilitiesView = damagedFacilities.AsReadOnly();
+        observationsView = observations.AsReadOnly();
+        synergyLogsView = synergyLogs.AsReadOnly();
+        activationLogsView = activationLogs.AsReadOnly();
         ThreatSnapshot = snapshot;
         StartedAt = Time.time;
     }
@@ -64,11 +67,11 @@ public class InvasionCombatReport
     public float ResidualRisk { get; private set; }
     public bool IsResolved { get; private set; }
 
-    public IReadOnlyList<DefenseContribution> DefenseContributions => defenseContributions;
-    public IReadOnlyList<BuildableObject> DamagedFacilities => damagedFacilities;
-    public IReadOnlyList<string> Observations => observations;
-    public IReadOnlyList<string> SynergyLogs => synergyLogs;
-    public IReadOnlyList<string> ActivationLogs => activationLogs;
+    public IReadOnlyList<DefenseContribution> DefenseContributions => defenseContributionsView;
+    public IReadOnlyList<BuildableObject> DamagedFacilities => damagedFacilitiesView;
+    public IReadOnlyList<string> Observations => observationsView;
+    public IReadOnlyList<string> SynergyLogs => synergyLogsView;
+    public IReadOnlyList<string> ActivationLogs => activationLogsView;
 
     public DefenseContribution TopDamageContribution => defenseContributions
         .Where((item) => item.TotalDamage > 0f)
@@ -80,23 +83,50 @@ public class InvasionCombatReport
         .OrderByDescending((item) => item.MaxDelaySeconds)
         .FirstOrDefault();
 
-    public IReadOnlyList<BuildableObject> BrokenFacilities => damagedFacilities
+    public IReadOnlyList<BuildableObject> BrokenFacilities => Array.AsReadOnly(damagedFacilities
         .Where((facility) => facility != null && facility.IsDamaged)
-        .ToList();
+        .ToArray());
+
+    public InvasionCombatReportSnapshot CreateSnapshot()
+    {
+        DefenseContributionSnapshot[] contributions = defenseContributions
+            .Select((item) => new DefenseContributionSnapshot(item))
+            .ToArray();
+        InvasionFacilitySnapshot[] facilities = damagedFacilities
+            .Where((facility) => facility != null)
+            .Select((facility) => new InvasionFacilitySnapshot(facility))
+            .ToArray();
+
+        return new InvasionCombatReportSnapshot(
+            ThreatSnapshot,
+            StartedAt,
+            Intruder != null ? Intruder.name : string.Empty,
+            FinalCombatOwner != null ? FinalCombatOwner.name : string.Empty,
+            FinalCombatStarted,
+            Defended,
+            ResidualRisk,
+            IsResolved,
+            contributions,
+            facilities,
+            observations,
+            synergyLogs,
+            activationLogs,
+            ToDetailText());
+    }
 
     public void SetIntruder(CharacterActor intruder)
     {
         Intruder = intruder;
     }
 
-    public void RecordDefenseActivation(DefenseActivationReport report)
+    public void RecordDefenseActivation(DefenseActivationSnapshot report)
     {
         if (report == null || report.Facility == null)
         {
             return;
         }
 
-        DefenseContribution contribution = FindOrCreateContribution(report.Facility);
+        DefenseContribution contribution = FindOrCreateContribution(report);
         contribution.Add(report);
 
         string activation = InvasionCombatReportFormatter.FormatActivation(report);
@@ -179,15 +209,16 @@ public class InvasionCombatReport
         return string.Join("\n", lines);
     }
 
-    private DefenseContribution FindOrCreateContribution(DefenseFacility facility)
+    private DefenseContribution FindOrCreateContribution(DefenseActivationSnapshot report)
     {
-        DefenseContribution contribution = defenseContributions.FirstOrDefault((item) => item.Facility == facility);
+        DefenseContribution contribution = defenseContributions.FirstOrDefault((item) =>
+            item.FacilityRuntimeId == report.FacilityRuntimeId);
         if (contribution != null)
         {
             return contribution;
         }
 
-        contribution = new DefenseContribution(facility);
+        contribution = new DefenseContribution(report);
         defenseContributions.Add(contribution);
         return contribution;
     }
@@ -259,23 +290,134 @@ public class InvasionCombatReport
     }
 }
 
-public class DefenseContribution
+public sealed class InvasionFacilitySnapshot
 {
-    private readonly List<string> effectTags = new List<string>();
-
-    public DefenseContribution(DefenseFacility facility)
+    internal InvasionFacilitySnapshot(BuildableObject facility)
     {
-        Facility = facility;
+        Building = facility != null ? facility.BuildingData : null;
+        Name = InvasionCombatReportFormatter.GetBuildingName(facility);
+        WasDamaged = facility != null && facility.IsDamaged;
     }
 
-    public DefenseFacility Facility { get; }
+    public BuildingSO Building { get; }
+    public string Name { get; }
+    public bool WasDamaged { get; }
+}
+
+public sealed class DefenseContributionSnapshot
+{
+    internal DefenseContributionSnapshot(DefenseContribution source)
+    {
+        Facility = source?.Facility;
+        FacilityName = source?.FacilityName ?? string.Empty;
+        TotalDamage = source?.TotalDamage ?? 0f;
+        MaxDelaySeconds = source?.MaxDelaySeconds ?? 0f;
+        TriggerCount = source?.TriggerCount ?? 0;
+        EffectTags = EventPayloadSnapshot.Copy(source?.EffectTags);
+    }
+
+    public BuildingSO Facility { get; }
+    public string FacilityName { get; }
+    public float TotalDamage { get; }
+    public float MaxDelaySeconds { get; }
+    public int TriggerCount { get; }
+    public IReadOnlyList<string> EffectTags { get; }
+}
+
+public sealed class InvasionCombatReportSnapshot
+{
+    internal InvasionCombatReportSnapshot(
+        InvasionThreatSnapshot threatSnapshot,
+        float startedAt,
+        string intruderName,
+        string finalCombatOwnerName,
+        bool finalCombatStarted,
+        bool defended,
+        float residualRisk,
+        bool isResolved,
+        IReadOnlyList<DefenseContributionSnapshot> defenseContributions,
+        IReadOnlyList<InvasionFacilitySnapshot> damagedFacilities,
+        IReadOnlyList<string> observations,
+        IReadOnlyList<string> synergyLogs,
+        IReadOnlyList<string> activationLogs,
+        string detailText)
+    {
+        ThreatSnapshot = threatSnapshot;
+        StartedAt = startedAt;
+        IntruderName = intruderName ?? string.Empty;
+        FinalCombatOwnerName = finalCombatOwnerName ?? string.Empty;
+        FinalCombatStarted = finalCombatStarted;
+        Defended = defended;
+        ResidualRisk = Mathf.Max(0f, residualRisk);
+        IsResolved = isResolved;
+        DefenseContributions = EventPayloadSnapshot.Copy(defenseContributions);
+        DamagedFacilities = EventPayloadSnapshot.Copy(damagedFacilities);
+        BrokenFacilities = EventPayloadSnapshot.Copy(
+            damagedFacilities?
+                .Where((facility) => facility != null && facility.WasDamaged)
+                .ToArray());
+        Observations = EventPayloadSnapshot.Copy(observations);
+        SynergyLogs = EventPayloadSnapshot.Copy(synergyLogs);
+        ActivationLogs = EventPayloadSnapshot.Copy(activationLogs);
+        this.detailText = detailText ?? string.Empty;
+
+        TopDamageContribution = DefenseContributions
+            .Where((item) => item != null && item.TotalDamage > 0f)
+            .OrderByDescending((item) => item.TotalDamage)
+            .FirstOrDefault();
+        TopDelayContribution = DefenseContributions
+            .Where((item) => item != null && item.MaxDelaySeconds > 0f)
+            .OrderByDescending((item) => item.MaxDelaySeconds)
+            .FirstOrDefault();
+    }
+
+    private readonly string detailText;
+
+    public InvasionThreatSnapshot ThreatSnapshot { get; }
+    public float StartedAt { get; }
+    public string IntruderName { get; }
+    public string FinalCombatOwnerName { get; }
+    public bool FinalCombatStarted { get; }
+    public bool Defended { get; }
+    public float ResidualRisk { get; }
+    public bool IsResolved { get; }
+    public IReadOnlyList<DefenseContributionSnapshot> DefenseContributions { get; }
+    public IReadOnlyList<InvasionFacilitySnapshot> DamagedFacilities { get; }
+    public IReadOnlyList<InvasionFacilitySnapshot> BrokenFacilities { get; }
+    public IReadOnlyList<string> Observations { get; }
+    public IReadOnlyList<string> SynergyLogs { get; }
+    public IReadOnlyList<string> ActivationLogs { get; }
+    public DefenseContributionSnapshot TopDamageContribution { get; }
+    public DefenseContributionSnapshot TopDelayContribution { get; }
+
+    public string ToDetailText()
+    {
+        return detailText;
+    }
+}
+
+internal sealed class DefenseContribution
+{
+    private readonly List<string> effectTags = new List<string>();
+    private readonly IReadOnlyList<string> effectTagsView;
+
+    public DefenseContribution(DefenseActivationSnapshot report)
+    {
+        effectTagsView = effectTags.AsReadOnly();
+        Facility = report?.Facility;
+        FacilityRuntimeId = report?.FacilityRuntimeId ?? 0;
+        FacilityName = report?.FacilityName ?? string.Empty;
+    }
+
+    public BuildingSO Facility { get; }
+    public int FacilityRuntimeId { get; }
     public float TotalDamage { get; private set; }
     public float MaxDelaySeconds { get; private set; }
     public int TriggerCount { get; private set; }
-    public IReadOnlyList<string> EffectTags => effectTags;
-    public string FacilityName => InvasionCombatReportFormatter.GetBuildingName(Facility);
+    public IReadOnlyList<string> EffectTags => effectTagsView;
+    public string FacilityName { get; }
 
-    public void Add(DefenseActivationReport report)
+    public void Add(DefenseActivationSnapshot report)
     {
         if (report == null)
         {
@@ -298,7 +440,7 @@ public class DefenseContribution
 
 public static class InvasionCombatReportFormatter
 {
-    public static string FormatActivation(DefenseActivationReport report)
+    public static string FormatActivation(DefenseActivationSnapshot report)
     {
         if (report == null || report.Facility == null)
         {
@@ -307,7 +449,7 @@ public static class InvasionCombatReportFormatter
 
         List<string> parts = new List<string>
         {
-            $"{GetBuildingName(report.Facility)} 발동"
+            $"{report.FacilityName} 발동"
         };
 
         if (report.TotalDamage > 0f)
@@ -374,14 +516,14 @@ public static class InvasionCombatReportFormatter
         return $"관찰: {normalized}";
     }
 
-    public static string FormatSynergy(DefenseActivationReport report)
+    public static string FormatSynergy(DefenseActivationSnapshot report)
     {
         if (report == null)
         {
             return string.Empty;
         }
 
-        string facilityName = GetBuildingName(report.Facility);
+        string facilityName = report.FacilityName;
         IReadOnlyList<string> tags = report.EffectTags;
         if (report.Concept == DefenseAttackConcept.Guard || tags.Any((tag) => tag.Contains("경비")))
         {

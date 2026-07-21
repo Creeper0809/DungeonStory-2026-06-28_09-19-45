@@ -9,12 +9,10 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 85198d4daa4dfb28ab223af0b037f1b6, type: 3}
+  m_Script: {fileID: 11500000, guid: 5e9ff0bb03ce4f1498afc7c178f2f87f, type: 3}
   m_Name: P1_CorrosionFreezer_3_Slow
-  m_EditorClassIdentifier: Assembly-CSharp::DefenseEffectSO
-  effect:
-    kind: 4
-    amount: 0.75
-    duration: 5
-    stacks: 1
-    logTag: "\uAC10\uC18D"
+  m_EditorClassIdentifier: Assembly-CSharp::DefenseSlowEffectSO
+  amount: 0.75
+  duration: 5
+  stacks: 1
+  logTag: "\uAC10\uC18D"

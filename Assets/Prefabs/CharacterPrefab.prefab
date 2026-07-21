@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 7442301706295112937}
   - component: {fileID: 9157544538988637050}
   - component: {fileID: 3088518949786441221}
-  - component: {fileID: 1518636516231926821}
   - component: {fileID: 632682312097462272}
   - component: {fileID: -6387031254453763657}
   - component: {fileID: -6030344698723765051}
@@ -28,6 +27,7 @@ GameObject:
   - component: {fileID: 2739592538648942395}
   - component: {fileID: 7586730358295892990}
   - component: {fileID: 2916327639639527830}
+  - component: {fileID: 8090790671964402091}
   m_Layer: 0
   m_Name: CharacterPrefab
   m_TagString: Character
@@ -146,39 +146,6 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
---- !u!114 &1518636516231926821
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3240235570985505524}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8edba9721b64c82458e81175b2eee3aa, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  serializationData:
-    SerializedFormat: 2
-    SerializedBytes: 
-    ReferencedUnityObjects: []
-    SerializedBytesString: 
-    Prefab: {fileID: 0}
-    PrefabModificationsReferencedUnityObjects: []
-    PrefabModifications: []
-    SerializationNodes: []
-  noExit: {fileID: 0}
-  identity: {fileID: 0}
-  abilityCache: {fileID: 0}
-  characterStats: {fileID: 0}
-  visual: {fileID: 0}
-  lifecycle: {fileID: 0}
-  characterLog: {fileID: 0}
-  blackboard: {fileID: 0}
-  personaRuntime: {fileID: 0}
-  dialogueRuntime: {fileID: 0}
-  socialMemory: {fileID: 0}
-  behaviorTree: {fileID: 0}
 --- !u!114 &632682312097462272
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -207,6 +174,7 @@ MonoBehaviour:
   data: {fileID: 0}
   characterType: 0
   role: 0
+  persistentId: 
 --- !u!114 &-6387031254453763657
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -273,25 +241,15 @@ MonoBehaviour:
     SerializationNodes: []
   availableActions:
   - actionset: {fileID: 11400000, guid: 7135b8e3960399447af8f4e294df54af, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   - actionset: {fileID: 11400000, guid: e4c3c69b221b2814c9558ac87d89e60e, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   - actionset: {fileID: 11400000, guid: 1e9be18b3b8179558b2b3115fb04d54d, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   - actionset: {fileID: 11400000, guid: 7348bf09bed06514db1a42e5fa42af95, type: 2}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: 0
   bestAction:
     actionset: {fileID: 0}
-    destination: {fileID: 0}
-    planKind: 0
     startedAt: -1
   isBestActionEnd: 1
   isExecuted: 0
@@ -409,6 +367,9 @@ MonoBehaviour:
   stats: {fileID: 0}
   log: {fileID: 0}
   lifecycleState: 0
+  aiPaused: 0
+  expeditionRecovery:
+    stress: 0
 --- !u!114 &726097687196488960
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -431,6 +392,7 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   log: []
+  activities: []
 --- !u!114 &673803912563292916
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -454,6 +416,7 @@ MonoBehaviour:
     SerializationNodes: []
   noExit: {fileID: 0}
   identity: {fileID: 0}
+  progression: {fileID: 0}
   abilityCache: {fileID: 0}
   characterStats: {fileID: 0}
   visual: {fileID: 0}
@@ -739,6 +702,79 @@ MonoBehaviour:
   facilitySentimentDebug: []
   characterSentimentDebug: []
   sourceTrustDebug: []
+--- !u!114 &8090790671964402091
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3240235570985505524}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: badabbf33eed2ae46b77a5f13883bc2d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterProgression
+  level: 1
+  currentExperience: 0
+  growthState:
+    initialized: 0
+    autoChooseDrafts: 0
+    potentialGrade: 0
+    generationSeed: 0
+    origin: 
+    displayName: 
+    initialBaseStats:
+      entries:
+      - statId: stat:attack
+        value: 5
+      - statId: stat:sales
+        value: 5
+      - statId: stat:research
+        value: 5
+      - statId: stat:move-speed
+        value: 5
+      - statId: stat:strength
+        value: 5
+      - statId: stat:toughness
+        value: 5
+      - statId: stat:dexterity
+        value: 5
+      - statId: stat:cleaning
+        value: 5
+      - statId: stat:endurance
+        value: 5
+    levelGrowthStats:
+      entries: []
+    traitIds: 
+    activeSkills: []
+    passiveSkills: []
+    ultimate:
+      id: 
+      displayName: 
+      description: 
+      narrativeReason: 
+      kind: 0
+      rarity: 0
+      trigger: 0
+      target: 0
+      ultimateDomain: 0
+      cooldownTurns: 0
+      usableFrom: 7
+      targetPositions: 7
+      modules: []
+      requestKey: 
+    drafts: []
+    pendingRequestKeys: []
+    allocationRecords: []
+    useLimits:
+      offenseBattleSerial: -1
+      defenseInvasionSerial: -1
+      managementOperatingDay: -1
+    allocatedGrowthPoints: 0
+    nextActiveDraftHasPity: 0
+    skillGenerationRevision: 0
+  narrativeLedger:
+    facts: []
 --- !u!1 &7074455978653400085
 GameObject:
   m_ObjectHideFlags: 0

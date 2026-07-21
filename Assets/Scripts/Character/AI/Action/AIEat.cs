@@ -5,6 +5,12 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Eat", order = 0)]
 public class AIEat : AIActionSet
 {
+    private static readonly CharacterAiActionDescriptor ActionDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.Eat,
+        "식사",
+        CharacterAiActionTags.SelfCare);
+
+    public override CharacterAiActionDescriptor Descriptor => ActionDescriptor;
     public override bool CanStart(CharacterActor actor)
     {
         return CanUseVisitorAction(actor);
@@ -42,11 +48,11 @@ public class AIEat : AIActionSet
             FacilityScoringContext.RequireFromActor(actor));
     }
 
-    public override bool TryResolveDestination(
+    public override bool TryResolveDestinationWithFailure(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
-        out string failureReason)
+        out AIActionFailure failure)
     {
         if (FacilityCandidateScorer.TrySelectBest(
             actor,
@@ -55,11 +61,11 @@ public class AIEat : AIActionSet
             FacilityScoringContext.RequireFromActor(actor),
             out destination))
         {
-            failureReason = string.Empty;
+            failure = AIActionFailure.None;
             return true;
         }
 
-        failureReason = "목적지 없음";
+        failure = AIActionFailure.Create(AIActionFailureKind.NoDestination);
         return false;
     }
 
@@ -79,9 +85,9 @@ public class AIEat : AIActionSet
             return true;
         }
 
-        failure = AIActionFailure.FromReason(
-            failureReason,
+        failure = AIActionFailure.Create(
             AIActionFailureKind.DestinationOccupied,
+            failureReason,
             destination);
         return false;
     }

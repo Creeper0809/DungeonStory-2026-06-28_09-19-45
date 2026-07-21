@@ -1,15 +1,33 @@
+using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using UnityEngine;
 
 public sealed class OffenseRewardGrantResult
 {
-    public OffenseRewardCategory category;
-    public string label;
-    public int requestedAmount;
-    public int grantedAmount;
-    public bool success;
-    public string detail;
+    public OffenseRewardGrantResult(
+        OffenseRewardCategory category,
+        string label,
+        int requestedAmount,
+        int grantedAmount,
+        bool success,
+        string detail)
+    {
+        this.category = category;
+        this.label = label ?? string.Empty;
+        this.requestedAmount = Mathf.Max(0, requestedAmount);
+        this.grantedAmount = Mathf.Max(0, grantedAmount);
+        this.success = success;
+        this.detail = detail ?? string.Empty;
+    }
+
+    public OffenseRewardCategory category { get; }
+    public string label { get; }
+    public int requestedAmount { get; }
+    public int grantedAmount { get; }
+    public bool success { get; }
+    public string detail { get; }
 
     public string ToSummaryText()
     {
@@ -26,11 +44,30 @@ public sealed class OffenseRewardGrantResult
     }
 }
 
-public sealed class OffenseRewardState
+public interface IOffenseRewardStateView
+{
+    int MoneyEarned { get; }
+    int HumanFactionWeakening { get; }
+    int RivalFactionWeakening { get; }
+    int RecruitCandidateCount { get; }
+    int PrisonerCount { get; }
+    int SpecialMonsterCount { get; }
+    IReadOnlyDictionary<StockCategory, int> StockGrantedByCategory { get; }
+    IReadOnlyCollection<int> RareFacilityBuildingIds { get; }
+    IReadOnlyCollection<int> AcquiredBlueprintIds { get; }
+}
+
+public sealed class OffenseRewardState : IOffenseRewardStateView
 {
     private readonly Dictionary<StockCategory, int> stockGrantedByCategory = new Dictionary<StockCategory, int>();
     private readonly HashSet<int> rareFacilityBuildingIds = new HashSet<int>();
     private readonly HashSet<int> acquiredBlueprintIds = new HashSet<int>();
+    private readonly IReadOnlyDictionary<StockCategory, int> stockGrantedView;
+
+    public OffenseRewardState()
+    {
+        stockGrantedView = new ReadOnlyDictionary<StockCategory, int>(stockGrantedByCategory);
+    }
 
     public int MoneyEarned { get; private set; }
     public int HumanFactionWeakening { get; private set; }
@@ -38,11 +75,11 @@ public sealed class OffenseRewardState
     public int RecruitCandidateCount { get; private set; }
     public int PrisonerCount { get; private set; }
     public int SpecialMonsterCount { get; private set; }
-    public IReadOnlyDictionary<StockCategory, int> StockGrantedByCategory => stockGrantedByCategory;
-    public IReadOnlyCollection<int> RareFacilityBuildingIds => rareFacilityBuildingIds;
-    public IReadOnlyCollection<int> AcquiredBlueprintIds => acquiredBlueprintIds;
+    public IReadOnlyDictionary<StockCategory, int> StockGrantedByCategory => stockGrantedView;
+    public IReadOnlyCollection<int> RareFacilityBuildingIds => rareFacilityBuildingIds.ToArray();
+    public IReadOnlyCollection<int> AcquiredBlueprintIds => acquiredBlueprintIds.ToArray();
 
-    public void Reset()
+    internal void Reset()
     {
         MoneyEarned = 0;
         HumanFactionWeakening = 0;
@@ -55,12 +92,45 @@ public sealed class OffenseRewardState
         acquiredBlueprintIds.Clear();
     }
 
-    public void RecordMoney(int amount)
+    internal void Restore(
+        int moneyEarned,
+        int humanFactionWeakening,
+        int rivalFactionWeakening,
+        int recruitCandidateCount,
+        int prisonerCount,
+        int specialMonsterCount,
+        IReadOnlyDictionary<StockCategory, int> restoredStock,
+        IEnumerable<int> restoredRareFacilityIds,
+        IEnumerable<int> restoredBlueprintIds)
+    {
+        Reset();
+        MoneyEarned = Mathf.Max(0, moneyEarned);
+        HumanFactionWeakening = Mathf.Max(0, humanFactionWeakening);
+        RivalFactionWeakening = Mathf.Max(0, rivalFactionWeakening);
+        RecruitCandidateCount = Mathf.Max(0, recruitCandidateCount);
+        PrisonerCount = Mathf.Max(0, prisonerCount);
+        SpecialMonsterCount = Mathf.Max(0, specialMonsterCount);
+        if (restoredStock != null)
+        {
+            foreach (KeyValuePair<StockCategory, int> pair in restoredStock)
+            {
+                if (pair.Value > 0)
+                {
+                    stockGrantedByCategory[pair.Key] = pair.Value;
+                }
+            }
+        }
+
+        rareFacilityBuildingIds.UnionWith(restoredRareFacilityIds ?? Array.Empty<int>());
+        acquiredBlueprintIds.UnionWith(restoredBlueprintIds ?? Array.Empty<int>());
+    }
+
+    internal void RecordMoney(int amount)
     {
         MoneyEarned += Mathf.Max(0, amount);
     }
 
-    public void RecordStock(StockCategory category, int amount)
+    internal void RecordStock(StockCategory category, int amount)
     {
         int safeAmount = Mathf.Max(0, amount);
         if (safeAmount <= 0) return;
@@ -70,17 +140,17 @@ public sealed class OffenseRewardState
             : safeAmount;
     }
 
-    public bool RecordRareFacility(BuildingSO building)
+    internal bool RecordRareFacility(BuildingSO building)
     {
         return building != null && rareFacilityBuildingIds.Add(building.id);
     }
 
-    public bool RecordBlueprint(FacilityBlueprintSO blueprint)
+    internal bool RecordBlueprint(FacilityBlueprintSO blueprint)
     {
         return blueprint != null && acquiredBlueprintIds.Add(blueprint.id);
     }
 
-    public void RecordFactionWeakening(bool humanFaction, int amount)
+    internal void RecordFactionWeakening(bool humanFaction, int amount)
     {
         int safeAmount = Mathf.Max(0, amount);
         if (humanFaction)
@@ -93,17 +163,17 @@ public sealed class OffenseRewardState
         }
     }
 
-    public void RecordRecruitCandidates(int amount)
+    internal void RecordRecruitCandidates(int amount)
     {
         RecruitCandidateCount += Mathf.Max(0, amount);
     }
 
-    public void RecordPrisoners(int amount)
+    internal void RecordPrisoners(int amount)
     {
         PrisonerCount += Mathf.Max(0, amount);
     }
 
-    public void RecordSpecialMonsters(int amount)
+    internal void RecordSpecialMonsters(int amount)
     {
         SpecialMonsterCount += Mathf.Max(0, amount);
     }

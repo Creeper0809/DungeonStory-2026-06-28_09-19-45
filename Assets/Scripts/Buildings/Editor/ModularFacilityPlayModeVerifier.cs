@@ -10,6 +10,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 
 public static class ModularFacilityPlayModeVerifier
@@ -58,6 +59,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
     private GridConstructTab constructTab;
     private DungeonStoryGridGhostPresenter ghostPresenter;
     private GridUIManager gridUi;
+    private BuildingSummaryInfo buildingSummary;
     private Grid grid;
     private GridBuildingPlacementService placementService;
     private Camera mainCamera;
@@ -92,6 +94,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
         constructTab = UnityEngine.Object.FindFirstObjectByType<GridConstructTab>(FindObjectsInactive.Include);
         ghostPresenter = UnityEngine.Object.FindFirstObjectByType<DungeonStoryGridGhostPresenter>();
         gridUi = UnityEngine.Object.FindFirstObjectByType<GridUIManager>(FindObjectsInactive.Include);
+        buildingSummary = UnityEngine.Object.FindFirstObjectByType<BuildingSummaryInfo>(FindObjectsInactive.Include);
         mainCamera = Camera.main;
         LockCameraMovement();
         grid = controller != null ? controller.GridSystem?.grid : null;
@@ -199,7 +202,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
         BuildingSO phase3 = LoadPart(1049, "G06");
         Check(phase1 != null && phase2 != null && phase3 != null,
             "ECONOMY_PHASE_DATA",
-            $"p1={phase1?.Operational.code}; p2={phase2?.Operational.code}; p3={phase3?.Operational.code}");
+            $"p1={phase1.GetFacilityCode()}; p2={phase2.GetFacilityCode()}; p3={phase3.GetFacilityCode()}");
         if (phase1 == null || phase2 == null || phase3 == null)
         {
             yield break;
@@ -274,7 +277,8 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
             yield break;
         }
 
-        int poorMoney = Mathf.Max(0, phase2.Operational.constructionCost - 1);
+        int phase2Cost = phase2.GetConstructionCost();
+        int poorMoney = Mathf.Max(0, phase2Cost - 1);
         gameData.holdingMoney.Value = poorMoney;
         yield return null;
         yield return null;
@@ -307,21 +311,21 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
             "ECONOMY_POOR_PLACEMENT_REJECTED",
             $"occupant={poorOccupant?.id}; money={beforePoorClick}->{gameData.holdingMoney.Value}; "
             + $"mode={controller.GridSystem.Mode}; selected={controller.SelectedBuilding?.id}");
-        Check(noticeText.Contains(phase2.Operational.constructionCost.ToString(), StringComparison.Ordinal)
+        Check(noticeText.Contains(phase2Cost.ToString(), StringComparison.Ordinal)
                 && noticeText.Contains(poorMoney.ToString(), StringComparison.Ordinal),
             "ECONOMY_POOR_NOTICE",
             noticeText);
         yield return CaptureScreen(ModularFacilityPlayModeVerifier.EconomyCapturePath, "ECONOMY_SCREEN_CAPTURE");
 
         controller.SetGridModeNone();
-        gameData.holdingMoney.Value = phase2.Operational.constructionCost + 10;
+        gameData.holdingMoney.Value = phase2Cost + 10;
         yield return SelectPartThroughUi(phase2, phase2.category, captureCatalog: false);
         int beforeSuccessfulBuild = gameData.holdingMoney.Value;
         yield return PlaceSelectedPart(phase2, position);
         BuildableObject placed = grid.GetGridCell(position)?.GetOccupant(phase2.layer) as BuildableObject;
         Check(placed != null && placed.id == phase2.id && gameData.holdingMoney.Value == 10,
             "ECONOMY_EXACT_DEDUCTION",
-            $"money={beforeSuccessfulBuild}->{gameData.holdingMoney.Value}; cost={phase2.Operational.constructionCost}");
+            $"money={beforeSuccessfulBuild}->{gameData.holdingMoney.Value}; cost={phase2Cost}");
 
         int beforeRefund = gameData.holdingMoney.Value;
         yield return DemolishPlacedPartThroughPointer(phase2, position);
@@ -388,8 +392,8 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
             ? item.transform.Find("Label")?.GetComponent<TMP_Text>()
             : null;
         bool valid = label != null
-            && label.text.Contains(part.Operational.constructionCost.ToString(), StringComparison.Ordinal)
-            && label.text.Contains($"P{part.Operational.unlockPhase}", StringComparison.Ordinal);
+            && label.text.Contains(part.GetConstructionCost().ToString(), StringComparison.Ordinal)
+            && label.text.Contains($"P{part.GetUnlockPhase()}", StringComparison.Ordinal);
         Check(valid,
             "ECONOMY_LABEL_" + suffix,
             label != null ? label.text.Replace('\n', ' ') : "label missing");
@@ -502,7 +506,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
             FacilityRole facilityRoles = instances.Aggregate(
                 FacilityRole.None,
                 (roles, part) => roles | (part.Facility?.roles ?? FacilityRole.None));
-            RoomRole expectedRoles = RoomRoleUtility.FromFacilityRoles(facilityRoles);
+            FacilityRole expectedRoles = (facilityRoles);
             List<IGridOccupant> reachable = room != null && room.Doors.Count > 0
                 ? grid.GetAllReachableOccupants(room.Doors[0].centerPos)
                 : new List<IGridOccupant>();
@@ -532,7 +536,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
                 && room.IsUsable
                 && !room.IsSelfContained
                 && room.HasDoor
-                && expectedRoles != RoomRole.None
+                && expectedRoles != FacilityRole.None
                 && room.Roles == expectedRoles
                 && roleMembership
                 && supportMembership
@@ -853,15 +857,15 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
             }
 
             placed++;
-            int expectedAfterPlacement = beforePlacementMoney - part.Operational.constructionCost;
+            int expectedAfterPlacement = beforePlacementMoney - part.GetConstructionCost();
             Check(gameData.holdingMoney.Value == expectedAfterPlacement,
                 "EXHAUSTIVE_COST_" + part.id,
-                $"money={beforePlacementMoney}->{gameData.holdingMoney.Value}; cost={part.Operational.constructionCost}");
-            Check(instance.Operational != null
-                    && instance.Operational.code == part.Operational.code
+                $"money={beforePlacementMoney}->{gameData.holdingMoney.Value}; cost={part.GetConstructionCost()}");
+            Check(instance.BuildingData != null
+                    && instance.BuildingData.GetFacilityCode() == part.GetFacilityCode()
                     && instance.buildPoses.SequenceEqual(part.GetGridPosList(position)),
                 "EXHAUSTIVE_RUNTIME_" + part.id,
-                $"code={instance.Operational?.code}; footprint={instance.buildPoses.Count}; layer={part.layer}");
+                $"code={instance.BuildingData?.GetFacilityCode()}; footprint={instance.buildPoses.Count}; layer={part.layer}");
 
             bool selectionPassed = false;
             yield return SelectPlacedPartThroughPointer(instance, position, value => selectionPassed = value);
@@ -914,25 +918,47 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
         yield return null;
         instance.OnBuildingClicked -= OnClicked;
 
-        UIBuildingInfo info = gridUi != null ? gridUi.buildingInfoUI : null;
-        bool panelMatches = info != null
-            && info.gameObject.activeInHierarchy
-            && info.nameText != null
-            && info.nameText.text == instance.BuildingData.objectName;
+        bool panelMatches = IsBuildingInfoOpenFor(instance, out string panelState);
         Check(clicked, "EXHAUSTIVE_WORLD_CLICK_" + instance.id,
             clicked ? instance.BuildingData.objectName : "OnBuildingClicked was not raised");
-        Check(panelMatches, "EXHAUSTIVE_INFO_" + instance.id,
-            info != null && info.nameText != null
-                ? $"active={info.gameObject.activeInHierarchy}; name={info.nameText.text}"
-                : "building info panel missing");
+        Check(panelMatches, "EXHAUSTIVE_INFO_" + instance.id, panelState);
         completed?.Invoke(clicked && panelMatches);
 
-        if (info != null)
+        CloseBuildingInfoPanels();
+        yield return new WaitForSecondsRealtime(0.12f);
+        yield return null;
+    }
+
+    private bool IsBuildingInfoOpenFor(BuildableObject instance, out string state)
+    {
+        string expectedName = instance != null && instance.BuildingData != null
+            ? instance.BuildingData.objectName
+            : string.Empty;
+        UIBuildingInfo detailInfo = gridUi != null ? gridUi.buildingInfoUI : null;
+        bool detailMatches = detailInfo != null
+            && detailInfo.gameObject.activeInHierarchy
+            && detailInfo.nameText != null
+            && detailInfo.nameText.text == expectedName;
+        bool summaryMatches = buildingSummary != null
+            && buildingSummary.UI != null
+            && buildingSummary.UI.activeInHierarchy
+            && buildingSummary.objectName != null
+            && buildingSummary.objectName.text == expectedName;
+        state = $"detailActive={detailInfo != null && detailInfo.gameObject.activeInHierarchy}; "
+            + $"detailName={detailInfo?.nameText?.text ?? "<null>"}; "
+            + $"summaryActive={buildingSummary != null && buildingSummary.UI != null && buildingSummary.UI.activeInHierarchy}; "
+            + $"summaryName={buildingSummary?.objectName?.text ?? "<null>"}";
+        return detailMatches || summaryMatches;
+    }
+
+    private void CloseBuildingInfoPanels()
+    {
+        if (gridUi != null && gridUi.buildingInfoUI != null)
         {
-            info.CloseDispaly();
-            yield return new WaitForSecondsRealtime(0.12f);
-            yield return null;
+            gridUi.buildingInfoUI.CloseDispaly();
         }
+
+        buildingSummary?.OnClose();
     }
 
     private IEnumerator DemolishPlacedPartThroughPointer(BuildingSO part, Vector2Int position)
@@ -1249,6 +1275,63 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
             Check(renderer != null && renderer.bounds.size.x > 0.5f && renderer.bounds.size.y > 1f,
                 "RENDERER_BOUNDS_" + part.id,
                 renderer != null ? $"bounds={renderer.bounds.size}" : "renderer missing");
+            if (part.layer == GridLayer.WallFixture || part.layer == GridLayer.CeilingFixture)
+            {
+                Check(renderer != null
+                    && renderer.sortingLayerName == "DungeonBackObject"
+                    && renderer.sortingOrder < 100,
+                    "RENDERER_MOUNTED_BEHIND_" + part.id,
+                    renderer != null
+                        ? $"layer={renderer.sortingLayerName}; order={renderer.sortingOrder}"
+                        : "renderer missing");
+                Check(renderer != null && renderer.transform.localPosition.y > 1.5f,
+                    "RENDERER_MOUNTED_UPPER_ANCHOR_" + part.id,
+                    renderer != null
+                        ? $"local={renderer.transform.localPosition}; bounds={renderer.bounds}"
+                        : "renderer missing");
+            }
+
+            BuildingLightingAbility lightingAbility = part.GetAbility<BuildingLightingAbility>();
+            if (lightingAbility != null && lightingAbility.IsValid)
+            {
+                Light2D light = placed != null ? placed.GetComponentInChildren<Light2D>() : null;
+                RoomClippedLight2D clippedLight = placed != null
+                    ? placed.GetComponentInChildren<RoomClippedLight2D>()
+                    : null;
+                clippedLight?.ForceRefresh();
+                Check(light != null
+                    && lightingAbility != null
+                    && clippedLight != null
+                    && clippedLight.HasCurrentWorldRect
+                    && light.lightType == Light2D.LightType.Freeform
+                    && clippedLight.CurrentFalloffSize > 0.25f
+                    && Mathf.Approximately(light.intensity, lightingAbility.intensity)
+                    && Mathf.Approximately(light.pointLightOuterRadius, lightingAbility.radius),
+                    "LIGHT_ROOM_CLIPPED_" + part.id,
+                    light != null && clippedLight != null && lightingAbility != null
+                        ? $"type={light.lightType}; ability={lightingAbility.AbilityId}; rect={clippedLight.CurrentWorldRect}; falloff={clippedLight.CurrentFalloffSize}"
+                        : "light or clipper missing");
+                Check(light != null
+                    && light.targetSortingLayers != null
+                    && !light.targetSortingLayers.Contains(SortingLayer.NameToID("Wall")),
+                    "LIGHT_IGNORES_CEILING_" + part.id,
+                    light != null && light.targetSortingLayers != null
+                        ? string.Join(",", light.targetSortingLayers.Select(SortingLayer.IDToName))
+                        : "light missing");
+                Check(clippedLight != null
+                    && clippedLight.CurrentCoreRect.width < clippedLight.CurrentWorldRect.width
+                    && clippedLight.CurrentCoreRect.height < clippedLight.CurrentWorldRect.height,
+                    "LIGHT_SOFT_EDGE_" + part.id,
+                    clippedLight != null
+                        ? $"core={clippedLight.CurrentCoreRect}; rect={clippedLight.CurrentWorldRect}"
+                        : "clipper missing");
+                Check(clippedLight != null
+                    && clippedLight.CurrentShapePointCount >= 16,
+                    "LIGHT_ROUNDED_SHAPE_" + part.id,
+                    clippedLight != null
+                        ? $"points={clippedLight.CurrentShapePointCount}"
+                        : "clipper missing");
+            }
         }
     }
 
@@ -1381,14 +1464,14 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
     private IEnumerator ClickMouse(Vector2 screenPoint)
     {
         EnsureVerificationMouseReady();
-        InputSystem.QueueStateEvent(verificationMouse, new MouseState
+        QueueVerificationMouseState(new MouseState
         {
             position = screenPoint
         }.WithButton(MouseButton.Left, true));
         yield return null;
         yield return null;
         EnsureVerificationMouseReady();
-        InputSystem.QueueStateEvent(verificationMouse, new MouseState
+        QueueVerificationMouseState(new MouseState
         {
             position = screenPoint
         });
@@ -1402,7 +1485,7 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
     private IEnumerator MoveMouse(Vector2 screenPoint, float waitSeconds)
     {
         EnsureVerificationMouseReady();
-        InputSystem.QueueStateEvent(verificationMouse, new MouseState
+        QueueVerificationMouseState(new MouseState
         {
             position = screenPoint
         });
@@ -1427,6 +1510,21 @@ public sealed class ModularFacilityPlayModeVerificationRunner : MonoBehaviour
             InputSystem.EnableDevice(verificationMouse);
         }
         verificationMouse.MakeCurrent();
+    }
+
+    private void QueueVerificationMouseState(MouseState state)
+    {
+        if (verificationMouse == null || !verificationMouse.added)
+        {
+            return;
+        }
+
+        InputSystem.QueueStateEvent(verificationMouse, state);
+        InputSystem.Update();
+        if (Vector2.Distance(verificationMouse.position.ReadValue(), state.position) > 0.1f)
+        {
+            InputState.Change(verificationMouse, state);
+        }
     }
 
     private IEnumerator CaptureScreen(string path, string key)

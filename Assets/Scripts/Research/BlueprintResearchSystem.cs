@@ -33,17 +33,36 @@ public class BlueprintResearchTask
         progress = Mathf.Min(RequiredWork, progress + Mathf.Max(0f, amount));
         return progress - before;
     }
+
+    internal void RestoreProgress(float value)
+    {
+        progress = Mathf.Clamp(value, 0f, RequiredWork);
+    }
 }
 
-public class BlueprintResearchState
+public class BlueprintResearchState : IBuildingUnlockStateView
 {
     private readonly List<BlueprintResearchTask> tasks = new List<BlueprintResearchTask>();
     private readonly HashSet<int> completedBlueprintIds = new HashSet<int>();
+    private readonly HashSet<int> unlockedBuildingIds = new HashSet<int>();
     private readonly HashSet<string> unlockedRecipeIds = new HashSet<string>();
+    private readonly IReadOnlyList<BlueprintResearchTask> tasksView;
+    private readonly IReadOnlyCollection<int> completedBlueprintIdsView;
+    private readonly IReadOnlyCollection<int> unlockedBuildingIdsView;
+    private readonly IReadOnlyCollection<string> unlockedRecipeIdsView;
 
-    public IReadOnlyList<BlueprintResearchTask> Tasks => tasks;
-    public IReadOnlyCollection<int> CompletedBlueprintIds => completedBlueprintIds;
-    public IReadOnlyCollection<string> UnlockedRecipeIds => unlockedRecipeIds;
+    public BlueprintResearchState()
+    {
+        tasksView = ReadOnlyView.List(tasks);
+        completedBlueprintIdsView = ReadOnlyView.Collection(completedBlueprintIds);
+        unlockedBuildingIdsView = ReadOnlyView.Collection(unlockedBuildingIds);
+        unlockedRecipeIdsView = ReadOnlyView.Collection(unlockedRecipeIds);
+    }
+
+    public IReadOnlyList<BlueprintResearchTask> Tasks => tasksView;
+    public IReadOnlyCollection<int> CompletedBlueprintIds => completedBlueprintIdsView;
+    public IReadOnlyCollection<int> UnlockedBuildingIds => unlockedBuildingIdsView;
+    public IReadOnlyCollection<string> UnlockedRecipeIds => unlockedRecipeIdsView;
 
     public bool HasActiveTask => TryGetActiveTask(out _);
 
@@ -103,26 +122,49 @@ public class BlueprintResearchState
     {
         return !string.IsNullOrWhiteSpace(recipeId) && unlockedRecipeIds.Add(recipeId);
     }
-}
 
-public readonly struct BlueprintResearchUnlockResult
-{
-    public BlueprintResearchUnlockResult(
-        FacilityBlueprintSO blueprint,
-        IReadOnlyList<string> unlockedBuildings,
-        IReadOnlyList<string> unlockedBasicPurchases,
-        IReadOnlyList<string> unlockedRecipes)
+    public bool UnlockBuilding(int buildingId)
     {
-        Blueprint = blueprint;
-        UnlockedBuildings = unlockedBuildings ?? Array.Empty<string>();
-        UnlockedBasicPurchases = unlockedBasicPurchases ?? Array.Empty<string>();
-        UnlockedRecipes = unlockedRecipes ?? Array.Empty<string>();
+        return buildingId >= 0 && unlockedBuildingIds.Add(buildingId);
     }
 
-    public FacilityBlueprintSO Blueprint { get; }
-    public IReadOnlyList<string> UnlockedBuildings { get; }
-    public IReadOnlyList<string> UnlockedBasicPurchases { get; }
-    public IReadOnlyList<string> UnlockedRecipes { get; }
+    public bool IsBuildingUnlocked(int buildingId)
+    {
+        return buildingId >= 0 && unlockedBuildingIds.Contains(buildingId);
+    }
+
+    public void ClearForRestore()
+    {
+        tasks.Clear();
+        completedBlueprintIds.Clear();
+        unlockedBuildingIds.Clear();
+        unlockedRecipeIds.Clear();
+    }
+
+    public bool RestoreTask(FacilityBlueprintSO blueprint, float progress)
+    {
+        if (!EnqueueBlueprint(blueprint))
+        {
+            return false;
+        }
+
+        BlueprintResearchTask task = tasks[tasks.Count - 1];
+        task.RestoreProgress(progress);
+        return true;
+    }
+
+    public void RestoreCompletedBlueprintId(int blueprintId)
+    {
+        if (blueprintId >= 0)
+        {
+            completedBlueprintIds.Add(blueprintId);
+        }
+    }
+
+    public void RestoreUnlockedBuildingId(int buildingId)
+    {
+        UnlockBuilding(buildingId);
+    }
 }
 
 public readonly struct BlueprintResearchWorkResult
@@ -164,10 +206,9 @@ public struct BlueprintResearchQueuedEvent
         this.blueprint = blueprint;
     }
 
-    private static BlueprintResearchQueuedEvent e;
-
     public static void Trigger(FacilityBlueprintSO blueprint)
     {
+        BlueprintResearchQueuedEvent e = new BlueprintResearchQueuedEvent();
         e.blueprint = blueprint;
         EventObserver.TriggerEvent(e);
     }
@@ -182,10 +223,9 @@ public struct BlueprintResearchProgressEvent
         this.result = result;
     }
 
-    private static BlueprintResearchProgressEvent e;
-
     public static void Trigger(BlueprintResearchWorkResult result)
     {
+        BlueprintResearchProgressEvent e = new BlueprintResearchProgressEvent();
         e.result = result;
         EventObserver.TriggerEvent(e);
     }
@@ -202,10 +242,9 @@ public struct BlueprintResearchCompletedEvent
         this.unlockResult = unlockResult;
     }
 
-    private static BlueprintResearchCompletedEvent e;
-
     public static void Trigger(FacilityBlueprintSO blueprint, BlueprintResearchUnlockResult unlockResult)
     {
+        BlueprintResearchCompletedEvent e = new BlueprintResearchCompletedEvent();
         e.blueprint = blueprint;
         e.unlockResult = unlockResult;
         EventObserver.TriggerEvent(e);
@@ -222,7 +261,8 @@ public static class BlueprintResearchService
             ? Mathf.Max(0.05f, researcher.GetWorkSpeedMultiplier(FacilityWorkType.Research))
             : 1f;
         float facilityMultiplier = GetFacilityResearchMultiplier(researchFacility);
-        return Mathf.Max(0f, seconds) * BaseResearchWorkPerSecond * characterMultiplier * facilityMultiplier;
+        float baseWork = Mathf.Max(0f, seconds) * BaseResearchWorkPerSecond * characterMultiplier * facilityMultiplier;
+        return baseWork + CharacterSkillRuntimeEffects.GetResearchWorkBonus(researcher, seconds);
     }
 
     public static float GetFacilityResearchMultiplier(BuildableObject researchFacility)
@@ -259,7 +299,7 @@ public static class BlueprintResearchService
     {
         if (blueprint == null)
         {
-            return new BlueprintResearchUnlockResult(null, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+            return new BlueprintResearchUnlockResult(null, Array.Empty<BlueprintUnlockRecord>());
         }
 
         if (facilityShopCatalog == null)
@@ -269,48 +309,26 @@ public static class BlueprintResearchService
 
         state?.MarkCompleted(blueprint);
 
-        List<string> unlockedBuildings = new List<string>();
-        foreach (int buildingId in blueprint.unlockBuildingIds ?? Array.Empty<int>())
+        BlueprintUnlockContext context = new BlueprintUnlockContext(
+            state,
+            shopUnlockState,
+            facilityShopCatalog);
+        List<BlueprintUnlockRecord> appliedUnlocks = new List<BlueprintUnlockRecord>();
+        foreach (BlueprintUnlock unlock in blueprint.Unlocks)
         {
-            BuildingSO building = FacilityShopService.FindBuildingById(facilityShopCatalog, buildingId);
-            if (building == null)
+            if (unlock == null || !unlock.IsConfigured)
             {
                 continue;
             }
 
-            building.unlocked = true;
-            unlockedBuildings.Add(FacilityShopService.GetBuildingName(building));
-        }
-
-        List<string> unlockedBasicPurchases = new List<string>();
-        foreach (int buildingId in blueprint.unlockBasicPurchaseBuildingIds ?? Array.Empty<int>())
-        {
-            BuildingSO building = FacilityShopService.FindBuildingById(facilityShopCatalog, buildingId);
-            if (building == null)
+            BlueprintUnlockRecord applied = unlock.Apply(context);
+            if (applied.IsApplied)
             {
-                continue;
-            }
-
-            if (shopUnlockState != null && shopUnlockState.UnlockBasicPurchase(building))
-            {
-                unlockedBasicPurchases.Add(FacilityShopService.GetBuildingName(building));
+                appliedUnlocks.Add(applied);
             }
         }
 
-        List<string> unlockedRecipes = new List<string>();
-        foreach (string recipeId in blueprint.unlockRecipeIds ?? Array.Empty<string>())
-        {
-            if (state != null && state.UnlockRecipe(recipeId))
-            {
-                unlockedRecipes.Add(recipeId);
-            }
-        }
-
-        return new BlueprintResearchUnlockResult(
-            blueprint,
-            unlockedBuildings,
-            unlockedBasicPurchases,
-            unlockedRecipes);
+        return new BlueprintResearchUnlockResult(blueprint, appliedUnlocks);
     }
 }
 
@@ -321,6 +339,8 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
     private readonly BlueprintResearchState state = new BlueprintResearchState();
     private IFacilityShopUnlockStateService shopUnlockStateService;
     private IFacilityShopCatalog facilityShopCatalog;
+    private IFacilityCandidateCache facilityCandidateCache;
+    private IWorkforceReplanService workforceReplanService;
 
     public BlueprintResearchState State => state;
     public bool HasActiveResearch => state.HasActiveTask;
@@ -329,12 +349,18 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
     [Inject]
     public void Construct(
         IFacilityShopUnlockStateService shopUnlockStateService,
-        IFacilityShopCatalog facilityShopCatalog)
+        IFacilityShopCatalog facilityShopCatalog,
+        IFacilityCandidateCache facilityCandidateCache,
+        IWorkforceReplanService workforceReplanService)
     {
         this.shopUnlockStateService = shopUnlockStateService
             ?? throw new ArgumentNullException(nameof(shopUnlockStateService));
         this.facilityShopCatalog = facilityShopCatalog
             ?? throw new ArgumentNullException(nameof(facilityShopCatalog));
+        this.facilityCandidateCache = facilityCandidateCache
+            ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
+        this.workforceReplanService = workforceReplanService
+            ?? throw new ArgumentNullException(nameof(workforceReplanService));
     }
 
     public bool EnqueueBlueprint(FacilityBlueprintSO blueprint)
@@ -342,6 +368,7 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
         bool queued = state.EnqueueBlueprint(blueprint);
         if (queued)
         {
+            NotifyResearchAvailabilityChanged(prioritizeResearch: true);
             BlueprintResearchQueuedEvent.Trigger(blueprint);
             EventAlertService.Raise(
                 "연구 대기",
@@ -395,6 +422,11 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
         }
 
         bool cancelled = state.TryCancelBlueprint(blueprint);
+        if (cancelled)
+        {
+            NotifyResearchAvailabilityChanged();
+        }
+
         message = cancelled
             ? $"{blueprint.DisplayName} 연구를 취소했습니다"
             : "취소할 수 있는 진행 중 연구가 없습니다";
@@ -403,12 +435,13 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
 
     public void OnTriggerEvent(FacilityShopPurchasedEvent eventType)
     {
-        if (!eventType.result.success || eventType.result.blueprint == null)
+        if (!eventType.result.success
+            || !eventType.result.TryGetBlueprint(out FacilityBlueprintSO blueprint))
         {
             return;
         }
 
-        EnqueueBlueprint(eventType.result.blueprint);
+        EnqueueBlueprint(blueprint);
     }
 
     private void CompleteTask(FacilityBlueprintSO blueprint)
@@ -419,6 +452,7 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
             ShopUnlockState,
             ResolveFacilityShopCatalog());
         BlueprintResearchCompletedEvent.Trigger(blueprint, unlockResult);
+        NotifyResearchAvailabilityChanged();
 
         if (raiseAlertOnResearchComplete)
         {
@@ -430,6 +464,18 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
         }
     }
 
+    private void NotifyResearchAvailabilityChanged(bool prioritizeResearch = false)
+    {
+        facilityCandidateCache?.MarkDynamicStateDirty();
+        if (prioritizeResearch && HasActiveResearch)
+        {
+            workforceReplanService?.RequestOneWorkerToReplanFor(FacilityWorkType.Research);
+            return;
+        }
+
+        workforceReplanService?.RequestIdleWorkersToReplan();
+    }
+
     private static string FormatUnlockResult(BlueprintResearchUnlockResult result)
     {
         if (result.Blueprint == null)
@@ -438,20 +484,8 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
         }
 
         List<string> lines = new List<string> { $"{result.Blueprint.DisplayName} 분석 완료" };
-        AddLines(lines, "기본 구매", result.UnlockedBasicPurchases);
-        AddLines(lines, "시설 해금", result.UnlockedBuildings);
-        AddLines(lines, "조합식", result.UnlockedRecipes);
+        lines.AddRange(result.FormatSummaryLines());
         return string.Join("\n", lines);
-    }
-
-    private static void AddLines(List<string> lines, string title, IReadOnlyList<string> values)
-    {
-        if (values == null || values.Count == 0)
-        {
-            return;
-        }
-
-        lines.Add($"{title}: {string.Join(", ", values)}");
     }
 
     private IFacilityShopUnlockStateService ResolveShopUnlockStateService()

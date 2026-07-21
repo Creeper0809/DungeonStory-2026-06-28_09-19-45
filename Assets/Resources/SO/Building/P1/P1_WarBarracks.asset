@@ -40,6 +40,13 @@ MonoBehaviour:
   objectName: "3\uC131 \uC804\uD22C \uBCD1\uC601"
   sprite: {fileID: 21300000, guid: 817fe2f69ad6482794b6da61b48a8a6e, type: 3}
   icon: {fileID: 21300000, guid: 817fe2f69ad6482794b6da61b48a8a6e, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562978982527692
+    - rid: 7302562987322638812
+    - rid: 7302562987322638813
+    - rid: 7302562987322638814
+    - rid: 7302562987322638815
   width: 4
   height: 1
   layer: 1
@@ -48,52 +55,55 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 5
-  facility:
-    roles: 8
-    capacity: 2
-    useDuration: 1.8
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 2
-    supportedWorkTypes: 37
-    preferredSpeciesTags:
-    - Orc
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 1
-    concept: 6
-    triggerTimings: 13
-    targetRule: 3
-    cooldownSeconds: 1.2
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 3
-    combatLogText: "3\uC131 \uC804\uD22C \uBCD1\uC601"
-    effectAssets:
-    - {fileID: 11400000, guid: 08881978cf0e6db2294746ab0febeba1, type: 2}
-    effects:
-    - kind: 5
-      amount: 24
-      duration: 0
-      stacks: 1
-      logTag: "\uACBD\uBE44 \uAD50\uC804"
-  evolution:
-    contributesToRoomProfile: 1
-    tags: []
-    scores: []
-    metrics: []
+  facilityAnchors:
+    slots: []
   unlocked: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562978982527692
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 0
+        maintenance: 5
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302562987322638812
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 8
+          capacity: 2
+          useDuration: 1.8
+          requiredWorkers: 2
+          supportedWorkTypes: 37
+          disabledWhenDamaged: 1
+    - rid: 7302562987322638813
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562987322638814
+      type: {class: BuildingSpeciesAffinityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSpeciesAffinityAbility
+        preferredTags:
+        - Orc
+        dislikedTags: []
+    - rid: 7302562987322638815
+      type: {class: BuildingDefenseAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingDefenseAbility
+        settings:
+          enabled: 1
+          concept: 6
+          triggerTimings: 13
+          targetRule: 3
+          cooldownSeconds: 1.2
+          periodicIntervalSeconds: 0
+          range: 0
+          star: 3
+          combatLogText: "3\uC131 \uC804\uD22C \uBCD1\uC601"
+          effectAssets:
+          - {fileID: 11400000, guid: 08881978cf0e6db2294746ab0febeba1, type: 2}

@@ -40,6 +40,11 @@ MonoBehaviour:
   objectName: "3\uC131 \uD3ED\uB8B0 \uBD84\uC0AC\uAD6C"
   sprite: {fileID: 21300000, guid: b33c8658c081b41f9f1d74b95cad8f42, type: 3}
   icon: {fileID: 21300000, guid: b33c8658c081b41f9f1d74b95cad8f42, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562978982527616
+    - rid: 7302562987322638810
+    - rid: 7302562987322638811
   width: 3
   height: 1
   layer: 1
@@ -48,69 +53,47 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 5
-  facility:
-    roles: 0
-    capacity: 0
-    useDuration: 0
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 1
-    supportedWorkTypes: 36
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 0
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 1
-    concept: 4
-    triggerTimings: 13
-    targetRule: 2
-    cooldownSeconds: 2.2
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 3
-    combatLogText: "3\uC131 \uD3ED\uB8B0 \uBD84\uC0AC\uAD6C"
-    effectAssets:
-    - {fileID: 11400000, guid: 1a0e55416d3620109a3589df0501954f, type: 2}
-    - {fileID: 11400000, guid: b776411c4b7a6b93a8470da56c96992a, type: 2}
-    - {fileID: 11400000, guid: 8dd434bad5603c15cb84614b321eae95, type: 2}
-    - {fileID: 11400000, guid: f51751280a6ebbe8c8ed42f996d233de, type: 2}
-    effects:
-    - kind: 0
-      amount: 18
-      duration: 0
-      stacks: 1
-      logTag: "\uD53C\uD574"
-    - kind: 2
-      amount: 3
-      duration: 6
-      stacks: 1
-      logTag: "\uC5F0\uC18C"
-    - kind: 3
-      amount: 18
-      duration: 10
-      stacks: 1
-      logTag: "\uCD95\uC804"
-    - kind: 5
-      amount: 10
-      duration: 0
-      stacks: 1
-      logTag: "\uACBD\uBE44 \uAD50\uC804"
-  evolution:
-    contributesToRoomProfile: 1
-    tags: []
-    scores: []
-    metrics: []
+  facilityAnchors:
+    slots: []
   unlocked: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562978982527616
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 0
+        maintenance: 5
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302562987322638810
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 0
+          capacity: 0
+          useDuration: 0
+          requiredWorkers: 1
+          supportedWorkTypes: 36
+          disabledWhenDamaged: 1
+    - rid: 7302562987322638811
+      type: {class: BuildingDefenseAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingDefenseAbility
+        settings:
+          enabled: 1
+          concept: 4
+          triggerTimings: 13
+          targetRule: 2
+          cooldownSeconds: 2.2
+          periodicIntervalSeconds: 0
+          range: 0
+          star: 3
+          combatLogText: "3\uC131 \uD3ED\uB8B0 \uBD84\uC0AC\uAD6C"
+          effectAssets:
+          - {fileID: 11400000, guid: 1a0e55416d3620109a3589df0501954f, type: 2}
+          - {fileID: 11400000, guid: b776411c4b7a6b93a8470da56c96992a, type: 2}
+          - {fileID: 11400000, guid: 8dd434bad5603c15cb84614b321eae95, type: 2}
+          - {fileID: 11400000, guid: f51751280a6ebbe8c8ed42f996d233de, type: 2}

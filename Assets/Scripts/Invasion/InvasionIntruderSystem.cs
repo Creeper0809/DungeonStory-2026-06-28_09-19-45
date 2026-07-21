@@ -5,19 +5,52 @@ using System.Linq;
 using UnityEngine;
 using VContainer;
 
-public class InvasionDirectorRuntime : MonoBehaviour, UtilEventListener<InvasionCandidateEvent>
+public class InvasionDirectorRuntime :
+    MonoBehaviour,
+    UtilEventListener<InvasionCandidateEvent>,
+    UtilEventListener<InvasionResolvedEvent>
 {
     [SerializeField] private CharacterSO intruderData;
     [SerializeField] private GameObject intruderPrefab;
     [SerializeField] private InvasionIntruderSettings intruderSettings = new InvasionIntruderSettings();
+    [SerializeField, Min(0f)] private float normalOwnerBreachDamage =
+        InvasionOwnerDamageTuning.DefaultNormalBreachDamage;
+    [SerializeField, Min(0f)] private float bossOwnerBreachDamage =
+        InvasionOwnerDamageTuning.DefaultBossBreachDamage;
 
     private readonly List<InvasionIntruderRuntime> activeIntruders = new List<InvasionIntruderRuntime>();
+    private IReadOnlyList<InvasionIntruderRuntime> activeIntrudersView;
     private IInvasionIntruderContext invasionContext;
     private IInvasionIntruderDataProvider intruderDataProvider;
     private IInvasionIntruderFactory intruderFactory;
     private IDefenseStatusRuntimeService defenseStatusRuntimeService;
+    private bool nextInvasionIsBoss;
+    private float nextBossHealthMultiplier = 1f;
+    private float nextBossDamageMultiplier = 1f;
+    private CharacterActor ralliedOwner;
+    private Coroutine ownerRallyRoutine;
 
-    public IReadOnlyList<InvasionIntruderRuntime> ActiveIntruders => activeIntruders;
+    public IReadOnlyList<InvasionIntruderRuntime> ActiveIntruders =>
+        activeIntrudersView ??= ReadOnlyView.List(activeIntruders);
+    public bool IsBossArmed => nextInvasionIsBoss;
+
+    public bool ArmNextInvasionAsBoss()
+    {
+        return ArmNextInvasionAsBoss(1f, 1f);
+    }
+
+    public bool ArmNextInvasionAsBoss(float healthMultiplier, float damageMultiplier)
+    {
+        if (nextInvasionIsBoss)
+        {
+            return false;
+        }
+
+        nextInvasionIsBoss = true;
+        nextBossHealthMultiplier = Mathf.Max(1f, healthMultiplier);
+        nextBossDamageMultiplier = Mathf.Max(1f, damageMultiplier);
+        return true;
+    }
 
     [Inject]
     public void Construct(
@@ -41,6 +74,11 @@ public class InvasionDirectorRuntime : MonoBehaviour, UtilEventListener<Invasion
         TrySpawnIntruder(eventType.snapshot, out _);
     }
 
+    public void OnTriggerEvent(InvasionResolvedEvent eventType)
+    {
+        ReleaseOwnerRally();
+    }
+
     public bool TrySpawnIntruder(InvasionThreatSnapshot snapshot, out CharacterActor intruder)
     {
         intruder = null;
@@ -61,29 +99,182 @@ public class InvasionDirectorRuntime : MonoBehaviour, UtilEventListener<Invasion
         InvasionIntruderRuntime runtime = ResolveIntruderFactory().Create(intruderPrefab, entry.OutsidePosition);
         runtime.Initialize(context, ResolveDefenseStatusRuntimeService());
         intruder = runtime.IntruderActor;
+        bool isBoss = nextInvasionIsBoss;
         InvasionIntruderSettings effectiveSettings = context.ApplyRunVariables(intruderSettings);
-        runtime.Begin(data, snapshot, effectiveSettings, entry.OutsidePosition, entry.DoorPosition, entry.GridPosition);
+        float runAdjustedOwnerDamage = effectiveSettings.finalCombatDamage;
+        if (isBoss)
+        {
+            effectiveSettings.patternId = InvasionIntruderPatternIds.Executioner;
+            effectiveSettings.secondsToFullFocus = Mathf.Max(0.1f, effectiveSettings.secondsToFullFocus * 0.5f);
+            effectiveSettings.repathIntervalSeconds = Mathf.Max(0.1f, effectiveSettings.repathIntervalSeconds * 0.7f);
+            effectiveSettings.facilityDamageIntervalSeconds = Mathf.Max(0f, effectiveSettings.facilityDamageIntervalSeconds * 0.6f);
+            effectiveSettings.healthMultiplier = nextBossHealthMultiplier;
+        }
+
+        effectiveSettings.finalCombatDamage = InvasionOwnerDamageTuning.Resolve(
+            intruderSettings.finalCombatDamage,
+            runAdjustedOwnerDamage,
+            isBoss,
+            normalOwnerBreachDamage,
+            bossOwnerBreachDamage * (isBoss ? nextBossDamageMultiplier : 1f));
+        InvasionIntruderPatternDefinition pattern = InvasionIntruderPatternCatalog.Resolve(
+            effectiveSettings.patternId);
+        effectiveSettings.patternId = pattern.id;
+
+        Vector2Int? finalDefenseTarget = null;
+        if (isBoss && TryStartOwnerRally(context, entry, out FinalDefenseRallyPlan rallyPlan))
+        {
+            finalDefenseTarget = rallyPlan.Target;
+        }
+
+        runtime.Begin(
+            data,
+            snapshot,
+            effectiveSettings,
+            entry.OutsidePosition,
+            entry.DoorPosition,
+            entry.GridPosition,
+            finalDefenseTarget);
         activeIntruders.Add(runtime);
         runtime.OnFinished += OnIntruderFinished;
+        nextInvasionIsBoss = false;
+        nextBossHealthMultiplier = 1f;
+        nextBossDamageMultiplier = 1f;
 
         InvasionStartedEvent.Trigger(snapshot);
         InvasionSpawnedEvent.Trigger(intruder, snapshot);
+        if (isBoss)
+        {
+            BossInvasionStartedEvent.Trigger(intruder, snapshot);
+        }
         EventAlertService.Raise(
-            "침입 시작",
-            "침입자가 던전 입구로 접근하고 있습니다.",
+            isBoss ? $"최종 침공 · {pattern.title}" : $"침입 · {pattern.title}",
+            isBoss
+                ? finalDefenseTarget.HasValue
+                    ? "사장이 최종 방어선으로 후퇴합니다. 집행자는 그 방어선을 먼저 돌파합니다."
+                    : "집행자가 다른 목표를 무시하고 사장에게 곧장 진입합니다."
+                : pattern.detail,
             EventAlertImportance.High,
             "침입");
         return true;
     }
 
+    public IReadOnlyList<InvasionIntruderPersistenceState> CapturePersistentState(Grid grid)
+    {
+        if (grid == null)
+        {
+            return Array.Empty<InvasionIntruderPersistenceState>();
+        }
+
+        return activeIntruders
+            .Where(runtime => runtime != null
+                && runtime.State != InvasionIntruderState.Finished
+                && runtime.IntruderActor != null
+                && !runtime.IntruderActor.IsDead)
+            .Select(runtime => runtime.CapturePersistentState(grid))
+            .ToArray();
+    }
+
+    public int RestorePersistentState(
+        IEnumerable<InvasionIntruderPersistenceState> restoredIntruders,
+        IList<string> warnings)
+    {
+        ClearForPersistentRestore();
+        CharacterSO data = ResolveIntruderData();
+        if (data == null)
+        {
+            warnings?.Add("Invasion intruder data was not present; active intruders were skipped.");
+            return 0;
+        }
+
+        int restoredCount = 0;
+        foreach (InvasionIntruderPersistenceState source in restoredIntruders
+            ?? Array.Empty<InvasionIntruderPersistenceState>())
+        {
+            if (source == null)
+            {
+                continue;
+            }
+
+            if (source.DataId >= 0 && source.DataId != data.id)
+            {
+                warnings?.Add($"Invasion intruder data {source.DataId} no longer exists.");
+                continue;
+            }
+
+            InvasionIntruderRuntime runtime = ResolveIntruderFactory().Create(
+                intruderPrefab,
+                source.WorldPosition);
+            runtime.Initialize(ResolveInvasionContext(), ResolveDefenseStatusRuntimeService());
+            Vector2Int? finalDefenseTarget = null;
+            if (string.Equals(
+                    source.Settings?.patternId,
+                    InvasionIntruderPatternIds.Executioner,
+                    StringComparison.Ordinal)
+                && ResolveInvasionContext().TryResolveEntry(out InvasionIntruderEntry entry)
+                && TryStartOwnerRally(ResolveInvasionContext(), entry, out FinalDefenseRallyPlan rallyPlan))
+            {
+                finalDefenseTarget = rallyPlan.Target;
+            }
+
+            if (!runtime.TryRestore(data, source, finalDefenseTarget, out string warning))
+            {
+                warnings?.Add(warning);
+                runtime.ReleaseForPersistentRestore();
+                continue;
+            }
+
+            activeIntruders.Add(runtime);
+            runtime.OnFinished += OnIntruderFinished;
+            restoredCount++;
+        }
+
+        return restoredCount;
+    }
+
+    public void ClearForPersistentRestore()
+    {
+        ReleaseOwnerRally();
+        foreach (InvasionIntruderRuntime runtime in activeIntruders.ToArray())
+        {
+            if (runtime == null)
+            {
+                continue;
+            }
+
+            runtime.OnFinished -= OnIntruderFinished;
+            runtime.ReleaseForPersistentRestore();
+        }
+
+        activeIntruders.Clear();
+    }
+
+    public int WithdrawActiveIntrudersForFinalInvasion()
+    {
+        InvasionIntruderRuntime[] withdrawing = activeIntruders
+            .Where(runtime => runtime != null)
+            .ToArray();
+        foreach (InvasionIntruderRuntime runtime in withdrawing)
+        {
+            runtime.OnFinished -= OnIntruderFinished;
+            runtime.ReleaseForPersistentRestore();
+        }
+
+        activeIntruders.Clear();
+        return withdrawing.Length;
+    }
+
     private void OnEnable()
     {
         this.EventStartListening<InvasionCandidateEvent>();
+        this.EventStartListening<InvasionResolvedEvent>();
     }
 
     private void OnDisable()
     {
         this.EventStopListening<InvasionCandidateEvent>();
+        this.EventStopListening<InvasionResolvedEvent>();
+        ReleaseOwnerRally();
     }
 
     private CharacterSO ResolveIntruderData()
@@ -116,6 +307,99 @@ public class InvasionDirectorRuntime : MonoBehaviour, UtilEventListener<Invasion
             ?? throw new InvalidOperationException($"{nameof(InvasionDirectorRuntime)} requires {nameof(IDefenseStatusRuntimeService)} injection.");
     }
 
+    private bool TryStartOwnerRally(
+        IInvasionIntruderContext context,
+        InvasionIntruderEntry entry,
+        out FinalDefenseRallyPlan plan)
+    {
+        plan = default;
+        if (context == null
+            || !context.TryGetGrid(out Grid grid)
+            || !context.TryGetOwner(out CharacterActor owner)
+            || owner == null
+            || owner.IsDead
+            || !FinalDefenseRallyPlanner.TryCreate(
+                grid,
+                entry.GridPosition,
+                owner.GetNowXY(),
+                out plan))
+        {
+            return false;
+        }
+
+        ReleaseOwnerRally();
+        AbilityMove ownerMove = owner.GetAbility<AbilityMove>();
+        if (ownerMove == null)
+        {
+            return false;
+        }
+
+        owner.Brain?.RequestImmediateReplan(clearFailures: false);
+        owner.SetAiPaused(true);
+        ralliedOwner = owner;
+        ownerRallyRoutine = StartCoroutine(RunOwnerRally(context, owner, ownerMove, plan));
+        return true;
+    }
+
+    private IEnumerator RunOwnerRally(
+        IInvasionIntruderContext context,
+        CharacterActor owner,
+        AbilityMove ownerMove,
+        FinalDefenseRallyPlan plan)
+    {
+        Queue<GridMoveStep> path = plan.CreateOwnerPath();
+        for (int attempt = 0; attempt < 3 && owner != null && !owner.IsDead; attempt++)
+        {
+            if (path.Count > 0)
+            {
+                yield return ownerMove.MoveByPath(path);
+            }
+
+            if (!context.TryGetGrid(out Grid grid) || owner.GetNowXY() == plan.Target)
+            {
+                break;
+            }
+
+            path = grid.GetMovePath(owner.GetNowXY(), position => position == plan.Target);
+            if (path.Count == 0)
+            {
+                break;
+            }
+        }
+
+        if (owner != null && !owner.IsDead && owner.GetNowXY() == plan.Target)
+        {
+            owner.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Combat,
+                CharacterActivityOutcomes.Started,
+                "최종 방어선 집결",
+                actionId: "invasion:final-rally",
+                sentiment: -0.15f,
+                bubbleEligible: true));
+        }
+
+        ownerRallyRoutine = null;
+    }
+
+    private void ReleaseOwnerRally()
+    {
+        if (ownerRallyRoutine != null)
+        {
+            StopCoroutine(ownerRallyRoutine);
+            ownerRallyRoutine = null;
+        }
+
+        CharacterActor owner = ralliedOwner;
+        ralliedOwner = null;
+        if (owner == null || owner.IsDead)
+        {
+            return;
+        }
+
+        owner.GetAbility<AbilityMove>()?.CancelActiveMovement();
+        owner.SetAiPaused(false);
+    }
+
     private void OnIntruderFinished(InvasionIntruderRuntime runtime)
     {
         if (runtime == null)
@@ -139,10 +423,23 @@ public class InvasionIntruderRuntime : MonoBehaviour
     private bool resolved;
     private IInvasionIntruderContext invasionContext;
     private IDefenseStatusRuntimeService defenseStatusRuntimeService;
+    private InvasionIntruderPatternDefinition pattern;
+    private BuildableObject currentPriorityTarget;
+    private bool hasFinalDefenseTarget;
+    private Vector2Int finalDefenseTarget;
+    private readonly HashSet<int> damagedFacilityInstanceIds = new HashSet<int>();
+    private int facilityDamageCount;
 
     public CharacterActor IntruderActor => intruderActor != null ? intruderActor : GetComponent<CharacterActor>();
     public InvasionIntruderState State { get; private set; }
     public float Focus => settings != null ? InvasionIntruderPlanner.CalculateFocus(elapsed, settings.secondsToFullFocus) : 1f;
+    public float ElapsedSeconds => elapsed;
+    public float DamageDelayRemaining => Mathf.Max(0f, nextDamageTime - Time.time);
+    public InvasionIntruderPatternDefinition Pattern => pattern ?? InvasionIntruderPatternCatalog.Default;
+    public BuildableObject CurrentPriorityTarget => currentPriorityTarget;
+    public bool HasFinalDefenseTarget => hasFinalDefenseTarget;
+    public Vector2Int FinalDefenseTarget => finalDefenseTarget;
+    public int FacilityDamageCount => facilityDamageCount;
 
     public event Action<InvasionIntruderRuntime> OnFinished;
 
@@ -168,7 +465,8 @@ public class InvasionIntruderRuntime : MonoBehaviour
         InvasionIntruderSettings settings,
         Vector3 outsidePosition,
         Vector3 entryDoorPosition,
-        Vector2Int entryGridPosition)
+        Vector2Int entryGridPosition,
+        Vector2Int? finalDefenseTarget = null)
     {
         if (routine != null)
         {
@@ -176,40 +474,239 @@ public class InvasionIntruderRuntime : MonoBehaviour
         }
 
         this.settings = settings ?? new InvasionIntruderSettings();
+        pattern = InvasionIntruderPatternCatalog.Resolve(this.settings.patternId);
+        this.settings.patternId = pattern.id;
+        currentPriorityTarget = null;
+        damagedFacilityInstanceIds.Clear();
+        facilityDamageCount = 0;
+        hasFinalDefenseTarget = finalDefenseTarget.HasValue;
+        this.finalDefenseTarget = finalDefenseTarget.GetValueOrDefault();
         elapsed = 0f;
-        nextDamageTime = this.settings.facilityDamageIntervalSeconds;
+        nextDamageTime = Time.time + this.settings.facilityDamageIntervalSeconds;
         resolved = false;
         RequireRuntimeComponents();
 
         transform.position = outsidePosition;
         intruderActor.SetLifecycleState(CharacterLifecycleState.SpawningOutside);
         intruderActor.Initialize(data);
+        intruderActor.ScaleMaxHealth(this.settings.healthMultiplier);
         intruderActor.SetLifecycleState(CharacterLifecycleState.SpawningOutside);
         routine = StartCoroutine(Run(entryDoorPosition, entryGridPosition));
     }
 
+    public InvasionIntruderPersistenceState CapturePersistentState(Grid grid)
+    {
+        RequireRuntimeComponents();
+        CharacterSO data = intruderActor.Identity != null ? intruderActor.Identity.Data : null;
+        CharacterMoodSnapshot mood = intruderActor.Stats.GetMoodSnapshot();
+        DefenseStatusRuntime statusRuntime = ResolveDefenseStatusRuntimeService().Get(intruderActor);
+        return new InvasionIntruderPersistenceState(
+            data != null ? data.id : -1,
+            transform.position,
+            grid.GetXY(transform.position),
+            State,
+            elapsed,
+            DamageDelayRemaining,
+            facilityDamageCount,
+            intruderActor.CurrentHealth,
+            intruderActor.InjurySeverity,
+            mood.BaseValue,
+            intruderActor.Stats.StatSnapshot,
+            settings,
+            statusRuntime != null
+                ? statusRuntime.ActiveStatuses
+                : Array.Empty<DefenseStatusSnapshot>());
+    }
+
+    public bool TryRestore(
+        CharacterSO data,
+        InvasionIntruderPersistenceState source,
+        Vector2Int? finalDefenseTarget,
+        out string warning)
+    {
+        warning = string.Empty;
+        if (data == null || source == null)
+        {
+            warning = "Active invasion state was incomplete.";
+            return false;
+        }
+
+        if (routine != null)
+        {
+            StopCoroutine(routine);
+        }
+
+        RequireRuntimeComponents();
+        settings = InvasionIntruderPersistenceState.CloneSettings(source.Settings);
+        pattern = InvasionIntruderPatternCatalog.Resolve(settings.patternId);
+        settings.patternId = pattern.id;
+        currentPriorityTarget = null;
+        damagedFacilityInstanceIds.Clear();
+        facilityDamageCount = source.FacilityDamageCount;
+        hasFinalDefenseTarget = finalDefenseTarget.HasValue;
+        this.finalDefenseTarget = finalDefenseTarget.GetValueOrDefault();
+        elapsed = source.ElapsedSeconds;
+        nextDamageTime = Time.time + source.DamageDelayRemaining;
+        resolved = false;
+        transform.position = source.WorldPosition;
+        intruderActor.SetLifecycleState(CharacterLifecycleState.SpawningOutside);
+        intruderActor.Initialize(data);
+        intruderActor.ScaleMaxHealth(settings.healthMultiplier);
+        intruderActor.Stats.RestorePersistentState(
+            source.Conditions,
+            source.CurrentHealth,
+            source.InjurySeverity,
+            source.BaseMood,
+            Array.Empty<CharacterMoodFactorSnapshot>());
+
+        DefenseStatusRuntime statusRuntime = ResolveDefenseStatusRuntimeService().GetOrAdd(intruderActor);
+        foreach (DefenseStatusKind kind in Enum.GetValues(typeof(DefenseStatusKind)))
+        {
+            statusRuntime.ClearStatus(kind);
+        }
+
+        foreach (DefenseStatusSnapshot status in source.DefenseStatuses)
+        {
+            if (status.RemainingSeconds > 0f && status.Stacks > 0)
+            {
+                statusRuntime.ApplyStatus(status.Kind, status.Value, status.RemainingSeconds, status.Stacks);
+            }
+        }
+
+        IInvasionIntruderContext context = ResolveInvasionContext();
+        if (source.State == InvasionIntruderState.Entering)
+        {
+            if (!context.TryResolveEntry(out InvasionIntruderEntry entry))
+            {
+                warning = "The active intruder entrance no longer exists.";
+                return false;
+            }
+
+            State = InvasionIntruderState.Entering;
+            intruderActor.SetLifecycleState(CharacterLifecycleState.SpawningOutside);
+            routine = StartCoroutine(Run(entry.DoorPosition, entry.GridPosition));
+            return true;
+        }
+
+        if (!context.TryGetGrid(out Grid grid))
+        {
+            warning = "The dungeon grid was unavailable while restoring an active intruder.";
+            return false;
+        }
+
+        Vector2Int restoredPosition = source.GridPosition;
+        if (!grid.IsValidGridPos(restoredPosition)
+            && !grid.TryFindNearestWalkablePosition(restoredPosition, out restoredPosition))
+        {
+            warning = "The active intruder has no valid restore position.";
+            return false;
+        }
+
+        transform.position = grid.GetWorldPos(restoredPosition);
+        intruderActor.SetLifecycleState(CharacterLifecycleState.Active);
+        State = source.State == InvasionIntruderState.None
+            || source.State == InvasionIntruderState.Finished
+            ? InvasionIntruderState.Searching
+            : source.State;
+        routine = StartCoroutine(RunInside());
+        return true;
+    }
+
+    public void ReleaseForPersistentRestore()
+    {
+        if (routine != null)
+        {
+            StopCoroutine(routine);
+            routine = null;
+        }
+
+        State = InvasionIntruderState.Finished;
+        if (intruderActor != null)
+        {
+            intruderActor.SetLifecycleState(CharacterLifecycleState.Despawned);
+        }
+
+        OnFinished = null;
+        gameObject.SetActive(false);
+        if (Application.isPlaying)
+        {
+            Destroy(gameObject);
+        }
+        else
+        {
+            DestroyImmediate(gameObject);
+        }
+    }
+
     public Queue<GridMoveStep> CreateNextPath(Grid grid, Vector2Int ownerPosition, out bool direct)
     {
+        return CreateNextPath(grid, ownerPosition, out direct, out _);
+    }
+
+    public Queue<GridMoveStep> CreateNextPath(
+        Grid grid,
+        Vector2Int ownerPosition,
+        out bool direct,
+        out BuildableObject priorityTarget)
+    {
         Vector2Int start = intruderActor != null ? intruderActor.GetNowXY() : Vector2Int.zero;
-        return InvasionIntruderPlanner.GetNextPath(grid, start, ownerPosition, Focus, out direct);
+        return InvasionIntruderPlanner.GetNextPath(
+            grid,
+            start,
+            ownerPosition,
+            Focus,
+            Pattern,
+            out direct,
+            out priorityTarget,
+            damagedFacilityInstanceIds,
+            facilityDamageCount);
     }
 
     public bool TryDamageNearbyFacility(Grid grid)
+    {
+        return TryDamageNearbyFacility(grid, currentPriorityTarget);
+    }
+
+    public bool TryDamageNearbyFacility(Grid grid, BuildableObject preferredTarget)
     {
         if (grid == null || intruderActor == null)
         {
             return false;
         }
 
-        if (!InvasionFacilityDamageResolver.TryFindDamageTarget(grid, intruderActor.GetNowXY(), out BuildableObject target))
+        if (facilityDamageCount >= Pattern.maxFacilityDamageCount)
+        {
+            return false;
+        }
+
+        if (!InvasionFacilityDamageResolver.TryFindDamageTarget(
+                grid,
+                intruderActor.GetNowXY(),
+                Pattern.targetPreference,
+                preferredTarget,
+                out BuildableObject target,
+                damagedFacilityInstanceIds))
         {
             return false;
         }
 
         State = InvasionIntruderState.DamagingFacility;
         target.SetDamaged(true);
-        intruderActor.AddLog($"{target.name} 손상");
+        damagedFacilityInstanceIds.Add(target.GetInstanceID());
+        facilityDamageCount++;
+        intruderActor.AddActivity(CharacterActivityEvent.Facility(
+            CharacterActivityKinds.Combat,
+            CharacterActivityOutcomes.Damaged,
+            $"{target.name} 손상",
+            target,
+            actionId: "invasion:damage-facility",
+            value: 1f,
+            bubbleEligible: true));
         InvasionFacilityDamagedEvent.Trigger(intruderActor, target);
+        if (target == currentPriorityTarget)
+        {
+            currentPriorityTarget = null;
+        }
         return true;
     }
 
@@ -237,9 +734,15 @@ public class InvasionIntruderRuntime : MonoBehaviour
 
         resolved = true;
         State = InvasionIntruderState.Finished;
-        intruderActor?.AddLog(defender != null
-            ? $"Suppressed by {defender.name}"
-            : "Suppressed.");
+        intruderActor?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Combat,
+            CharacterActivityOutcomes.Defeated,
+            defender != null ? $"{defender.name}에게 제압됨" : "제압됨",
+            actionId: "invasion:suppressed",
+            targetId: defender != null ? $"character:{defender.GetInstanceID()}" : string.Empty,
+            targetName: defender != null ? defender.name : string.Empty,
+            sentiment: -0.9f,
+            bubbleEligible: true));
         InvasionResolvedEvent.Trigger(true, 1f);
         Finish();
     }
@@ -257,6 +760,13 @@ public class InvasionIntruderRuntime : MonoBehaviour
         }
 
         intruderActor.SetLifecycleState(CharacterLifecycleState.Active);
+        yield return RunInside();
+    }
+
+    private IEnumerator RunInside()
+    {
+        IInvasionIntruderContext context = ResolveInvasionContext();
+        Grid grid;
         while (State != InvasionIntruderState.Finished && intruderActor != null && !intruderActor.IsDead)
         {
             context.TryGetGrid(out grid);
@@ -267,25 +777,46 @@ public class InvasionIntruderRuntime : MonoBehaviour
                 yield break;
             }
 
-            if (InvasionIntruderPlanner.IsAtOwner(grid, intruderActor, owner))
+            if (hasFinalDefenseTarget && intruderActor.GetNowXY() == finalDefenseTarget)
+            {
+                hasFinalDefenseTarget = false;
+            }
+
+            if (!hasFinalDefenseTarget
+                && InvasionIntruderPlanner.IsAtOwner(grid, intruderActor, owner))
             {
                 yield return FinalCombat(owner);
                 yield break;
             }
 
             elapsed += Mathf.Max(0.01f, settings.repathIntervalSeconds);
-            bool direct;
-            Queue<GridMoveStep> path = CreateNextPath(grid, owner.GetNowXY(), out direct);
-            State = direct ? InvasionIntruderState.MovingToOwner : InvasionIntruderState.Searching;
+            Queue<GridMoveStep> path = CreateNextPath(
+                grid,
+                hasFinalDefenseTarget ? finalDefenseTarget : owner.GetNowXY(),
+                out bool direct,
+                out BuildableObject priorityTarget);
+            currentPriorityTarget = priorityTarget;
+            State = priorityTarget != null
+                ? InvasionIntruderState.MovingToFacility
+                : direct
+                    ? InvasionIntruderState.MovingToOwner
+                    : InvasionIntruderState.Searching;
 
             if (Time.time >= nextDamageTime)
             {
-                TryDamageNearbyFacility(grid);
+                TryDamageNearbyFacility(grid, currentPriorityTarget);
                 nextDamageTime = Time.time + settings.facilityDamageIntervalSeconds;
             }
 
             if (path.Count == 0)
             {
+                if (hasFinalDefenseTarget)
+                {
+                    hasFinalDefenseTarget = false;
+                    yield return null;
+                    continue;
+                }
+
                 TickDefenseStatuses(settings.repathIntervalSeconds);
                 yield return new WaitForSeconds(settings.repathIntervalSeconds);
                 continue;
@@ -296,6 +827,12 @@ public class InvasionIntruderRuntime : MonoBehaviour
             {
                 ResolveIntruderDefeated();
                 yield break;
+            }
+
+            if (currentPriorityTarget != null && Time.time >= nextDamageTime)
+            {
+                TryDamageNearbyFacility(grid, currentPriorityTarget);
+                nextDamageTime = Time.time + settings.facilityDamageIntervalSeconds;
             }
 
             yield return null;

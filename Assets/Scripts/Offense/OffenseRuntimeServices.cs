@@ -12,6 +12,11 @@ public interface IOffenseRewardRuntimeProvider
     bool TryGetRuntime(out OffenseRewardRuntime runtime);
 }
 
+public interface IOffenseExpeditionRuntimeProvider
+{
+    bool TryGetRuntime(out OffenseExpeditionRuntime runtime);
+}
+
 public interface IOffenseExpeditionMemberQuery
 {
     IReadOnlyList<CharacterActor> GetAvailableMemberActors();
@@ -25,15 +30,21 @@ public interface IOffenseRewardCatalog
 
 public interface IOffenseRewardSelector
 {
-    StockCategory ResolveStockCategory(OffenseRewardPreview reward);
     BuildingSO SelectRareFacility(
         OffenseRewardContext context,
         IReadOnlyCollection<int> additionallyExcludedBuildingIds);
     FacilityBlueprintSO SelectBlueprint(
-        OffenseRewardPreview reward,
+        OffenseBlueprintRewardSpec rewardSpec,
         OffenseRewardContext context);
-    bool IsHumanFactionWeakening(OffenseRewardPreview reward, OffenseTargetDefinition target);
-    bool ContainsAny(string source, params string[] values);
+}
+
+public interface IOffenseRewardGrantHandler
+{
+    string RewardTypeId { get; }
+    OffenseRewardGrantResult Grant(
+        OffenseRewardPreview reward,
+        OffenseRewardContext context,
+        IOffenseRewardSelector selector);
 }
 
 public interface IOffenseRewardGrantService
@@ -79,6 +90,21 @@ public sealed class OffenseRewardRuntimeProvider :
     }
 }
 
+public sealed class OffenseExpeditionRuntimeProvider :
+    CachedSceneRuntimeProvider<OffenseExpeditionRuntime>,
+    IOffenseExpeditionRuntimeProvider
+{
+    public OffenseExpeditionRuntimeProvider(IDungeonSceneComponentQuery sceneQuery)
+        : base(sceneQuery)
+    {
+    }
+
+    public bool TryGetRuntime(out OffenseExpeditionRuntime runtime)
+    {
+        return TryGetRuntimeComponent(out runtime);
+    }
+}
+
 public sealed class OffenseExpeditionMemberQuery : IOffenseExpeditionMemberQuery
 {
     private readonly IDungeonSceneComponentQuery sceneQuery;
@@ -91,7 +117,8 @@ public sealed class OffenseExpeditionMemberQuery : IOffenseExpeditionMemberQuery
 
     public IReadOnlyList<CharacterActor> GetAvailableMemberActors()
     {
-        return sceneQuery.All<CharacterActor>()
+        return OffenseExpeditionService
+            .GetDistinctMembers(sceneQuery.All<CharacterActor>())
             .Where((actor) => OffenseExpeditionService.CanJoinExpedition(actor, out _))
             .OrderByDescending(OffenseExpeditionService.CalculateMemberPower)
             .ToList();
@@ -151,6 +178,7 @@ public sealed class OffensePanelService : IOffensePanelService
             throw new ArgumentNullException(nameof(runtime));
         }
 
+        sceneQuery.First<OffenseExpeditionPanel>(includeInactive: true)?.Hide();
         OffenseWorldMapPanel panel = sceneQuery.First<OffenseWorldMapPanel>(includeInactive: true)
             ?? panelFactory.CreateWorldMapPanel();
         panel.Bind(runtime, buttonFactory);
@@ -165,6 +193,7 @@ public sealed class OffensePanelService : IOffensePanelService
         }
 
         worldMapProvider.TryGetRuntime(out OffenseWorldMapRuntime worldMap);
+        sceneQuery.First<OffenseWorldMapPanel>(includeInactive: true)?.Hide();
         OffenseExpeditionPanel panel = sceneQuery.First<OffenseExpeditionPanel>(includeInactive: true)
             ?? panelFactory.CreateExpeditionPanel();
         panel.Bind(runtime, worldMap, buttonFactory);

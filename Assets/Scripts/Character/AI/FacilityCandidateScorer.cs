@@ -187,7 +187,7 @@ public static class FacilityCandidateScorer
             return false;
         }
 
-        if (building is Shop shop
+        if (building is IRetailFacility shop
             && actor != null
             && actor.TryGetAbility(out AbilityShopping shopping)
             && !shopping.CanBuyFrom(shop, out rejectReason))
@@ -266,14 +266,24 @@ public static class FacilityCandidateScorer
                 GetLowStatNeed(actor, CharacterCondition.MOOD) * 0.6f),
             FacilityRole.Rest => Mathf.Max(
                 GetLowStatNeed(actor, CharacterCondition.SLEEP),
-                GetLowStatNeed(actor, CharacterCondition.MOOD) * 0.4f),
+                GetLowStatNeed(actor, CharacterCondition.MOOD) * 0.4f,
+                GetExpeditionRecoveryNeed(actor)),
             FacilityRole.Training => GetLowStatNeed(actor, CharacterCondition.FUN),
             FacilityRole.Research => GetLowStatNeed(actor, CharacterCondition.FUN),
             FacilityRole.Mana => GetLowStatNeed(actor, CharacterCondition.MOOD),
             FacilityRole.Toilet => GetLowStatNeed(actor, CharacterCondition.EXCRETION),
-            FacilityRole.Hygiene => GetLowStatNeed(actor, CharacterCondition.HYGIENE),
+            FacilityRole.Hygiene => Mathf.Max(
+                GetLowStatNeed(actor, CharacterCondition.HYGIENE),
+                GetExpeditionStressNeed(actor) * 0.75f),
             _ => 0.5f
         };
+    }
+
+    public static float GetExpeditionRecoveryNeed(CharacterActor actor)
+    {
+        return Mathf.Max(
+            actor != null ? actor.InjurySeverity : 0f,
+            GetExpeditionStressNeed(actor));
     }
 
     private static IEnumerable<BuildableObject> GetCandidateSource(
@@ -369,6 +379,12 @@ public static class FacilityCandidateScorer
         return Mathf.Clamp01(1f - (value / 100f));
     }
 
+    private static float GetExpeditionStressNeed(CharacterActor actor)
+    {
+        CharacterLifecycle lifecycle = actor != null ? actor.Lifecycle : null;
+        return Mathf.Clamp01((lifecycle?.ExpeditionRecovery?.stress ?? 0f) / 100f);
+    }
+
     private static float GetPreferenceScore(
         CharacterActor actor,
         BuildableObject building,
@@ -391,14 +407,12 @@ public static class FacilityCandidateScorer
             return 0.5f;
         }
 
-        if (building.Facility.dislikedSpeciesTags != null
-            && System.Array.IndexOf(building.Facility.dislikedSpeciesTags, speciesTag) >= 0)
+        if (building.BuildingData.IsDislikedSpecies(speciesTag))
         {
             return 0.1f;
         }
 
-        if (building.Facility.preferredSpeciesTags != null
-            && System.Array.IndexOf(building.Facility.preferredSpeciesTags, speciesTag) >= 0)
+        if (building.BuildingData.IsPreferredSpecies(speciesTag))
         {
             return 1f;
         }
@@ -424,7 +438,7 @@ public static class FacilityCandidateScorer
 
     private static float GetStockScore(BuildableObject building)
     {
-        if (building.Facility == null || !building.Facility.requiresStock)
+        if (building.Facility == null || !building.BuildingData.RequiresStockForUse())
         {
             return 1f;
         }
@@ -434,13 +448,13 @@ public static class FacilityCandidateScorer
             return 0f;
         }
 
-        int max = Mathf.Max(1, building.Facility.internalStockMax);
+        int max = Mathf.Max(1, building.GetInternalStockCapacity());
         return Mathf.Clamp01((float)stockedFacility.CurrentStock / max);
     }
 
     private static float GetAffordabilityScore(CharacterActor actor, BuildableObject building)
     {
-        if (building is not Shop shop)
+        if (building is not IRetailFacility shop)
         {
             return 1f;
         }
@@ -488,7 +502,7 @@ public static class FacilityCandidateScorer
             return 1f;
         }
 
-        return shopping.visitedBuilding.Contains(building) ? 0.2f : 1f;
+        return shopping.HasVisited(building) ? 0.2f : 1f;
     }
 
     private static float GetFacilityStateScore(BuildableObject building)
@@ -498,7 +512,7 @@ public static class FacilityCandidateScorer
             return 0f;
         }
 
-        float score = Mathf.Clamp01(building.OperationalState.cleanliness / 100f);
+        float score = Mathf.Clamp01(building.FacilityState.cleanliness / 100f);
         if (building.IsDamaged)
         {
             score *= 0.45f;

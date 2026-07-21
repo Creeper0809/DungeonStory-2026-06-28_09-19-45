@@ -16,8 +16,8 @@ public interface IFacilityEvolutionRecordEventRecorder
 
 public sealed class FacilityEvolutionRecordEventRecorder : IFacilityEvolutionRecordEventRecorder
 {
-    private readonly Dictionary<int, HashSet<int>> uniqueVisitorsByFacility =
-        new Dictionary<int, HashSet<int>>();
+    private readonly Dictionary<int, HashSet<string>> uniqueVisitorsByFacility =
+        new Dictionary<int, HashSet<string>>();
     private readonly Dictionary<int, FacilityDayRecord> dayRecords =
         new Dictionary<int, FacilityDayRecord>();
     private readonly Dictionary<int, int> stockConsumedByFacility =
@@ -55,14 +55,17 @@ public sealed class FacilityEvolutionRecordEventRecorder : IFacilityEvolutionRec
         CharacterActor visitor = eventType.visitorActor;
         if (visitor != null)
         {
-            int visitorId = GetVisitorId(visitor);
-            HashSet<int> uniqueVisitors = GetUniqueVisitors(facility);
-            bool repeatVisit = !uniqueVisitors.Add(visitorId);
-            SetMetric(record, FacilityEvolutionTerms.UniqueVisitorCount, uniqueVisitors.Count);
-            SetMetric(
-                record,
-                FacilityEvolutionTerms.RepeatVisitorRatio,
-                UpdateRatio(GetMetric(record, FacilityEvolutionTerms.RepeatVisitorRatio), previousVisits, nextVisits, repeatVisit));
+            string visitorId = GetVisitorId(visitor);
+            if (!string.IsNullOrWhiteSpace(visitorId))
+            {
+                HashSet<string> uniqueVisitors = GetUniqueVisitors(facility);
+                bool repeatVisit = !uniqueVisitors.Add(visitorId);
+                SetMetric(record, FacilityEvolutionTerms.UniqueVisitorCount, uniqueVisitors.Count);
+                SetMetric(
+                    record,
+                    FacilityEvolutionTerms.RepeatVisitorRatio,
+                    UpdateRatio(GetMetric(record, FacilityEvolutionTerms.RepeatVisitorRatio), previousVisits, nextVisits, repeatVisit));
+            }
 
             float mood = GetCondition(visitor, CharacterCondition.MOOD, 50f);
             SetMetric(
@@ -200,8 +203,8 @@ public sealed class FacilityEvolutionRecordEventRecorder : IFacilityEvolutionRec
 
     public void RecordDefenseTriggered(DefenseFacilityTriggeredEvent eventType)
     {
-        DefenseActivationReport report = eventType.report;
-        DefenseFacility facility = report != null ? report.Facility : null;
+        DefenseActivationSnapshot report = eventType.report;
+        DefenseFacility facility = report?.SourceFacility;
         if (!IsValidFacility(facility))
         {
             return;
@@ -279,12 +282,12 @@ public sealed class FacilityEvolutionRecordEventRecorder : IFacilityEvolutionRec
         facilityCandidateCache.MarkDynamicStateDirty();
     }
 
-    private HashSet<int> GetUniqueVisitors(BuildableObject facility)
+    private HashSet<string> GetUniqueVisitors(BuildableObject facility)
     {
         int key = GetFacilityKey(facility);
-        if (!uniqueVisitorsByFacility.TryGetValue(key, out HashSet<int> visitors))
+        if (!uniqueVisitorsByFacility.TryGetValue(key, out HashSet<string> visitors))
         {
-            visitors = new HashSet<int>();
+            visitors = new HashSet<string>(StringComparer.Ordinal);
             uniqueVisitorsByFacility[key] = visitors;
         }
 
@@ -347,11 +350,11 @@ public sealed class FacilityEvolutionRecordEventRecorder : IFacilityEvolutionRec
         return facility != null ? facility.GetInstanceID() : 0;
     }
 
-    private static int GetVisitorId(CharacterActor actor)
+    private static string GetVisitorId(CharacterActor actor)
     {
         return actor != null && actor.Identity != null
-            ? actor.Identity.StableId
-            : actor != null ? actor.GetInstanceID() : 0;
+            ? actor.Identity.PersistentId
+            : string.Empty;
     }
 
     private static bool SupportsRole(BuildableObject facility, FacilityRole role)

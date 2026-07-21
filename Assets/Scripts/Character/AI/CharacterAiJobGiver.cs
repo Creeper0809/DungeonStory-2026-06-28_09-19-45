@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 public readonly struct CharacterAiActionCandidate
@@ -100,7 +102,10 @@ public abstract class CharacterAiJobGiver
         return candidate.IsValid;
     }
 
-    public abstract bool MatchesAction(AIActionSet actionSet);
+    public virtual bool MatchesAction(AIActionSet actionSet)
+    {
+        return actionSet != null && actionSet.Branch == Branch;
+    }
 
     protected abstract float GetDomainScore(CharacterActor actor, out string reason);
 
@@ -111,6 +116,11 @@ public abstract class CharacterAiJobGiver
 
     public static float Need(CharacterActor actor, CharacterCondition condition)
     {
+        if (CharacterNeedCatalog.TryGet(condition, out CharacterNeedDefinition definition))
+        {
+            return definition.GetUrgency(actor);
+        }
+
         CharacterStats stats = actor != null ? actor.Stats : null;
         if (stats == null
             || stats.Stats == null
@@ -188,24 +198,26 @@ public static class CharacterAiRoutinePriority
 
     private static float GetSurvivalPriority(CharacterActor actor, out string reason)
     {
-        float hungerNeed = CharacterAiJobGiver.Need(actor, CharacterCondition.HUNGER);
-        float sleepNeed = CharacterAiJobGiver.Need(actor, CharacterCondition.SLEEP);
-        float excretionNeed = CharacterAiJobGiver.Need(actor, CharacterCondition.EXCRETION);
-        float hygieneNeed = CharacterAiJobGiver.Need(actor, CharacterCondition.HYGIENE);
+        IReadOnlyList<CharacterNeedDefinition> survivalNeeds = CharacterNeedCatalog.All
+            .Where((definition) => definition.HasTag(CharacterNeedTag.Survival))
+            .ToArray();
+        float registeredNeed = survivalNeeds
+            .Select((definition) => definition.GetUrgency(actor))
+            .DefaultIfEmpty(0f)
+            .Max();
         float restNeed = FacilityCandidateScorer.GetNeedScore(actor, FacilityRole.Rest);
-        float injuryNeed = actor != null ? actor.InjurySeverity : 0f;
+        float recoveryNeed = FacilityCandidateScorer.GetExpeditionRecoveryNeed(actor);
         float exitNeed = ShouldExitDungeon(actor) ? 1f : 0f;
         float strongestNeed = Mathf.Max(
             exitNeed,
-            hungerNeed,
-            sleepNeed,
+            registeredNeed,
             restNeed,
-            excretionNeed,
-            hygieneNeed,
-            injuryNeed);
-        reason =
-            $"need={strongestNeed:0.###} hunger={hungerNeed:0.###} sleep={sleepNeed:0.###} "
-            + $"toilet={excretionNeed:0.###} hygiene={hygieneNeed:0.###} rest={restNeed:0.###} exit={exitNeed:0.###}";
+            recoveryNeed);
+        string needDetails = string.Join(
+            " ",
+            survivalNeeds.Select((definition) =>
+                $"{definition.Id}={definition.GetUrgency(actor):0.###}"));
+        reason = $"need={strongestNeed:0.###} {needDetails} rest={restNeed:0.###} exit={exitNeed:0.###}";
         if (strongestNeed <= 0.05f)
         {
             return 0f;
@@ -256,11 +268,9 @@ public static class CharacterAiRoutinePriority
         float funNeed = CharacterAiJobGiver.Need(actor, CharacterCondition.FUN);
         float moodNeed = CharacterAiJobGiver.Need(actor, CharacterCondition.MOOD);
         float shoppingNeed = FacilityCandidateScorer.GetNeedScore(actor, FacilityRole.Purchase);
-        float urgentSurvival = Mathf.Max(
-            CharacterAiJobGiver.Need(actor, CharacterCondition.HUNGER),
-            CharacterAiJobGiver.Need(actor, CharacterCondition.SLEEP),
-            CharacterAiJobGiver.Need(actor, CharacterCondition.EXCRETION),
-            CharacterAiJobGiver.Need(actor, CharacterCondition.HYGIENE) * 0.7f);
+        float urgentSurvival = CharacterNeedCatalog.GetStrongestUrgency(
+            actor,
+            CharacterNeedTag.Survival);
         float leisureNeed = Mathf.Max(funNeed, moodNeed * 0.75f, shoppingNeed);
         float survivalWindow = Mathf.Clamp01(1f - urgentSurvival * 0.85f);
         float priority = Mathf.Clamp01(leisureNeed * survivalWindow) * 70f;
@@ -283,12 +293,9 @@ public static class CharacterAiRoutinePriority
     private static float GetSurvivalPressure(CharacterActor actor)
     {
         return Mathf.Max(
-            CharacterAiJobGiver.Need(actor, CharacterCondition.HUNGER),
-            CharacterAiJobGiver.Need(actor, CharacterCondition.SLEEP),
-            CharacterAiJobGiver.Need(actor, CharacterCondition.EXCRETION),
-            CharacterAiJobGiver.Need(actor, CharacterCondition.HYGIENE) * 0.7f,
+            CharacterNeedCatalog.GetStrongestUrgency(actor, CharacterNeedTag.Survival),
             CharacterAiJobGiver.Need(actor, CharacterCondition.MOOD) * 0.8f,
-            actor != null ? actor.InjurySeverity : 0f);
+            FacilityCandidateScorer.GetExpeditionRecoveryNeed(actor));
     }
 
     private static bool CanUseLeisure(CharacterActor actor)
@@ -309,6 +316,7 @@ public static class CharacterAiRoutinePriority
     private static bool ShouldExitDungeon(CharacterActor actor)
     {
         return actor != null
+            && !CharacterWorkRoleUtility.TryGetWork(actor, out _)
             && actor.TryGetAbility(out AbilityShopping shopping)
             && shopping.ShouldExitDungeon();
     }
@@ -318,7 +326,6 @@ public sealed class ExitDungeonJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.ExitDungeon;
     public override string Name => "ExitDungeonJobGiver";
-    public override bool MatchesAction(AIActionSet actionSet) => actionSet is AIExitDungeon;
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
@@ -331,7 +338,6 @@ public sealed class GetFoodJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.Eat;
     public override string Name => "GetFoodJobGiver";
-    public override bool MatchesAction(AIActionSet actionSet) => actionSet is AIEat;
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
@@ -345,14 +351,13 @@ public sealed class RestJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.Rest;
     public override string Name => "RestJobGiver";
-    public override bool MatchesAction(AIActionSet actionSet) => actionSet is AIRest;
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
         float restNeed = FacilityCandidateScorer.GetNeedScore(actor, FacilityRole.Rest);
-        float injuryNeed = actor != null ? actor.InjurySeverity : 0f;
-        float domain = Mathf.Max(restNeed, injuryNeed * 0.85f);
-        reason = $"restNeed={restNeed:0.###} injury={injuryNeed:0.###}";
+        float recoveryNeed = FacilityCandidateScorer.GetExpeditionRecoveryNeed(actor);
+        float domain = Mathf.Max(restNeed, recoveryNeed * 0.95f);
+        reason = $"restNeed={restNeed:0.###} recovery={recoveryNeed:0.###}";
         return domain;
     }
 }
@@ -361,12 +366,6 @@ public sealed class ToiletJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.Toilet;
     public override string Name => "ToiletJobGiver";
-
-    public override bool MatchesAction(AIActionSet actionSet)
-    {
-        return actionSet is AIFacilityRoleAction roleAction
-            && roleAction.Role == FacilityRole.Toilet;
-    }
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
@@ -381,12 +380,6 @@ public sealed class HygieneJobGiver : CharacterAiJobGiver
     public override CharacterAiBranch Branch => CharacterAiBranch.Hygiene;
     public override string Name => "HygieneJobGiver";
 
-    public override bool MatchesAction(AIActionSet actionSet)
-    {
-        return actionSet is AIFacilityRoleAction roleAction
-            && roleAction.Role == FacilityRole.Hygiene;
-    }
-
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
         float hygieneNeed = FacilityCandidateScorer.GetNeedScore(actor, FacilityRole.Hygiene);
@@ -399,7 +392,6 @@ public sealed class WorkJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.Work;
     public override string Name => "WorkJobGiver";
-    public override bool MatchesAction(AIActionSet actionSet) => actionSet is AIWork;
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
@@ -420,7 +412,8 @@ public sealed class WorkJobGiver : CharacterAiJobGiver
             Need(actor, CharacterCondition.SLEEP),
             Need(actor, CharacterCondition.EXCRETION),
             Need(actor, CharacterCondition.HYGIENE) * 0.7f,
-            Need(actor, CharacterCondition.MOOD) * 0.8f);
+            Need(actor, CharacterCondition.MOOD) * 0.8f,
+            FacilityCandidateScorer.GetExpeditionRecoveryNeed(actor));
         float wellness = 1f - Mathf.Clamp01((survivalPressure - 0.25f) / 0.75f);
         float domain = Mathf.Lerp(0.2f, 1f, wellness);
         reason = $"onDuty survivalPressure={survivalPressure:0.###} wellness={wellness:0.###}";
@@ -432,7 +425,6 @@ public sealed class ShoppingJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.Shopping;
     public override string Name => "ShoppingJobGiver";
-    public override bool MatchesAction(AIActionSet actionSet) => actionSet is AIShopping;
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
@@ -446,7 +438,6 @@ public sealed class LookAroundJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.LookAround;
     public override string Name => "LookAroundJobGiver";
-    public override bool MatchesAction(AIActionSet actionSet) => actionSet is AILookAround;
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
@@ -468,7 +459,6 @@ public sealed class WaitJobGiver : CharacterAiJobGiver
 {
     public override CharacterAiBranch Branch => CharacterAiBranch.Wait;
     public override string Name => "WaitJobGiver";
-    public override bool MatchesAction(AIActionSet actionSet) => actionSet is AIWait;
 
     protected override float GetDomainScore(CharacterActor actor, out string reason)
     {
@@ -509,30 +499,57 @@ public interface ICharacterAiJobGiverCatalog
 
 public sealed class CharacterAiJobGiverCatalog : ICharacterAiJobGiverCatalog
 {
-    public CharacterAiJobGiver ExitDungeon { get; } = new ExitDungeonJobGiver();
-    public CharacterAiJobGiver GetFood { get; } = new GetFoodJobGiver();
-    public CharacterAiJobGiver Rest { get; } = new RestJobGiver();
-    public CharacterAiJobGiver Toilet { get; } = new ToiletJobGiver();
-    public CharacterAiJobGiver Hygiene { get; } = new HygieneJobGiver();
-    public CharacterAiJobGiver Work { get; } = new WorkJobGiver();
-    public CharacterAiJobGiver Shopping { get; } = new ShoppingJobGiver();
-    public CharacterAiJobGiver LookAround { get; } = new LookAroundJobGiver();
-    public CharacterAiJobGiver Wait { get; } = new WaitJobGiver();
+    private readonly Dictionary<CharacterAiBranch, CharacterAiJobGiver> jobGivers =
+        new Dictionary<CharacterAiBranch, CharacterAiJobGiver>();
+
+    public CharacterAiJobGiverCatalog()
+    {
+        Register(new ExitDungeonJobGiver());
+        Register(new GetFoodJobGiver());
+        Register(new RestJobGiver());
+        Register(new ToiletJobGiver());
+        Register(new HygieneJobGiver());
+        Register(new WorkJobGiver());
+        Register(new ShoppingJobGiver());
+        Register(new LookAroundJobGiver());
+        Register(new WaitJobGiver());
+    }
+
+    public CharacterAiJobGiver ExitDungeon => Get(CharacterAiBranch.ExitDungeon);
+    public CharacterAiJobGiver GetFood => Get(CharacterAiBranch.Eat);
+    public CharacterAiJobGiver Rest => Get(CharacterAiBranch.Rest);
+    public CharacterAiJobGiver Toilet => Get(CharacterAiBranch.Toilet);
+    public CharacterAiJobGiver Hygiene => Get(CharacterAiBranch.Hygiene);
+    public CharacterAiJobGiver Work => Get(CharacterAiBranch.Work);
+    public CharacterAiJobGiver Shopping => Get(CharacterAiBranch.Shopping);
+    public CharacterAiJobGiver LookAround => Get(CharacterAiBranch.LookAround);
+    public CharacterAiJobGiver Wait => Get(CharacterAiBranch.Wait);
 
     public CharacterAiJobGiver Get(CharacterAiBranch branch)
     {
-        return branch switch
+        return jobGivers.TryGetValue(branch, out CharacterAiJobGiver jobGiver)
+            ? jobGiver
+            : null;
+    }
+
+    public void Register(CharacterAiJobGiver jobGiver, bool replace = false)
+    {
+        if (jobGiver == null)
         {
-            CharacterAiBranch.ExitDungeon => ExitDungeon,
-            CharacterAiBranch.Eat => GetFood,
-            CharacterAiBranch.Rest => Rest,
-            CharacterAiBranch.Toilet => Toilet,
-            CharacterAiBranch.Hygiene => Hygiene,
-            CharacterAiBranch.Work => Work,
-            CharacterAiBranch.Shopping => Shopping,
-            CharacterAiBranch.LookAround => LookAround,
-            CharacterAiBranch.Wait => Wait,
-            _ => null
-        };
+            throw new ArgumentNullException(nameof(jobGiver));
+        }
+
+        if (jobGiver.Branch == CharacterAiBranch.None)
+        {
+            throw new InvalidOperationException("AI job givers require a concrete branch.");
+        }
+
+        if (!replace && jobGivers.ContainsKey(jobGiver.Branch))
+        {
+            throw new InvalidOperationException(
+                $"An AI job giver is already registered for {jobGiver.Branch}.");
+        }
+
+        jobGivers[jobGiver.Branch] = jobGiver;
     }
 }

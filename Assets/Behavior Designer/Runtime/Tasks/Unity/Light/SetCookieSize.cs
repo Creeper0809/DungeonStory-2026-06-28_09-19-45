@@ -31,7 +31,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityLight
                 return TaskStatus.Failure;
             }
 
-            light.cookieSize = cookieSize.Value;
+            light.cookieSize2D = Vector2.one * cookieSize.Value;
             return TaskStatus.Success;
         }
 

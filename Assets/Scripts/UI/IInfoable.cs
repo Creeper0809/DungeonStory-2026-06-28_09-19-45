@@ -4,5 +4,4 @@ using UnityEngine;
 
 public interface IInfoable
 {
-    public InfoFeedEvent.Type GetInfoType();
 }

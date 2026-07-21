@@ -22,7 +22,11 @@ public sealed class ResourceTmpKoreanFontProvider : ITmpKoreanFontProvider
             return cachedFont;
         }
 
-        cachedSettings ??= resourcesAssetLoader.LoadRequired<TmpKoreanFontSettingsSO>(SettingsResourcePath);
+        if (cachedSettings == null)
+        {
+            cachedSettings = resourcesAssetLoader.LoadRequired<TmpKoreanFontSettingsSO>(SettingsResourcePath);
+        }
+
         cachedFont = cachedSettings.GetRequiredFont();
         return cachedFont;
     }

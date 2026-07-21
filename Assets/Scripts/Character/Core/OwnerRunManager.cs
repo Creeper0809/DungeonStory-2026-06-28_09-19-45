@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Sirenix.OdinInspector;
 using UnityEngine;
@@ -11,17 +12,19 @@ public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<Charac
     [SerializeField] private GameObject ownerPrefab;
     [SerializeField] private Transform ownerSpawnPoint;
     [SerializeField] private Vector2Int ownerSpawnGridPosition = Vector2Int.zero;
-    [SerializeField] private bool autoSpawnDefaultOwner = true;
+    [SerializeField] private bool autoSpawnDefaultOwner;
 
     public Data<CharacterSO> selectedOwnerData = new Data<CharacterSO>();
 
     private CharacterActor currentOwnerActor;
     private IOwnerCandidateCatalog ownerCandidateCatalog;
     private IOwnerCharacterFactory ownerCharacterFactory;
+    private IReadOnlyList<CharacterSO> ownerCandidatesView;
 
     public CharacterActor CurrentOwnerActor => currentOwnerActor;
     public bool IsRunEnded { get; private set; }
-    public CharacterSO[] OwnerCandidates => ownerCandidates;
+    public IReadOnlyList<CharacterSO> OwnerCandidates =>
+        ownerCandidatesView ??= ReadOnlyView.List(ownerCandidates);
 
     public event Action<CharacterSO> OnOwnerSelected;
     public event Action<CharacterActor, string> OnRunEnded;
@@ -68,7 +71,7 @@ public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<Charac
         SelectOwner(ownerCandidates[index]);
     }
 
-    public void SelectOwner(CharacterSO ownerData)
+    public void SelectOwner(CharacterSO ownerData, string displayNameOverride = null)
     {
         if (ownerData == null)
         {
@@ -90,7 +93,34 @@ public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<Charac
         selectedOwnerData.Value = ownerData;
         currentOwnerActor = SpawnOwner(ownerData);
         OnOwnerSelected?.Invoke(ownerData);
-        NoticeFeedEvent.Trigger($"{ownerData.characterName} 사장으로 시작", NoticeFeedEvent.Grade.NONE);
+        string displayName = string.IsNullOrWhiteSpace(displayNameOverride)
+            ? ownerData.characterName
+            : displayNameOverride.Trim();
+        string notice = displayName.EndsWith("사장", StringComparison.Ordinal)
+            ? $"{displayName}으로 시작"
+            : $"{displayName} 사장으로 시작";
+        NoticeFeedEvent.Trigger(notice, NoticeFeedEvent.Grade.NONE);
+    }
+
+    public CharacterActor RestoreOwner(CharacterSO ownerData)
+    {
+        if (ownerData == null)
+        {
+            throw new ArgumentNullException(nameof(ownerData));
+        }
+
+        if (currentOwnerActor != null)
+        {
+            currentOwnerActor.gameObject.SetActive(false);
+            Destroy(currentOwnerActor.gameObject);
+        }
+
+        selectedOwnerData ??= new Data<CharacterSO>();
+        selectedOwnerData.Value = ownerData;
+        IsRunEnded = false;
+        currentOwnerActor = SpawnOwner(ownerData);
+        OnOwnerSelected?.Invoke(ownerData);
+        return currentOwnerActor;
     }
 
     public void HandleOwnerDeath(CharacterActor owner, string reason)
@@ -100,13 +130,35 @@ public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<Charac
             return;
         }
 
+        CompleteRun(DungeonRunOutcome.Defeat, reason);
+    }
+
+    public bool CompleteRun(DungeonRunOutcome outcome, string reason)
+    {
+        if (outcome == DungeonRunOutcome.None || IsRunEnded || currentOwnerActor == null)
+        {
+            return false;
+        }
+
         IsRunEnded = true;
-        string message = string.IsNullOrWhiteSpace(reason)
-            ? "사장이 사망해 런이 종료되었습니다."
-            : $"사장이 사망해 런이 종료되었습니다. 원인: {reason}";
-        NoticeFeedEvent.Trigger(message, NoticeFeedEvent.Grade.DANGER);
-        OnRunEnded?.Invoke(owner, reason);
-        OwnerRunEndedEvent.Trigger(owner, reason);
+        string resolvedReason = string.IsNullOrWhiteSpace(reason)
+            ? outcome == DungeonRunOutcome.Victory ? "오펜스를 완수해 던전의 진실을 밝혔습니다" : "사장 사망"
+            : reason.Trim();
+        NoticeFeedEvent.Trigger(
+            outcome == DungeonRunOutcome.Victory
+                ? $"런 승리: {resolvedReason}"
+                : $"런 패배: {resolvedReason}",
+            outcome == DungeonRunOutcome.Victory
+                ? NoticeFeedEvent.Grade.NONE
+                : NoticeFeedEvent.Grade.DANGER);
+        OnRunEnded?.Invoke(currentOwnerActor, resolvedReason);
+        OwnerRunEndedEvent.Trigger(currentOwnerActor, resolvedReason, outcome);
+        return true;
+    }
+
+    public void RestoreRunEnded(bool value)
+    {
+        IsRunEnded = value;
     }
 
     public CharacterSO GetDefaultOwner()
@@ -136,6 +188,7 @@ public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<Charac
                 .Where((candidate) => candidate != null)
                 .Distinct()
                 .ToArray();
+            ownerCandidatesView = null;
         }
     }
 
@@ -145,6 +198,7 @@ public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<Charac
             .Where((candidate) => candidate != null)
             .Distinct()
             .ToArray() ?? Array.Empty<CharacterSO>();
+        ownerCandidatesView = null;
     }
 
     private IOwnerCharacterFactory ResolveOwnerCharacterFactory()
@@ -172,23 +226,27 @@ public class OwnerRunManager : SerializedMonoBehaviour, UtilEventListener<Charac
     }
 }
 
-public struct OwnerRunEndedEvent
+public readonly struct OwnerRunEndedEvent
 {
-    public CharacterActor OwnerActor;
-    public string Reason;
+    public CharacterActor OwnerActor { get; }
+    public string Reason { get; }
+    public DungeonRunOutcome Outcome { get; }
 
-    public OwnerRunEndedEvent(CharacterActor owner, string reason)
+    public OwnerRunEndedEvent(
+        CharacterActor owner,
+        string reason,
+        DungeonRunOutcome outcome = DungeonRunOutcome.Defeat)
     {
         OwnerActor = owner;
         Reason = reason;
+        Outcome = outcome == DungeonRunOutcome.None ? DungeonRunOutcome.Defeat : outcome;
     }
 
-    private static OwnerRunEndedEvent e;
-
-    public static void Trigger(CharacterActor owner, string reason)
+    public static void Trigger(
+        CharacterActor owner,
+        string reason,
+        DungeonRunOutcome outcome = DungeonRunOutcome.Defeat)
     {
-        e.OwnerActor = owner;
-        e.Reason = reason;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new OwnerRunEndedEvent(owner, reason, outcome));
     }
 }

@@ -1,12 +1,16 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-public interface IEventAlertCanvasProvider
+public interface IDungeonUiCanvasProvider
 {
     Canvas GetOrCreateCanvas();
 }
 
-public sealed class EventAlertCanvasProvider : IEventAlertCanvasProvider
+public interface IEventAlertCanvasProvider : IDungeonUiCanvasProvider
+{
+}
+
+public sealed class EventAlertCanvasProvider : IEventAlertCanvasProvider, IDungeonUiCanvasProvider
 {
     private readonly DungeonSceneRuntimeReferences sceneReferences;
     private Canvas runtimeCanvas;

@@ -7,6 +7,17 @@ using Object = UnityEngine.Object;
 
 public static class StaffDiscontentDebugScenarios
 {
+    private static readonly HashSet<string> ScenarioStaffNames = new HashSet<string>
+    {
+        "Low Satisfaction Staff",
+        "Efficiency Drop Staff",
+        "Work Disruption Staff",
+        "Moderate Low Mood Staff",
+        "Departing Staff",
+        "Rebel Staff",
+        "Escalating Rebel Staff"
+    };
+
     [MenuItem("DungeonStory/Debug/Character/Run P2 Staff Discontent Scenarios")]
     public static void RunFromMenu()
     {
@@ -20,6 +31,7 @@ public static class StaffDiscontentDebugScenarios
     public static bool RunAll(bool logSuccess)
     {
         List<string> errors = new List<string>();
+        RunScenario("Moderate low mood does not permanently remove staff", VerifyModerateLowMoodDoesNotDepart, errors);
 
         RunScenario("만족도 낮음 상태", VerifyLowSatisfactionStage, errors);
         RunScenario("1단계 효율 저하", VerifyEfficiencyDropMultiplier, errors);
@@ -48,16 +60,56 @@ public static class StaffDiscontentDebugScenarios
 
     private static void RunScenario(string name, Func<bool> scenario, List<string> errors)
     {
+        bool passed = false;
         try
         {
-            if (scenario()) return;
+            passed = scenario();
         }
         catch (Exception ex)
         {
             Debug.LogException(ex);
         }
+        finally
+        {
+            CleanupScenarioArtifacts();
+        }
 
-        errors.Add(name);
+        if (!passed)
+        {
+            errors.Add(name);
+        }
+    }
+
+    private static void CleanupScenarioArtifacts()
+    {
+        CharacterActor[] actors = Object.FindObjectsByType<CharacterActor>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None);
+        foreach (CharacterActor actor in actors)
+        {
+            if (actor == null || !ScenarioStaffNames.Contains(actor.name))
+            {
+                continue;
+            }
+
+            if (actor.data != null && !AssetDatabase.Contains(actor.data))
+            {
+                Object.DestroyImmediate(actor.data);
+            }
+
+            Object.DestroyImmediate(actor.gameObject);
+        }
+
+        StaffDiscontentRuntime[] runtimes = Object.FindObjectsByType<StaffDiscontentRuntime>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None);
+        foreach (StaffDiscontentRuntime runtime in runtimes)
+        {
+            if (runtime != null && runtime.name == "StaffDiscontentRuntime_Test")
+            {
+                Object.DestroyImmediate(runtime.gameObject);
+            }
+        }
     }
 
     private static bool VerifyLowSatisfactionStage()
@@ -87,6 +139,27 @@ public static class StaffDiscontentDebugScenarios
             && record.Stage == StaffDiscontentStage.EfficiencyDrop
             && multiplier < 1f
             && multiplier > 0f;
+
+        DestroyStaff(staff);
+        return valid;
+    }
+
+    private static bool VerifyModerateLowMoodDoesNotDepart()
+    {
+        using ScenarioRuntime runtime = new ScenarioRuntime();
+        CharacterActor staff = CreateStaff(206, "Moderate Low Mood Staff", 45f);
+        StaffDiscontentRecord record = null;
+        StaffDiscontentOutcome outcome = StaffDiscontentOutcome.None;
+        for (int i = 0; i < 5; i++)
+        {
+            record = runtime.Runtime.ProcessStaff(CharacterActor.From(staff), out outcome);
+        }
+
+        bool valid = record != null
+            && record.Stage != StaffDiscontentStage.Departure
+            && outcome != StaffDiscontentOutcome.PermanentDeparture
+            && !record.IsPermanentLoss
+            && staff.CurrentLifecycleState != CharacterLifecycleState.Despawned;
 
         DestroyStaff(staff);
         return valid;
@@ -178,17 +251,21 @@ public static class StaffDiscontentDebugScenarios
         obj.AddComponent<AbilityWork>();
         AIBrain brain = obj.AddComponent<AIBrain>();
         brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
+        CharacterAiEditorTestDependencies.Inject(obj);
         CharacterActor character = obj.GetComponent<CharacterActor>();
         typeof(CharacterActor)
             .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.Invoke(character, null);
         character.RefreshAbilityCache();
         character.Initialization(data);
+        character.Identity.SetPersistentId($"staff-discontent-test:{id}");
         character.SetLifecycleState(CharacterLifecycleState.Active);
+        character.stats[CharacterCondition.SLEEP] = 50f;
+        character.stats[CharacterCondition.HUNGER] = 50f;
+        character.stats[CharacterCondition.FUN] = 50f;
+        character.stats[CharacterCondition.EXCRETION] = 50f;
+        character.stats[CharacterCondition.HYGIENE] = 50f;
         character.stats[CharacterCondition.MOOD] = mood;
-        character.stats[CharacterCondition.SLEEP] = 80f;
-        character.stats[CharacterCondition.HUNGER] = 80f;
-        character.stats[CharacterCondition.FUN] = 80f;
         return character;
     }
 
@@ -212,6 +289,7 @@ public static class StaffDiscontentDebugScenarios
         {
             runtimeObject = new GameObject("StaffDiscontentRuntime_Test");
             Runtime = runtimeObject.AddComponent<StaffDiscontentRuntime>();
+            CharacterAiEditorTestDependencies.Inject(Runtime, System.Array.Empty<GameObject>());
         }
 
         public StaffDiscontentRuntime Runtime { get; }

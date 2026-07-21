@@ -26,15 +26,25 @@ MonoBehaviour:
   description: "\uCCAD\uC18C\uC640 \uC720\uC9C0\uBCF4\uC218\uC5D0 \uAC15\uD558\uACE0
     \uC624\uC5FC \uC0AC\uACE0\uC5D0 \uB35C \uD754\uB4E4\uB9B0\uB2E4."
   statBonus:
-    attack: 0
-    sales: 0
-    research: 0
-    moveSpeed: 0
-    strength: 0
-    toughness: 0
-    dexterity: 1
-    cleaning: 3
-    endurance: 0
+    entries:
+    - statId: stat:attack
+      value: 0
+    - statId: stat:sales
+      value: 0
+    - statId: stat:research
+      value: 0
+    - statId: stat:move-speed
+      value: 0
+    - statId: stat:strength
+      value: 0
+    - statId: stat:toughness
+      value: 0
+    - statId: stat:dexterity
+      value: 1
+    - statId: stat:cleaning
+      value: 3
+    - statId: stat:endurance
+      value: 0
   modifiers:
     consumptionMultiplier: 0.95
     spendingMultiplier: 1

@@ -32,6 +32,11 @@ public sealed class UnityPlayerInputReader : IPlayerInputReader
     {
         get
         {
+            if (DungeonAutomationInputState.TryGetPointerPosition(out Vector3 automationPosition))
+            {
+                return automationPosition;
+            }
+
             if (Mouse.current != null)
             {
                 Vector2 position = Mouse.current.position.ReadValue();
@@ -52,16 +57,25 @@ public sealed class UnityPlayerInputReader : IPlayerInputReader
 
     public bool GetKey(KeyCode keyCode)
     {
-        return IsLegacyKeyPressed(keyCode) || IsInputSystemKeyPressed(keyCode);
+        return DungeonAutomationInputState.GetKey(keyCode)
+            || IsLegacyKeyPressed(keyCode)
+            || IsInputSystemKeyPressed(keyCode);
     }
 
     public bool GetKeyDown(KeyCode keyCode)
     {
-        return IsLegacyKeyPressedThisFrame(keyCode) || IsInputSystemKeyPressedThisFrame(keyCode);
+        return DungeonAutomationInputState.GetKeyDown(keyCode)
+            || IsLegacyKeyPressedThisFrame(keyCode)
+            || IsInputSystemKeyPressedThisFrame(keyCode);
     }
 
     public bool GetMouseButtonDown(int button)
     {
+        if (DungeonAutomationInputState.GetMouseButtonDown(button))
+        {
+            return true;
+        }
+
         if (Mouse.current != null)
         {
             return button switch
@@ -78,6 +92,11 @@ public sealed class UnityPlayerInputReader : IPlayerInputReader
 
     public bool GetMouseButton(int button)
     {
+        if (DungeonAutomationInputState.GetMouseButton(button))
+        {
+            return true;
+        }
+
         if (Mouse.current != null)
         {
             return button switch

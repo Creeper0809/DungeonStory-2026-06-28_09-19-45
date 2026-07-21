@@ -119,15 +119,17 @@ public static class CharacterAiPlanDebugScenarios
         RunScenario("BehaviorTree wrapper debug", VerifyBehaviorTreeWrapperDebug, errors);
         RunScenario("BehaviorTree visual graph", VerifyBehaviorTreeVisualGraph, errors);
         RunScenario("BehaviorTree runtime branch selection", VerifyBehaviorTreeRuntimeBranchSelection, errors);
-        RunScenario("Runtime component reuse", VerifyGameManagerReusesSceneRuntime, errors);
+        RunScenario("GameManager has no runtime service locator", VerifyGameManagerHasNoRuntimeServiceLocator, errors);
         RunScenario("Runtime actor BehaviorTree contract", VerifyRuntimeActorBehaviorTreeContract, errors);
         RunScenario("Director context compression", VerifyDirectorContextCompression, errors);
         RunScenario("Director prompt numeric contract", VerifyDirectorPromptNumericContract, errors);
         RunScenario("Director routine macro trigger", VerifyDirectorRoutineMacroTrigger, errors);
-        RunScenario("Director rejected macro request keeps retry window open", VerifyDirectorRejectedMacroRequestKeepsRetryWindowOpen, errors);
-        RunScenario("Social rejected request does not start cooldown", VerifySocialRejectedRequestDoesNotStartCooldown, errors);
+        RunScenario("Director rejected macro request starts backoff", VerifyDirectorRejectedMacroRequestStartsBackoff, errors);
+        RunScenario("Social rejected request starts cooldown", VerifySocialRejectedRequestStartsCooldown, errors);
         RunScenario("LLM queue bubble drop policy", VerifyLlmQueueDropPolicy, errors);
         RunScenario("LLM queue capacity protects non-bubble requests", VerifyLlmQueueCapacityProtectsNonBubbleRequests, errors);
+        RunScenario("LLM queue supports open request profiles", VerifyLlmQueueSupportsOpenRequestProfiles, errors);
+        RunScenario("LLM queue cancellation completes exactly once", VerifyLlmQueueCancellationCompletesExactlyOnce, errors);
         RunScenario("LLM persona request lifecycle", VerifyPersonaRequestLifecycle, errors);
         RunScenario("LLM persona invalid JSON rejection", VerifyPersonaRejectsInvalidJson, errors);
         RunScenario("Bubble has no original-text fallback", VerifyBubbleNoFallback, errors);
@@ -274,6 +276,8 @@ public static class CharacterAiPlanDebugScenarios
 
             BuildableObject good = goodObject.GetComponent<BuildableObject>();
             BuildableObject bad = badObject.GetComponent<BuildableObject>();
+            CharacterAiEditorTestDependencies.Inject(good);
+            CharacterAiEditorTestDependencies.Inject(bad);
             good.Initialization(goodData, Vector2Int.zero);
             bad.Initialization(badData, Vector2Int.right);
 
@@ -368,6 +372,13 @@ public static class CharacterAiPlanDebugScenarios
         }
     }
 
+    public static bool RunLlmBackpressureScenarios()
+    {
+        return VerifyDirectorRejectedMacroRequestStartsBackoff()
+            && VerifySocialRejectedRequestStartsCooldown()
+            && VerifyLlmQueueCapacityProtectsNonBubbleRequests();
+    }
+
     public static string RunPlayModeMoodImpulseRuntimeProbe()
     {
         if (!Application.isPlaying)
@@ -387,6 +398,7 @@ public static class CharacterAiPlanDebugScenarios
             queue.ConfigureTimeoutsForDebug(45f, 45f, 45f, 20f, 20f);
             actorObject = CreatePlayActorObject("PlayMoodImpulseActor");
             actorObject.AddComponent<AbilityWork>();
+            CharacterAiEditorTestDependencies.Inject(actorObject);
             actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
             data = CreateCharacterData(CharacterType.Customer, "Play Mood Impulse", "Slime");
             CharacterActor actor = actorObject.GetComponent<CharacterActor>();
@@ -501,6 +513,7 @@ public static class CharacterAiPlanDebugScenarios
             playModeMoodImpulseLlmActorObject.AddComponent<AbilityShopping>();
         }
 
+        CharacterAiEditorTestDependencies.Inject(playModeMoodImpulseLlmActorObject);
         playModeMoodImpulseLlmActorObject
             .GetComponent<CharacterAbilityCache>()
             ?.RefreshAbilityCache();
@@ -1055,6 +1068,7 @@ public static class CharacterAiPlanDebugScenarios
             speaker.Initialize(speakerData);
             listener.Initialize(listenerData);
             target.Initialize(targetData);
+            target.Identity.SetPersistentId("world:test:target");
             speaker.SetLifecycleState(CharacterLifecycleState.Active);
             listener.SetLifecycleState(CharacterLifecycleState.Active);
             target.SetLifecycleState(CharacterLifecycleState.Active);
@@ -1069,7 +1083,7 @@ public static class CharacterAiPlanDebugScenarios
             {
                 type = SocialRumorType.Complaint,
                 targetType = SocialRumorTargetType.Character,
-                targetCharacterId = targetData.id,
+                targetCharacterId = target.Identity.PersistentId,
                 targetCharacterName = targetData.characterName,
                 sentiment = -0.75f,
                 spreadChance = 1f,
@@ -1141,9 +1155,9 @@ public static class CharacterAiPlanDebugScenarios
 
         string prompt =
             "Interpret this NPC social event. Return exactly one compact JSON object and no markdown. "
-            + "Required shape: {\"rumorType\":\"Recommendation\",\"targetType\":\"Facility\",\"targetFacilityId\":910201,\"targetFacilityTag\":\"Rest\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":0.75,\"summary\":\"short text\",\"spreadChance\":0.6,\"trustImpact\":0.1,\"validSeconds\":600}. "
+            + "Required shape: {\"rumorType\":\"Recommendation\",\"targetType\":\"Facility\",\"targetFacilityId\":910201,\"targetFacilityTag\":\"Rest\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":0.75,\"summary\":\"short text\",\"spreadChance\":0.6,\"trustImpact\":0.1,\"validSeconds\":600}. "
             + "All numeric fields must be raw JSON numbers, never strings, words, or null. "
-            + "targetFacilityId and targetCharacterId must be integers; use -1 when unused. "
+            + "targetFacilityId must be an integer; targetCharacterId must be a persistent-ID string. "
             + "sentiment and trustImpact must be between -1 and 1. spreadChance must be between 0 and 1. "
             + "validSeconds must be 600 for this probe and must never be 3600. "
             + "Allowed rumorType: None, Complaint, Recommendation, Warning, Praise. "
@@ -1368,8 +1382,16 @@ public static class CharacterAiPlanDebugScenarios
         playModeSocialLogStartedAt = Time.realtimeSinceStartup;
         playModeSocialLogEventTriggered = true;
         int eventCountBefore = runtime.ActorLogEventCountForDebug;
-        speaker.AddLog(
-            "AI failure: blocked path to Rest facility id 910401; destination occupied; AUTO_SOCIAL_LOG_PROBE_910401.");
+        speaker.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Social,
+            CharacterActivityOutcomes.Failed,
+            "AI failure: blocked path to Rest facility id 910401; destination occupied; AUTO_SOCIAL_LOG_PROBE_910401.",
+            actionId: "probe:social-log",
+            targetId: "facility:910401",
+            reasonCode: "destination-occupied",
+            facilityId: 910401,
+            sentiment: -0.65f,
+            bubbleEligible: true));
         playModeSocialLogEventObserved = runtime.ActorLogEventCountForDebug > eventCountBefore;
         playModeSocialLogRequestAcceptedObserved = playModeSocialLogEventObserved
             && string.IsNullOrWhiteSpace(runtime.LastRequestSkipDebug)
@@ -1640,7 +1662,14 @@ public static class CharacterAiPlanDebugScenarios
         int runningBefore = queue.RunningCount;
         playModeBubbleOriginalLine =
             "AI failure: no path to destination occupied; customer is unhappy.";
-        actor.AddLog(playModeBubbleOriginalLine);
+        actor.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Wait,
+            CharacterActivityOutcomes.Failed,
+            playModeBubbleOriginalLine,
+            actionId: "probe:bubble",
+            reasonCode: "destination-occupied",
+            sentiment: -0.6f,
+            bubbleEligible: true));
         playModeBubbleAccepted = queue.QueuedCount > queuedBefore
             || queue.RunningCount > runningBefore;
         playModeBubbleStartedAt = Time.realtimeSinceStartup;
@@ -1776,12 +1805,12 @@ public static class CharacterAiPlanDebugScenarios
 
     private static bool VerifySocialRumorJsonParser()
     {
-        string valid = "{\"rumorType\":\"Recommendation\",\"targetType\":\"Facility\",\"targetFacilityId\":120,\"targetFacilityTag\":\"Meal\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":0.7,\"summary\":\"meal was quick\",\"spreadChance\":0.8,\"trustImpact\":0.1,\"validSeconds\":600}";
-        string none = "{\"rumorType\":\"None\",\"targetType\":\"None\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":0,\"summary\":\"\",\"spreadChance\":0,\"trustImpact\":0,\"validSeconds\":0}";
-        string characterTarget = "{\"rumorType\":\"Complaint\",\"targetType\":\"Character\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":777201,\"targetCharacterName\":\"Rude Guest\",\"sentiment\":-0.65,\"summary\":\"cut in line\",\"spreadChance\":0.9,\"trustImpact\":0.2,\"validSeconds\":600}";
-        string invalidSentiment = "{\"rumorType\":\"Warning\",\"targetType\":\"Facility\",\"targetFacilityId\":120,\"targetFacilityTag\":\"Meal\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":2,\"summary\":\"bad\",\"spreadChance\":0.5,\"trustImpact\":0,\"validSeconds\":600}";
-        string missingFacility = "{\"rumorType\":\"Complaint\",\"targetType\":\"Facility\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":-0.5,\"summary\":\"bad\",\"spreadChance\":0.5,\"trustImpact\":0,\"validSeconds\":600}";
-        string lowSpreadChance = "{\"rumorType\":\"Warning\",\"targetType\":\"Facility\",\"targetFacilityId\":120,\"targetFacilityTag\":\"Meal\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":-0.5,\"summary\":\"bad\",\"spreadChance\":0.01,\"trustImpact\":0,\"validSeconds\":600}";
+        string valid = "{\"rumorType\":\"Recommendation\",\"targetType\":\"Facility\",\"targetFacilityId\":120,\"targetFacilityTag\":\"Meal\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":0.7,\"summary\":\"meal was quick\",\"spreadChance\":0.8,\"trustImpact\":0.1,\"validSeconds\":600}";
+        string none = "{\"rumorType\":\"None\",\"targetType\":\"None\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":0,\"summary\":\"\",\"spreadChance\":0,\"trustImpact\":0,\"validSeconds\":0}";
+        string characterTarget = "{\"rumorType\":\"Complaint\",\"targetType\":\"Character\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":\"world:test:777201\",\"targetCharacterName\":\"Rude Guest\",\"sentiment\":-0.65,\"summary\":\"cut in line\",\"spreadChance\":0.9,\"trustImpact\":0.2,\"validSeconds\":600}";
+        string invalidSentiment = "{\"rumorType\":\"Warning\",\"targetType\":\"Facility\",\"targetFacilityId\":120,\"targetFacilityTag\":\"Meal\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":2,\"summary\":\"bad\",\"spreadChance\":0.5,\"trustImpact\":0,\"validSeconds\":600}";
+        string missingFacility = "{\"rumorType\":\"Complaint\",\"targetType\":\"Facility\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":-0.5,\"summary\":\"bad\",\"spreadChance\":0.5,\"trustImpact\":0,\"validSeconds\":600}";
+        string lowSpreadChance = "{\"rumorType\":\"Warning\",\"targetType\":\"Facility\",\"targetFacilityId\":120,\"targetFacilityTag\":\"Meal\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":-0.5,\"summary\":\"bad\",\"spreadChance\":0.01,\"trustImpact\":0,\"validSeconds\":600}";
 
         bool validParsed = LlmJsonResponseParser.TryParse(valid, out SocialRumorJsonDto dto, out _)
             && dto.rumorType == "Recommendation"
@@ -1790,7 +1819,7 @@ public static class CharacterAiPlanDebugScenarios
             && noneDto.rumorType == "None";
         bool characterParsed = LlmJsonResponseParser.TryParse(characterTarget, out SocialRumorJsonDto characterDto, out _)
             && characterDto.targetType == "Character"
-            && characterDto.targetCharacterId == 777201
+            && characterDto.targetCharacterId == "world:test:777201"
             && characterDto.targetFacilityId == -1;
         bool invalidRejected = !LlmJsonResponseParser.TryParse(invalidSentiment, out SocialRumorJsonDto _, out string sentimentError)
             && sentimentError.Contains("sentiment", System.StringComparison.Ordinal);
@@ -1915,6 +1944,7 @@ public static class CharacterAiPlanDebugScenarios
             speaker.Initialize(speakerData);
             listener.Initialize(listenerData);
             target.Initialize(targetData);
+            target.Identity.SetPersistentId("world:test:target-playmode");
             speaker.SetLifecycleState(CharacterLifecycleState.Active);
             listener.SetLifecycleState(CharacterLifecycleState.Active);
             target.SetLifecycleState(CharacterLifecycleState.Active);
@@ -1928,7 +1958,7 @@ public static class CharacterAiPlanDebugScenarios
             {
                 type = SocialRumorType.Complaint,
                 targetType = SocialRumorTargetType.Character,
-                targetCharacterId = targetData.id,
+                targetCharacterId = target.Identity.PersistentId,
                 targetCharacterName = targetData.characterName,
                 sentiment = -0.75f,
                 spreadChance = 1f,
@@ -1986,6 +2016,8 @@ public static class CharacterAiPlanDebugScenarios
 
             BuildableObject good = goodObject.GetComponent<BuildableObject>();
             BuildableObject bad = badObject.GetComponent<BuildableObject>();
+            CharacterAiEditorTestDependencies.Inject(good);
+            CharacterAiEditorTestDependencies.Inject(bad);
             good.Initialization(goodData, Vector2Int.zero);
             bad.Initialization(badData, Vector2Int.right);
 
@@ -2054,6 +2086,7 @@ public static class CharacterAiPlanDebugScenarios
         GameObject gridObject = EnsureGridForScenario(out bool createdGrid);
         GameObject actorObject = CreateActorObject("RimWorldStyleUtilityActor");
         actorObject.AddComponent<AbilityWork>();
+        CharacterAiEditorTestDependencies.Inject(actorObject);
         actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "RimWorld Utility Customer", "Slime");
         ProbeExitDungeonActionSet lowExitActionSet = ScriptableObject.CreateInstance<ProbeExitDungeonActionSet>();
@@ -2207,6 +2240,7 @@ public static class CharacterAiPlanDebugScenarios
     {
         GameObject actorObject = CreateActorObject("MoodImpulseBiasActor");
         actorObject.AddComponent<AbilityWork>();
+        CharacterAiEditorTestDependencies.Inject(actorObject);
         actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "Mood Bias Worker", "Slime");
         data.aiPersonality.diligence = 1.4f;
@@ -2291,6 +2325,7 @@ public static class CharacterAiPlanDebugScenarios
     {
         GameObject actorObject = CreateActorObject("MoodImpulseInterruptActor");
         actorObject.AddComponent<AbilityWork>();
+        CharacterAiEditorTestDependencies.Inject(actorObject);
         actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "Mood Interrupt Worker", "Slime");
         ProbeContinuableWorkActionSet workActionSet = ScriptableObject.CreateInstance<ProbeContinuableWorkActionSet>();
@@ -2305,8 +2340,12 @@ public static class CharacterAiPlanDebugScenarios
             actor.stats[CharacterCondition.SLEEP] = 100f;
             actor.stats[CharacterCondition.FUN] = 100f;
             actor.stats[CharacterCondition.MOOD] = 30f;
+            SerializedObject brainFixture = new SerializedObject(actor.Brain);
+            brainFixture.FindProperty("defaultActionPersistenceSeconds").floatValue = 0f;
+            brainFixture.FindProperty("actionTransitionCooldown").floatValue = 0f;
+            brainFixture.ApplyModifiedPropertiesWithoutUndo();
             AIAction runningAction = new AIAction { actionset = workActionSet };
-            runningAction.MarkStarted(Time.time);
+            runningAction.MarkStarted(Mathf.Max(0f, Time.time - 1f));
             actor.Brain.bestAction = runningAction;
             actor.Blackboard.SetMoodImpulse(new CharacterMoodImpulse
             {
@@ -2319,6 +2358,12 @@ public static class CharacterAiPlanDebugScenarios
 
             bool canContinue = actor.Brain.CanContinueCurrentAction(out string continueStatus);
             bool shouldStop = actor.Brain.ShouldStopCurrentActionForReplan(out string stopReason);
+            bool hasImpulse = actor.Blackboard.HasActiveMoodImpulse();
+            CharacterAiBranch runningBranch = CharacterMoodImpulseUtility.GetBranchForActionSet(workActionSet);
+            bool directInterrupt = CharacterMoodImpulseUtility.ShouldInterruptCurrentAction(
+                actor,
+                runningAction,
+                out string directReason);
             bool valid = !canContinue
                 && shouldStop
                 && continueStatus.Contains("Mood impulse", System.StringComparison.Ordinal)
@@ -2329,7 +2374,9 @@ public static class CharacterAiPlanDebugScenarios
                 Debug.LogError(
                     "Mood impulse interrupt probe failed: "
                     + $"canContinue={canContinue} continueStatus={continueStatus} "
-                    + $"shouldStop={shouldStop} stopReason={stopReason}");
+                    + $"shouldStop={shouldStop} stopReason={stopReason} "
+                    + $"hasImpulse={hasImpulse} branch={runningBranch} "
+                    + $"directInterrupt={directInterrupt} directReason={directReason}");
             }
 
             return valid;
@@ -2360,6 +2407,7 @@ public static class CharacterAiPlanDebugScenarios
             actor.Stats.Stats[CharacterCondition.FUN] = 100f;
 
             AiDirectorRuntime director = directorObject.GetComponent<AiDirectorRuntime>();
+            CharacterAiEditorTestDependencies.Inject(director);
             queue.ClearForDebug();
             bool shouldBefore = director.ShouldRequestMoodImpulse(actor);
             bool accepted = director.RequestMoodImpulse(actor);
@@ -2416,6 +2464,7 @@ public static class CharacterAiPlanDebugScenarios
         GameObject gridObject = EnsureGridForScenario(out bool createdGrid);
         GameObject actorObject = CreateActorObject("BtContinueCurrentActor");
         actorObject.AddComponent<AbilityWork>();
+        CharacterAiEditorTestDependencies.Inject(actorObject);
         actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "BT Continue Worker", "Slime");
         ProbeContinuableWorkActionSet actionSet = ScriptableObject.CreateInstance<ProbeContinuableWorkActionSet>();
@@ -2489,6 +2538,7 @@ public static class CharacterAiPlanDebugScenarios
         GameObject gridObject = EnsureGridForScenario(out bool createdGrid);
         GameObject actorObject = CreateActorObject("BtStopCurrentActor");
         actorObject.AddComponent<AbilityWork>();
+        CharacterAiEditorTestDependencies.Inject(actorObject);
         actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "BT Stop Worker", "Slime");
         ProbeContinuableWorkActionSet actionSet = ScriptableObject.CreateInstance<ProbeContinuableWorkActionSet>();
@@ -2566,6 +2616,7 @@ public static class CharacterAiPlanDebugScenarios
         GameObject gridObject = EnsureGridForScenario(out bool createdGrid);
         GameObject actorObject = CreateActorObject("BtDecisionTraceActor");
         actorObject.AddComponent<AbilityWork>();
+        CharacterAiEditorTestDependencies.Inject(actorObject);
         actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "BT Trace Worker", "Slime");
         ProbeContinuableWorkActionSet actionSet = ScriptableObject.CreateInstance<ProbeContinuableWorkActionSet>();
@@ -2745,6 +2796,7 @@ public static class CharacterAiPlanDebugScenarios
 
     private static bool VerifyMacroGoalsUseJobGiverCandidates()
     {
+        GameObject gridObject = EnsureGridForScenario(out bool createdGrid);
         GameObject actorObject = CreateActorObject("MacroJobGiverActor");
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "Macro JobGiver Customer", "Slime");
         ProbeEatActionSet eatActionSet = ScriptableObject.CreateInstance<ProbeEatActionSet>();
@@ -2839,6 +2891,10 @@ public static class CharacterAiPlanDebugScenarios
             Object.DestroyImmediate(eatActionSet);
             Object.DestroyImmediate(shoppingActionSet);
             Object.DestroyImmediate(lookAroundActionSet);
+            if (createdGrid && gridObject != null)
+            {
+                Object.DestroyImmediate(gridObject);
+            }
         }
     }
 
@@ -2847,6 +2903,7 @@ public static class CharacterAiPlanDebugScenarios
         GameObject gridObject = EnsureGridForScenario(out bool createdGrid);
         GameObject actorObject = CreateActorObject("JobGiverCacheInvalidationActor");
         actorObject.AddComponent<AbilityWork>();
+        CharacterAiEditorTestDependencies.Inject(actorObject);
         actorObject.GetComponent<CharacterAbilityCache>()?.RefreshAbilityCache();
         CharacterSO data = CreateCharacterData(CharacterType.Customer, "JobGiver Cache Customer", "Slime");
         ProbeOneShotWorkActionSet actionSet = ScriptableObject.CreateInstance<ProbeOneShotWorkActionSet>();
@@ -3246,37 +3303,28 @@ public static class CharacterAiPlanDebugScenarios
             : task.FriendlyName;
     }
 
-    private static bool VerifyGameManagerReusesSceneRuntime()
+    private static bool VerifyGameManagerHasNoRuntimeServiceLocator()
     {
-        LocalLlmRequestQueue existingRuntime = FindQueueInstance();
-        GameObject existingRuntimeObject = existingRuntime == null
-            ? new GameObject("ExistingLocalLlmRuntime", typeof(LocalLlmRequestQueue))
-            : existingRuntime.gameObject;
         GameObject managerObject = new GameObject("GameManagerRuntimeReuse");
         try
         {
             int queueCountBefore = Object.FindObjectsByType<LocalLlmRequestQueue>(
                 FindObjectsInactive.Include,
                 FindObjectsSortMode.None).Length;
-            GameManager manager = managerObject.AddComponent<GameManager>();
+            managerObject.AddComponent<GameManager>();
             MethodInfo method = typeof(GameManager)
                 .GetMethod("EnsureRuntimeComponent", BindingFlags.Instance | BindingFlags.NonPublic);
-            Component resolved = method?.Invoke(manager, new object[] { typeof(LocalLlmRequestQueue) }) as Component;
             int queueCountAfter = Object.FindObjectsByType<LocalLlmRequestQueue>(
                 FindObjectsInactive.Include,
                 FindObjectsSortMode.None).Length;
 
-            return resolved is LocalLlmRequestQueue
+            return method == null
                 && queueCountAfter == queueCountBefore
                 && managerObject.GetComponent<LocalLlmRequestQueue>() == null;
         }
         finally
         {
             Object.DestroyImmediate(managerObject);
-            if (existingRuntime == null)
-            {
-                Object.DestroyImmediate(existingRuntimeObject);
-            }
         }
     }
 
@@ -3293,15 +3341,14 @@ public static class CharacterAiPlanDebugScenarios
                 CharacterAiBehaviorDesignerGraphBuilder.EnsureCharacterAiExternalBehavior();
             CharacterAiBehaviorDesignerGraphBuilder.BuildVisualCharacterAiBehaviorTrees();
             CharacterAiScheduler scheduler = schedulerObject.AddComponent<CharacterAiScheduler>();
+            CharacterAiEditorTestDependencies.Inject(scheduler);
             SerializedObject schedulerSerialized = new SerializedObject(scheduler);
             SerializedProperty externalProperty = schedulerSerialized.FindProperty("characterAiExternalBehavior");
             externalProperty.objectReferenceValue = externalBehavior;
             schedulerSerialized.ApplyModifiedPropertiesWithoutUndo();
             schedulerObject.SetActive(true);
             scheduler.ClearRegistrationsForDebug();
-            new DungeonSceneComponentQuery()
-                .First<CharacterAiScheduler>(includeInactive: true)
-                ?.RegisterActor(actor);
+            scheduler.RegisterActor(actor);
             BehaviorTree tree = actorObject.GetComponent<BehaviorTree>();
             return tree != null
                 && scheduler.CharacterAiExternalBehavior == externalBehavior
@@ -3327,7 +3374,14 @@ public static class CharacterAiPlanDebugScenarios
         {
             CharacterActor actor = actorObject.GetComponent<CharacterActor>();
             actor.EnsureRuntimeState();
-            actor.AddLog("AI failure: no path");
+            actor.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Wait,
+                CharacterActivityOutcomes.Failed,
+                "AI failure: no path",
+                actionId: "probe:context-compression",
+                reasonCode: "no-path",
+                sentiment: -0.5f,
+                bubbleEligible: true));
             AiDirectorContextSummary summary = AiDirectorContextAggregator.Build(
                 actor,
                 new AiDirectorContextSceneSnapshot(new[] { actor }, new BuildableObject[0]));
@@ -3356,6 +3410,7 @@ public static class CharacterAiPlanDebugScenarios
             CharacterActor actor = actorObject.GetComponent<CharacterActor>();
             actor.EnsureRuntimeState();
             AiDirectorRuntime director = directorObject.GetComponent<AiDirectorRuntime>();
+            CharacterAiEditorTestDependencies.Inject(director);
             MethodInfo method = typeof(AiDirectorRuntime)
                 .GetMethod("BuildMacroGoalPrompt", BindingFlags.Instance | BindingFlags.NonPublic);
             string prompt = method?.Invoke(director, new object[] { actor }) as string;
@@ -3391,6 +3446,7 @@ public static class CharacterAiPlanDebugScenarios
             actor.Stats.Stats[CharacterCondition.FUN] = 100f;
 
             AiDirectorRuntime director = directorObject.GetComponent<AiDirectorRuntime>();
+            CharacterAiEditorTestDependencies.Inject(director);
             queue.ClearForDebug();
             bool routinePredicateHasNoCooldownSideEffect = director.ShouldRequestMacroGoal(actor)
                 && director.ShouldRequestMacroGoal(actor);
@@ -3429,7 +3485,7 @@ public static class CharacterAiPlanDebugScenarios
         }
     }
 
-    private static bool VerifyDirectorRejectedMacroRequestKeepsRetryWindowOpen()
+    private static bool VerifyDirectorRejectedMacroRequestStartsBackoff()
     {
         LocalLlmRequestQueue queue = EnsureQueueInstance(out GameObject queueObject);
         GameObject actorObject = CreateActorObject("DirectorRejectedMacroActor");
@@ -3447,13 +3503,14 @@ public static class CharacterAiPlanDebugScenarios
             actor.Stats.Stats[CharacterCondition.FUN] = 100f;
 
             AiDirectorRuntime director = directorObject.GetComponent<AiDirectorRuntime>();
+            CharacterAiEditorTestDependencies.Inject(director);
             director.SetWarningLogsSuppressedForDebug(true);
             queue.ClearForDebug();
             queue.SetWarningLogsSuppressedForDebug(true);
             for (int i = 0; i < queue.MaxQueueSize; i++)
             {
                 if (!queue.EnqueueSocialRumor(
-                        "{\"rumorType\":\"None\",\"targetType\":\"None\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":0,\"summary\":\"none\",\"spreadChance\":0,\"trustImpact\":0,\"validSeconds\":0}",
+                        "{\"rumorType\":\"None\",\"targetType\":\"None\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":0,\"summary\":\"none\",\"spreadChance\":0,\"trustImpact\":0,\"validSeconds\":0}",
                         null))
                 {
                     return false;
@@ -3465,7 +3522,7 @@ public static class CharacterAiPlanDebugScenarios
             bool shouldAfterRejected = director.ShouldRequestMacroGoal(actor);
             return shouldBefore
                 && !accepted
-                && shouldAfterRejected
+                && !shouldAfterRejected
                 && queue.QueuedCount == queue.MaxQueueSize
                 && director.LastError.Contains("not accepted", System.StringComparison.OrdinalIgnoreCase);
         }
@@ -3491,7 +3548,7 @@ public static class CharacterAiPlanDebugScenarios
         }
     }
 
-    private static bool VerifySocialRejectedRequestDoesNotStartCooldown()
+    private static bool VerifySocialRejectedRequestStartsCooldown()
     {
         LocalLlmRequestQueue queue = EnsureQueueInstance(out GameObject queueObject);
         GameObject actorObject = CreateActorObject("SocialRejectedRequestActor");
@@ -3517,25 +3574,37 @@ public static class CharacterAiPlanDebugScenarios
                 }
             }
 
+            CharacterActivityEvent activity = CharacterActivityEvent.Create(
+                CharacterActivityKinds.Social,
+                CharacterActivityOutcomes.Failed,
+                "A tense encounter ended badly.",
+                actionId: "social:test-retry",
+                reasonCode: "rejected-request-probe",
+                sentiment: -0.7f,
+                narrativeEligible: true);
             CharacterLogEntry entry = new CharacterLogEntry(
-                "AI failure",
-                "AI failure: NoPath",
                 1,
-                "AI failure: NoPath while choosing destination");
+                activity.KindId,
+                "A tense encounter ended badly.",
+                1,
+                "A tense encounter ended badly.",
+                activity);
             bool rejected = !runtime.RequestSocialInterpretation(actor, entry);
-            bool rejectedWasNotCooldown = !string.Equals(
-                runtime.LastRequestSkipDebug,
-                "cooldown",
-                System.StringComparison.OrdinalIgnoreCase);
+            bool cooldownAfterRejected = !runtime.RequestSocialInterpretation(actor, entry)
+                && string.Equals(
+                    runtime.LastRequestSkipDebug,
+                    "cooldown",
+                    System.StringComparison.OrdinalIgnoreCase);
 
             queue.ClearForDebug();
             queue.SetWarningLogsSuppressedForDebug(true);
+            runtime.ClearForDebug();
             bool acceptedAfterRejected = runtime.RequestSocialInterpretation(actor, entry);
             bool cooldownAfterAccepted = !runtime.RequestSocialInterpretation(actor, entry)
                 && string.Equals(runtime.LastRequestSkipDebug, "cooldown", System.StringComparison.OrdinalIgnoreCase);
 
             return rejected
-                && rejectedWasNotCooldown
+                && cooldownAfterRejected
                 && acceptedAfterRejected
                 && cooldownAfterAccepted;
         }
@@ -3596,7 +3665,7 @@ public static class CharacterAiPlanDebugScenarios
             return dropped > 0
                 && droppedContentStayedEmpty
                 && droppedOriginalStayedDebugOnly
-                && queue.DroppedBubbleCount == dropped;
+                && queue.DroppedEphemeralRequestCount == dropped;
         }
         finally
         {
@@ -3625,7 +3694,7 @@ public static class CharacterAiPlanDebugScenarios
             for (int i = 0; i < queue.MaxQueueSize; i++)
             {
                 bool accepted = queue.EnqueueSocialRumor(
-                    "{\"rumorType\":\"None\",\"targetType\":\"None\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":0,\"summary\":\"none\",\"spreadChance\":0,\"trustImpact\":0,\"validSeconds\":0}",
+                    "{\"rumorType\":\"None\",\"targetType\":\"None\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":0,\"summary\":\"none\",\"spreadChance\":0,\"trustImpact\":0,\"validSeconds\":0}",
                     null);
                 if (!accepted)
                 {
@@ -3633,8 +3702,11 @@ public static class CharacterAiPlanDebugScenarios
                 }
             }
 
-            bool extraAccepted = queue.EnqueueMacroGoal(
+            bool extraAccepted = queue.Enqueue(
+                LocalLlmRequestProfiles.Persona,
                 "{\"macroGoal\":\"Continue\",\"reason\":\"capacity test\",\"targetFacilityId\":-1,\"targetFacilityTag\":\"\",\"validSeconds\":30}",
+                string.Empty,
+                1f,
                 (result) =>
                 {
                     if (!result.IsSuccess)
@@ -3656,6 +3728,184 @@ public static class CharacterAiPlanDebugScenarios
                 ? queueObject.GetComponent<LocalLlmRequestQueue>()
                 : null;
             queue?.SetWarningLogsSuppressedForDebug(false);
+            if (existingQueue == null)
+            {
+                Object.DestroyImmediate(queueObject);
+            }
+        }
+    }
+
+    private static bool VerifyLlmQueueSupportsOpenRequestProfiles()
+    {
+        LocalLlmRequestQueue existingQueue = FindQueueInstance();
+        GameObject queueObject = existingQueue == null
+            ? new GameObject("QueueOpenProfilePolicy", typeof(LocalLlmRequestQueue))
+            : existingQueue.gameObject;
+        try
+        {
+            LocalLlmRequestQueue queue = existingQueue != null
+                ? existingQueue
+                : queueObject.GetComponent<LocalLlmRequestQueue>();
+            queue.ClearForDebug();
+            queue.SetWarningLogsSuppressedForDebug(true);
+
+            LocalLlmRequestProfile lowPriority = new LocalLlmRequestProfile(
+                "TestLowPriority",
+                1,
+                temperature: 0.2f);
+            LocalLlmRequestProfile highPriority = new LocalLlmRequestProfile(
+                "TestHighPriority",
+                100,
+                temperature: 0.9f,
+                maxQueueAgeSeconds: 9f);
+            bool lowAccepted = queue.Enqueue(lowPriority, "{}", string.Empty, 1f, null);
+            bool highAccepted = queue.Enqueue(highPriority, "{}", string.Empty, 1f, null);
+            bool customPriorityApplied = queue.PeekNextProfileIdForDebug() == highPriority.Id;
+            bool profileIsImmutable = !typeof(LocalLlmRequestProfile)
+                .GetProperty(nameof(LocalLlmRequestProfile.Priority))
+                .CanWrite;
+
+            queue.ClearForDebug();
+            queue.SetWarningLogsSuppressedForDebug(true);
+            for (int i = 0; i < queue.MaxQueueSize; i++)
+            {
+                if (!queue.Enqueue(LocalLlmRequestProfiles.SocialRumor, "{}", string.Empty, 1f, null))
+                {
+                    return false;
+                }
+            }
+
+            int quietCallbackCount = 0;
+            LocalLlmRequestProfile quietProfile = new LocalLlmRequestProfile(
+                "TestQuietWhenFull",
+                50,
+                queueFullBehavior: LocalLlmQueueFullBehavior.RejectQuietly);
+            bool quietAccepted = queue.Enqueue(
+                quietProfile,
+                "{}",
+                string.Empty,
+                1f,
+                _ => quietCallbackCount++);
+
+            int dropCallbackCount = 0;
+            LocalLlmRequestStatus dropStatus = LocalLlmRequestStatus.Succeeded;
+            LocalLlmRequestProfile dropProfile = new LocalLlmRequestProfile(
+                "TestDropWhenFull",
+                2,
+                queueFullBehavior: LocalLlmQueueFullBehavior.Drop,
+                canBeEvictedForQueuePressure: true,
+                maxQueueAgeSeconds: 2f);
+            bool dropAccepted = queue.Enqueue(
+                dropProfile,
+                "{}",
+                "original",
+                1f,
+                result =>
+                {
+                    dropCallbackCount++;
+                    dropStatus = result.Status;
+                });
+
+            return lowAccepted
+                && highAccepted
+                && customPriorityApplied
+                && profileIsImmutable
+                && highPriority.Temperature == 0.9f
+                && highPriority.MaxQueueAgeSeconds == 9f
+                && !quietAccepted
+                && quietCallbackCount == 0
+                && queue.LastError.Contains(quietProfile.Id, System.StringComparison.Ordinal)
+                && !dropAccepted
+                && dropCallbackCount == 1
+                && dropStatus == LocalLlmRequestStatus.Dropped
+                && queue.DroppedEphemeralRequestCount == 1;
+        }
+        finally
+        {
+            LocalLlmRequestQueue queue = queueObject != null
+                ? queueObject.GetComponent<LocalLlmRequestQueue>()
+                : null;
+            if (queue != null)
+            {
+                queue.SetWarningLogsSuppressedForDebug(false);
+                queue.ClearForDebug();
+            }
+
+            if (existingQueue == null)
+            {
+                Object.DestroyImmediate(queueObject);
+            }
+        }
+    }
+
+    private static bool VerifyLlmQueueCancellationCompletesExactlyOnce()
+    {
+        LocalLlmRequestQueue existingQueue = FindQueueInstance();
+        GameObject queueObject = existingQueue == null
+            ? new GameObject("QueueCancellationPolicy", typeof(LocalLlmRequestQueue))
+            : existingQueue.gameObject;
+        try
+        {
+            LocalLlmRequestQueue queue = existingQueue != null
+                ? existingQueue
+                : queueObject.GetComponent<LocalLlmRequestQueue>();
+            queue.ClearForDebug();
+
+            int callbackCount = 0;
+            int cancelledCount = 0;
+            int correlatedCallbackCount = 0;
+            bool originalTextPreserved = true;
+            bool personaAccepted = queue.EnqueuePersona(
+                "{\"persona\":\"test\"}",
+                result =>
+                {
+                    callbackCount++;
+                    cancelledCount += result.IsCancelled ? 1 : 0;
+                });
+            bool bubbleAccepted = queue.EnqueueBubbleLine(
+                "{\"line\":\"test\"}",
+                "original line",
+                result =>
+                {
+                    callbackCount++;
+                    cancelledCount += result.IsCancelled ? 1 : 0;
+                    originalTextPreserved &= result.OriginalText == "original line";
+                });
+            bool skillAccepted = queue.GenerateCharacterSkillAsync(
+                "skill:cancel-test",
+                "{\"skill\":\"test\"}",
+                result =>
+                {
+                    callbackCount++;
+                    correlatedCallbackCount++;
+                    cancelledCount += result.IsCancelled ? 1 : 0;
+                });
+
+            queue.CancelCharacterSkillRequest("skill:cancel-test");
+            bool correlatedOnlyCompleted = correlatedCallbackCount == 1
+                && callbackCount == 1
+                && cancelledCount == 1
+                && queue.QueuedCount == 2;
+            queue.CancelCharacterSkillRequest("skill:cancel-test");
+
+            queue.AbortAllForDebug();
+            bool firstAbortCompleted = callbackCount == 3
+                && cancelledCount == 3
+                && correlatedCallbackCount == 1
+                && originalTextPreserved
+                && queue.QueuedCount == 0
+                && queue.RunningCount == 0;
+
+            queue.AbortAllForDebug();
+            return personaAccepted
+                && bubbleAccepted
+                && skillAccepted
+                && correlatedOnlyCompleted
+                && firstAbortCompleted
+                && callbackCount == 3;
+        }
+        finally
+        {
             if (existingQueue == null)
             {
                 Object.DestroyImmediate(queueObject);
@@ -3764,6 +4014,7 @@ public static class CharacterAiPlanDebugScenarios
             actor.SetLifecycleState(CharacterLifecycleState.Active);
 
             BuildableObject building = buildingObject.GetComponent<BuildableObject>();
+            CharacterAiEditorTestDependencies.Inject(building);
             building.Initialization(buildingData, Vector2Int.zero);
 
             actor.Blackboard.SetMacroGoal(new CharacterMacroGoal

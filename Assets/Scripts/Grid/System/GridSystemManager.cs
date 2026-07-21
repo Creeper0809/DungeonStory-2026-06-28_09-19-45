@@ -13,6 +13,8 @@ public enum GridMode
 
 public class GridSystemManager : MonoBehaviour
 {
+    private readonly List<Vector2Int> mutableSelectedPositions = new List<Vector2Int>();
+    private IReadOnlyList<Vector2Int> selectedPositionsView;
     public Grid grid { get; private set; }
     public GridMode Mode { get; private set; } = GridMode.None;
 
@@ -21,10 +23,16 @@ public class GridSystemManager : MonoBehaviour
     [Min(1)] [Tooltip("그리드 열 개수")]
     public int defaultGridHeight;
     public Vector3 gridOriginPos;
+    [Header("Physical World Areas")]
+    [SerializeField] private bool configureDefaultPhysicalWorldAreas = true;
+    [SerializeField, Min(0)] private int exteriorColumnCount = 4;
+    [SerializeField, Min(0)] private int dropZoneWidth = 3;
+    [SerializeField] private Vector2Int entranceGridPosition = new Vector2Int(4, 0);
 
     public Vector2Int firstSelectedPos { get; private set; }
     public Vector2Int lastSelectedPos { get; private set; }
-    public List<Vector2Int> totalSelectedPos { get; private set; } = new List<Vector2Int>();
+    public IReadOnlyList<Vector2Int> totalSelectedPos =>
+        selectedPositionsView ??= ReadOnlyView.List(mutableSelectedPositions);
     public bool isDragging { get; private set; }
     public int xCount { get; private set; }
     public int yCount { get; private set; }
@@ -49,6 +57,7 @@ public class GridSystemManager : MonoBehaviour
         if (grid != null) return;
 
         grid = new Grid(defaultGridWidth, defaultGridHeight, gridOriginPos);
+        ApplyDefaultPhysicalWorldAreas();
     }
 
     protected virtual void Start()
@@ -63,6 +72,7 @@ public class GridSystemManager : MonoBehaviour
         if (newGrid == null) return;
 
         grid = newGrid;
+        ApplyDefaultPhysicalWorldAreas();
         OnGridExpand?.Invoke();
     }
 
@@ -118,13 +128,13 @@ public class GridSystemManager : MonoBehaviour
     public List<Vector2Int> CompleteDragSelection()
     {
         isDragging = false;
-        return new List<Vector2Int>(totalSelectedPos);
+        return new List<Vector2Int>(mutableSelectedPositions);
     }
 
     public void CancelDragSelection()
     {
         isDragging = false;
-        totalSelectedPos.Clear();
+        mutableSelectedPositions.Clear();
         xCount = 0;
         yCount = 0;
     }
@@ -144,9 +154,84 @@ public class GridSystemManager : MonoBehaviour
         OnGridObjectChanged?.Invoke();
     }
 
+    public bool TryGetEntranceGridPosition(out Vector2Int position)
+    {
+        EnsureGridInitialized();
+        position = entranceGridPosition;
+        if (grid == null)
+        {
+            return false;
+        }
+
+        if (grid.IsValidGridPos(position) && grid.IsWalkable(position))
+        {
+            return true;
+        }
+
+        GridCell entranceCell = grid.GetCells()
+            .Where(cell => cell != null
+                && cell.AreaType == GridCellAreaType.Entrance
+                && grid.IsWalkable(cell.Position))
+            .OrderBy(cell => cell.Position.y)
+            .ThenBy(cell => cell.Position.x)
+            .FirstOrDefault();
+        if (entranceCell == null)
+        {
+            return false;
+        }
+
+        position = entranceCell.Position;
+        return true;
+    }
+
+    private void ApplyDefaultPhysicalWorldAreas()
+    {
+        if (!configureDefaultPhysicalWorldAreas || grid == null)
+        {
+            return;
+        }
+
+        int entranceX = Mathf.Clamp(entranceGridPosition.x, 0, grid.width - 1);
+        int entranceY = Mathf.Clamp(entranceGridPosition.y, 0, grid.height - 1);
+        int exteriorLimitExclusive = Mathf.Clamp(
+            exteriorColumnCount > 0 ? exteriorColumnCount : entranceX,
+            0,
+            grid.width);
+        int dropStartX = Mathf.Max(0, entranceX - Mathf.Max(0, dropZoneWidth));
+
+        foreach (GridCell cell in grid.GetCells())
+        {
+            if (cell == null)
+            {
+                continue;
+            }
+
+            Vector2Int pos = cell.Position;
+            GridCellAreaType areaType = GridCellAreaType.DungeonInterior;
+            if (pos.x < exteriorLimitExclusive)
+            {
+                areaType = pos.y == entranceY
+                    ? GridCellAreaType.ExteriorPath
+                    : GridCellAreaType.BlockedExterior;
+            }
+
+            if (pos.y == entranceY && pos.x >= dropStartX && pos.x < entranceX)
+            {
+                areaType = GridCellAreaType.DropZone;
+            }
+
+            if (pos.x == entranceX && pos.y == entranceY)
+            {
+                areaType = GridCellAreaType.Entrance;
+            }
+
+            grid.SetAreaType(pos, areaType);
+        }
+    }
+
     private void RecalculateSelectedPositions(Vector2Int pos, bool horizontalDraggable, bool verticalDraggable)
     {
-        totalSelectedPos = new List<Vector2Int>();
+        mutableSelectedPositions.Clear();
         int startX = Mathf.Min(firstSelectedPos.x, pos.x);
         int endX = Mathf.Max(firstSelectedPos.x, pos.x);
         int startY = Mathf.Min(firstSelectedPos.y, pos.y);
@@ -158,7 +243,7 @@ public class GridSystemManager : MonoBehaviour
             {
                 for (int y = startY; y <= endY; y++)
                 {
-                    totalSelectedPos.Add(new Vector2Int(x, y));
+                    mutableSelectedPositions.Add(new Vector2Int(x, y));
                 }
             }
         }
@@ -166,22 +251,22 @@ public class GridSystemManager : MonoBehaviour
         {
             for (int y = startY; y <= endY; y++)
             {
-                totalSelectedPos.Add(new Vector2Int(firstSelectedPos.x, y));
+                mutableSelectedPositions.Add(new Vector2Int(firstSelectedPos.x, y));
             }
         }
         else if (horizontalDraggable)
         {
             for (int x = startX; x <= endX; x++)
             {
-                totalSelectedPos.Add(new Vector2Int(x, firstSelectedPos.y));
+                mutableSelectedPositions.Add(new Vector2Int(x, firstSelectedPos.y));
             }
         }
         else
         {
-            totalSelectedPos.Add(firstSelectedPos);
+            mutableSelectedPositions.Add(firstSelectedPos);
         }
 
-        totalSelectedPos = totalSelectedPos.Where(gridPos => grid.IsValidGridPos(gridPos)).ToList();
+        mutableSelectedPositions.RemoveAll(gridPos => !grid.IsValidGridPos(gridPos));
         xCount = totalSelectedPos.GroupBy(gridPos => gridPos.x).Count();
         yCount = totalSelectedPos.GroupBy(gridPos => gridPos.y).Count();
     }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 public interface IFacilityCandidateCache
 {
+    int DynamicStateVersion { get; }
     IReadOnlyList<BuildableObject> GetCandidates(Grid grid, FacilityRole role);
     void MarkDynamicStateDirty();
     void Clear();
@@ -14,13 +15,15 @@ public sealed class FacilityCandidateCacheStore : IFacilityCandidateCache
     {
         public int Version = -1;
         public int StateVersion = -1;
-        public readonly Dictionary<FacilityRole, List<BuildableObject>> CandidatesByRole =
-            new Dictionary<FacilityRole, List<BuildableObject>>();
+        public readonly Dictionary<FacilityRole, IReadOnlyList<BuildableObject>> CandidatesByRole =
+            new Dictionary<FacilityRole, IReadOnlyList<BuildableObject>>();
     }
 
     private readonly Dictionary<Grid, GridFacilityCache> cacheByGrid =
         new Dictionary<Grid, GridFacilityCache>();
     private int facilityStateVersion;
+
+    public int DynamicStateVersion => facilityStateVersion;
 
     public IReadOnlyList<BuildableObject> GetCandidates(Grid grid, FacilityRole role)
     {
@@ -47,7 +50,7 @@ public sealed class FacilityCandidateCacheStore : IFacilityCandidateCache
             }
         }
 
-        return merged;
+        return ReadOnlyView.List(merged);
     }
 
     public void MarkDynamicStateDirty()
@@ -82,24 +85,25 @@ public sealed class FacilityCandidateCacheStore : IFacilityCandidateCache
         return cache;
     }
 
-    private List<BuildableObject> GetSingleRoleCandidates(
+    private IReadOnlyList<BuildableObject> GetSingleRoleCandidates(
         Grid grid,
         GridFacilityCache cache,
         FacilityRole role)
     {
-        if (!cache.CandidatesByRole.TryGetValue(role, out List<BuildableObject> candidates))
+        if (!cache.CandidatesByRole.TryGetValue(role, out IReadOnlyList<BuildableObject> candidates))
         {
-            candidates = new List<BuildableObject>();
+            List<BuildableObject> discovered = new List<BuildableObject>();
             foreach (IGridOccupant occupant in grid.FindAllOccupants(null))
             {
                 if (occupant is BuildableObject building
                     && !building.isDestroy
                     && building.SupportsFacilityRole(role))
                 {
-                    candidates.Add(building);
+                    discovered.Add(building);
                 }
             }
 
+            candidates = ReadOnlyView.List(discovered);
             cache.CandidatesByRole[role] = candidates;
         }
 
@@ -114,12 +118,9 @@ public sealed class FacilityCandidateCacheStore : IFacilityCandidateCache
 
     private static IEnumerable<FacilityRole> GetSingleRoles(FacilityRole roles)
     {
-        foreach (FacilityRole role in Enum.GetValues(typeof(FacilityRole)))
+        foreach (FacilityRoleDefinition definition in FacilityRoleCatalog.Enumerate(roles))
         {
-            if (role != FacilityRole.None && (roles & role) != 0)
-            {
-                yield return role;
-            }
+            yield return definition.Role;
         }
     }
 }

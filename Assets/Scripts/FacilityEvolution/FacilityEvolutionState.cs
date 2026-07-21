@@ -54,12 +54,17 @@ public class FacilityEvolutionStateComponent : MonoBehaviour
     public string BaseFacilityId => baseFacilityId;
     public string CurrentFacilityId => currentFacilityId;
     public int StarGrade => Mathf.Max(1, starGrade);
-    public IReadOnlyList<string> LineageTags => lineageTags ?? Array.Empty<string>();
-    public IReadOnlyList<string> MutationTags => mutationTags ?? Array.Empty<string>();
+    public IReadOnlyList<string> LineageTags => EventPayloadSnapshot.Copy(lineageTags);
+    public IReadOnlyList<string> MutationTags => EventPayloadSnapshot.Copy(mutationTags);
     public string LastIdentitySummary => lastIdentitySummary ?? string.Empty;
-    public IReadOnlyList<FacilityEvolutionValue> LastIdentityPressures => lastIdentityPressures ?? Array.Empty<FacilityEvolutionValue>();
-    public IReadOnlyList<string> DominantIdentityTags => dominantIdentityTags ?? Array.Empty<string>();
-    public IReadOnlyList<FacilityEvolutionHistoryEntry> EvolutionHistory => evolutionHistory;
+    public IReadOnlyList<FacilityEvolutionValue> LastIdentityPressures =>
+        EventPayloadSnapshot.Copy(lastIdentityPressures);
+    public IReadOnlyList<string> DominantIdentityTags => EventPayloadSnapshot.Copy(dominantIdentityTags);
+    public IReadOnlyList<FacilityEvolutionHistoryEntry> EvolutionHistory => Array.AsReadOnly(
+        (evolutionHistory ?? new List<FacilityEvolutionHistoryEntry>())
+            .Where((entry) => entry != null)
+            .Select((entry) => entry.Clone())
+            .ToArray());
 
     public FacilityEvolutionStateSnapshot CreateSnapshot()
     {

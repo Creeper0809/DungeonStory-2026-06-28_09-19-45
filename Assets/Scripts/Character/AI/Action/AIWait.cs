@@ -4,6 +4,12 @@ using Random = UnityEngine.Random;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Wait", order = 0)]
 public class AIWait : AIActionSet
 {
+    private static readonly CharacterAiActionDescriptor ActionDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.Wait,
+        "대기",
+        CharacterAiActionTags.Patience);
+
+    public override CharacterAiActionDescriptor Descriptor => ActionDescriptor;
     [SerializeField] private float minDuration = 0.5f;
     [SerializeField] private float maxDuration = 1.2f;
     [SerializeField, Range(0f, 1f)] private float onDutyWorkAvailableScore = 0.15f;
@@ -73,7 +79,14 @@ public class AIWait : AIActionSet
             return;
         }
 
-        actor?.AddLog($"대기 이동 불가: {failureReason}");
+        actor?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Wait,
+            CharacterActivityOutcomes.Blocked,
+            $"대기 이동 불가: {failureReason}",
+            actionId: "wait:idle-behavior",
+            reasonCode: "idle-movement-unavailable",
+            sentiment: -0.35f,
+            bubbleEligible: true));
         if (IdleBehaviorRunner.TryRunStatic(
             actor,
             duration,
@@ -83,7 +96,14 @@ public class AIWait : AIActionSet
             return;
         }
 
-        actor?.AddLog($"대기 실패: {failureReason}");
+        actor?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Wait,
+            CharacterActivityOutcomes.Failed,
+            $"대기 실패: {failureReason}",
+            actionId: "wait:idle-behavior",
+            reasonCode: "idle-behavior-failed",
+            sentiment: -0.5f,
+            bubbleEligible: true));
 
         if (actor != null && actor.Brain != null)
         {

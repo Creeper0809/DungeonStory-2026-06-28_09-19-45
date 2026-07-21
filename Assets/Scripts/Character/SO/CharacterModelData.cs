@@ -17,74 +17,120 @@ public enum CharacterStatType
 }
 
 [Serializable]
+public sealed class CharacterStatEntry
+{
+    public string statId;
+    public int value;
+
+    public CharacterStatEntry()
+    {
+    }
+
+    public CharacterStatEntry(string statId, int value)
+    {
+        this.statId = statId;
+        this.value = value;
+    }
+}
+
+[Serializable]
 public class CharacterStatBlock
 {
-    public int attack;
-    public int sales;
-    public int research;
-    public int moveSpeed;
-    public int strength;
-    public int toughness;
-    public int dexterity;
-    public int cleaning;
-    public int endurance;
+    [SerializeField]
+    private List<CharacterStatEntry> entries = new List<CharacterStatEntry>();
 
-    public bool HasAnyValue => attack != 0
-        || sales != 0
-        || research != 0
-        || moveSpeed != 0
-        || strength != 0
-        || toughness != 0
-        || dexterity != 0
-        || cleaning != 0
-        || endurance != 0;
+    public IReadOnlyList<CharacterStatEntry> Entries =>
+        entries ??= new List<CharacterStatEntry>();
+
+    public bool HasAnyValue => Entries.Any(entry => entry != null && entry.value != 0);
 
     public static CharacterStatBlock CreateDefault(int value = 5)
     {
-        return new CharacterStatBlock
+        CharacterStatBlock block = new CharacterStatBlock();
+        foreach (CharacterStatDefinition definition in CharacterStatCatalog.All)
         {
-            attack = value,
-            sales = value,
-            research = value,
-            moveSpeed = value,
-            strength = value,
-            toughness = value,
-            dexterity = value,
-            cleaning = value,
-            endurance = value
-        };
+            block.Set(definition.Id, value);
+        }
+
+        return block;
     }
 
     public int Get(CharacterStatType type)
     {
-        return type switch
+        return Get(CharacterStatCatalog.GetRequired(type).Id);
+    }
+
+    public int Get(string statId)
+    {
+        if (string.IsNullOrWhiteSpace(statId) || entries == null)
         {
-            CharacterStatType.Attack => attack,
-            CharacterStatType.Sales => sales,
-            CharacterStatType.Research => research,
-            CharacterStatType.MoveSpeed => moveSpeed,
-            CharacterStatType.Strength => strength,
-            CharacterStatType.Toughness => toughness,
-            CharacterStatType.Dexterity => dexterity,
-            CharacterStatType.Cleaning => cleaning,
-            CharacterStatType.Endurance => endurance,
-            _ => 0
-        };
+            return 0;
+        }
+
+        int total = 0;
+        foreach (CharacterStatEntry entry in entries)
+        {
+            if (entry != null && string.Equals(entry.statId, statId, StringComparison.Ordinal))
+            {
+                total += entry.value;
+            }
+        }
+
+        return total;
+    }
+
+    public void Set(CharacterStatType type, int value)
+    {
+        Set(CharacterStatCatalog.GetRequired(type).Id, value);
+    }
+
+    public void Set(string statId, int value)
+    {
+        string normalizedId = NormalizeId(statId);
+        entries ??= new List<CharacterStatEntry>();
+        CharacterStatEntry existing = entries.FirstOrDefault(entry => entry != null
+            && string.Equals(entry.statId, normalizedId, StringComparison.Ordinal));
+        if (existing == null)
+        {
+            entries.Add(new CharacterStatEntry(normalizedId, value));
+            return;
+        }
+
+        existing.value = value;
+        entries.RemoveAll(entry => entry != null
+            && !ReferenceEquals(entry, existing)
+            && string.Equals(entry.statId, normalizedId, StringComparison.Ordinal));
+    }
+
+    public void Add(string statId, int value)
+    {
+        Set(statId, Get(statId) + value);
     }
 
     public void Add(CharacterStatBlock other)
     {
-        if (other == null) return;
+        if (other == null)
+        {
+            return;
+        }
 
-        attack += other.attack;
-        sales += other.sales;
-        research += other.research;
-        moveSpeed += other.moveSpeed;
-        strength += other.strength;
-        toughness += other.toughness;
-        dexterity += other.dexterity;
-        cleaning += other.cleaning;
-        endurance += other.endurance;
+        foreach (CharacterStatEntry entry in other.Entries)
+        {
+            if (entry != null && !string.IsNullOrWhiteSpace(entry.statId))
+            {
+                Add(entry.statId, entry.value);
+            }
+        }
+    }
+
+    private static string NormalizeId(string statId)
+    {
+        if (string.IsNullOrWhiteSpace(statId))
+        {
+            throw new ArgumentException("Character stat id is required.", nameof(statId));
+        }
+
+        return statId.Trim();
     }
 }
 
@@ -134,6 +180,7 @@ public sealed class CharacterRuntimeProfile
     private readonly CharacterStatBlock finalStats;
     private readonly CharacterModelModifiers finalModifiers;
     private readonly List<CharacterTraitSO> traits;
+    private readonly IReadOnlyList<CharacterTraitSO> traitsView;
 
     private CharacterRuntimeProfile(
         CharacterSO source,
@@ -143,13 +190,14 @@ public sealed class CharacterRuntimeProfile
         Source = source;
         Species = species;
         this.traits = traits?.Where((trait) => trait != null).ToList() ?? new List<CharacterTraitSO>();
+        traitsView = ReadOnlyView.List(this.traits);
         finalStats = BuildFinalStats(source, species, this.traits);
         finalModifiers = BuildFinalModifiers(species, this.traits);
     }
 
     public CharacterSO Source { get; }
     public CharacterSpeciesSO Species { get; }
-    public IReadOnlyList<CharacterTraitSO> Traits => traits;
+    public IReadOnlyList<CharacterTraitSO> Traits => traitsView;
     public string SpeciesTag => !string.IsNullOrWhiteSpace(Species?.speciesTag)
         ? Species.speciesTag
         : Source != null
@@ -161,9 +209,21 @@ public sealed class CharacterRuntimeProfile
         return new CharacterRuntimeProfile(source, source != null ? source.species : null, source?.traits);
     }
 
+    public static CharacterRuntimeProfile From(
+        CharacterSO source,
+        IEnumerable<CharacterTraitSO> traits)
+    {
+        return new CharacterRuntimeProfile(source, source != null ? source.species : null, traits);
+    }
+
     public int GetStat(CharacterStatType type)
     {
         return Mathf.Max(0, finalStats.Get(type));
+    }
+
+    public int GetStat(string statId)
+    {
+        return Mathf.Max(0, finalStats.Get(statId));
     }
 
     public float GetMoveSpeedMultiplier()
@@ -172,10 +232,20 @@ public sealed class CharacterRuntimeProfile
             * finalModifiers.moveSpeedMultiplier;
     }
 
+    public float GetMoveModifierOnly()
+    {
+        return Mathf.Max(0f, finalModifiers.moveSpeedMultiplier);
+    }
+
     public float GetSpendingMultiplier()
     {
         return ClampStatMultiplier(CharacterStatType.Sales, 0.05f, 0.5f, 2f)
             * finalModifiers.spendingMultiplier;
+    }
+
+    public float GetSpendingModifierOnly()
+    {
+        return Mathf.Max(0f, finalModifiers.spendingMultiplier);
     }
 
     public float GetConsumptionMultiplier()
@@ -201,6 +271,16 @@ public sealed class CharacterRuntimeProfile
         return Mathf.Max(0f, finalModifiers.accidentChanceMultiplier * enduranceMultiplier * toughnessMultiplier);
     }
 
+    public float GetAccidentModifierOnly()
+    {
+        return Mathf.Max(0f, finalModifiers.accidentChanceMultiplier);
+    }
+
+    public float GetCrimeRiskMultiplier()
+    {
+        return Species != null ? Mathf.Max(0f, Species.crimeRiskMultiplier) : 1f;
+    }
+
     public CharacterSpeciesIncidentType GetIncidentType()
     {
         return Species != null ? Species.incidentType : CharacterSpeciesIncidentType.None;
@@ -223,8 +303,28 @@ public sealed class CharacterRuntimeProfile
 
     public float GetCombatPowerMultiplier()
     {
-        return ClampStatMultiplier(CharacterStatType.Attack, 0.07f, 0.5f, 2f)
-            * finalModifiers.combatPowerMultiplier;
+        return Mathf.Max(0f, finalModifiers.combatPowerMultiplier);
+    }
+
+    public float GetWorkModifierOnly(FacilityWorkType workTypes)
+    {
+        float typeMultiplier = 1f;
+        if ((workTypes & finalModifiers.preferredWorkTypes) != 0)
+        {
+            typeMultiplier *= 1.25f;
+        }
+
+        if ((workTypes & finalModifiers.dislikedWorkTypes) != 0)
+        {
+            typeMultiplier *= 0.75f;
+        }
+
+        if ((workTypes & FacilityWorkType.Research) != 0)
+        {
+            typeMultiplier *= finalModifiers.researchSpeedMultiplier;
+        }
+
+        return Mathf.Max(0f, finalModifiers.workSpeedMultiplier * typeMultiplier);
     }
 
     public float GetWorkSpeedMultiplier(FacilityWorkType workTypes)

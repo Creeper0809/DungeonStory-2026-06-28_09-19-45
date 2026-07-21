@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DamageNumbersPro;
+using TMPro;
 using UnityEditor;
 using UnityEngine;
 
@@ -27,34 +28,93 @@ internal static class CharacterAiEditorTestDependencies
         new AssetDatabaseShopStockCatalog();
     private static readonly IGridSystemProvider GridSystem =
         new EditorGridSystemProvider();
+    private static readonly IDungeonSceneComponentQuery SceneQuery =
+        new DungeonSceneComponentQuery();
+    private static readonly ILocalLlmRuntimeProvider LocalLlm =
+        new LocalLlmRuntimeProvider(SceneQuery);
+    private static readonly ICharacterSpawnerProvider CharacterSpawner =
+        new CharacterSpawnerProvider(SceneQuery);
+    private static readonly ICharacterSocialMemoryFactory SocialMemoryFactory =
+        new EditorCharacterSocialMemoryFactory();
+    private static readonly IAiDirectorContextSceneQuery DirectorContext =
+        new AiDirectorContextSceneQuery(SceneQuery);
+    private static readonly ICharacterDialogueBubbleFactory DialogueBubbles =
+        new EditorCharacterDialogueBubbleFactory();
+    private static readonly ICharacterBehaviorTreeRuntimeConfigurator BehaviorTreeConfigurator =
+        new CharacterBehaviorTreeRuntimeConfigurator();
+    private static readonly IMainCameraProvider MainCamera =
+        new OptionalMainCameraProvider();
+    private static readonly ICharacterFeedbackBubbleFactory FeedbackBubbles =
+        new NoopCharacterFeedbackBubbleFactory();
+    private static readonly IOwnerCandidateCatalog OwnerCandidates =
+        new EditorOwnerCandidateCatalog();
     private static GameData gameData;
 
     public static void Inject(GameObject actorObject)
+    {
+        Inject(actorObject, Scheduling);
+    }
+
+    public static void Inject(
+        GameObject actorObject,
+        ICharacterAiSchedulingService scheduling)
+    {
+        Inject(actorObject, scheduling, StaffDiscontent);
+    }
+
+    public static void Inject(
+        GameObject actorObject,
+        StaffDiscontentRuntime staffDiscontentRuntime)
+    {
+        Inject(
+            actorObject,
+            Scheduling,
+            new EditorStaffDiscontentRuntimeService(staffDiscontentRuntime));
+    }
+
+    private static void Inject(
+        GameObject actorObject,
+        ICharacterAiSchedulingService scheduling,
+        IStaffDiscontentRuntimeService staffDiscontent)
     {
         if (actorObject == null)
         {
             return;
         }
 
+        scheduling ??= Scheduling;
+
         foreach (CharacterAbility ability in actorObject.GetComponents<CharacterAbility>())
         {
             ability.ConstructCharacterAbility(GridSystem);
         }
 
+        actorObject.GetComponent<AbilityMove>()?.ConstructAbilityMove(
+            CharacterSpawner,
+            scheduling);
+
+        actorObject.GetComponent<CharacterLifecycle>()?.ConstructCharacterLifecycle(GridSystem);
+
         actorObject.GetComponent<CharacterStats>()?.ConstructCharacterStats(
-            StaffDiscontent,
+            staffDiscontent,
             new NoopOwnerRunLifecycleService(),
             MetaProgression);
 
         actorObject.GetComponent<CustomerPersonaRuntime>()?.ConstructCustomerPersonaRuntime(
-            new MissingLocalLlmRuntimeProvider());
+            LocalLlm);
+
+        actorObject.GetComponent<CharacterDialogueRuntime>()?.ConstructCharacterDialogueRuntime(
+            LocalLlm,
+            scheduling,
+            DialogueBubbles);
 
         actorObject.GetComponent<AbilityWork>()?.ConstructAbilityWork(
             BlueprintResearch,
-            StaffDiscontent,
+            staffDiscontent,
             FloatingIcons,
             new ActiveWorkGridResolver(),
-            FacilityCandidates);
+            FacilityCandidates,
+            null);
 
         actorObject.GetComponent<AbilityShopping>()?.ConstructAbilityShopping(
             ShopStock,
@@ -62,13 +122,76 @@ internal static class CharacterAiEditorTestDependencies
 
         actorObject.GetComponent<AIBrain>()?.ConstructAIBrain(
             new ResourceCharacterAiActionAssetCatalog(new UnityResourcesAssetLoader()),
-            Scheduling,
+            scheduling,
             new NeutralSocialReputationBiasService(),
             FacilityCandidates,
             new SceneFacilityLookup(),
             new CharacterAiJobGiverCatalog(),
             new CharacterAiDecisionPipeline(),
             RoomPolicy);
+
+        actorObject.GetComponent<CharacterActor>()?.ConstructCharacterActor(
+            GridSystem,
+            scheduling,
+            WorldInfo,
+            SocialMemoryFactory,
+            FeedbackBubbles);
+    }
+
+    public static void Inject(SocialReputationRuntime runtime)
+    {
+        runtime?.ConstructSocialReputationRuntime(
+            LocalLlm,
+            SceneQuery,
+            SocialMemoryFactory);
+    }
+
+    public static void Inject(AiDirectorRuntime runtime)
+    {
+        runtime?.ConstructAiDirectorRuntime(
+            LocalLlm,
+            DirectorContext,
+            Scheduling,
+            new SceneFacilityLookup());
+    }
+
+    public static void Inject(CharacterAiScheduler scheduler)
+    {
+        scheduler?.Construct(
+            SceneQuery,
+            MainCamera,
+            BehaviorTreeConfigurator);
+    }
+
+    public static void Inject(OwnerRunManager manager)
+    {
+        if (manager != null)
+        {
+            manager.ConstructOwnerRunManager(
+                OwnerCandidates,
+                new EditorOwnerCharacterFactory(manager));
+        }
+    }
+
+    public static void Inject(OperatingDaySettlementRuntime runtime)
+    {
+        runtime?.Construct(
+            SceneQuery,
+            new EmptyFacilityShopCatalog(),
+            new NeutralRunVariableReader(),
+            new FixedGameDataProvider(GetGameData()));
+    }
+
+    public static void Inject(StaffDiscontentRuntime runtime)
+    {
+        runtime?.Construct(SceneQuery);
+    }
+
+    public static void Inject(
+        StaffDiscontentRuntime runtime,
+        IEnumerable<GameObject> scenarioRoots)
+    {
+        runtime?.Construct(new EditorRootSceneComponentQuery(scenarioRoots));
     }
 
     public static void Inject(BuildableObject building)
@@ -86,7 +209,8 @@ internal static class CharacterAiEditorTestDependencies
             new FixedGameDataProvider(GetGameData()),
             ShopStock,
             new NoopFloatingNumberFeedbackService(),
-            new NoopWorkforceReplanService());
+            new NoopWorkforceReplanService(),
+            FacilityCrimeEditorTestDependencies.Evaluator);
     }
 
     private static GameData GetGameData()
@@ -183,17 +307,170 @@ internal static class CharacterAiEditorTestDependencies
         public float GetFacilityUtilityBias(CharacterActor actor, BuildableObject building) => 0f;
     }
 
-    private sealed class MissingLocalLlmRuntimeProvider : ILocalLlmRuntimeProvider
+    private sealed class EditorCharacterSocialMemoryFactory : ICharacterSocialMemoryFactory
     {
-        public bool TryGetRuntime(out ILocalLlmRuntime runtime)
+        public CharacterSocialMemory GetOrAdd(CharacterActor actor)
         {
-            runtime = null;
-            return false;
+            if (actor == null)
+            {
+                return null;
+            }
+
+            CharacterSocialMemory memory = actor.GetComponent<CharacterSocialMemory>();
+            if (memory == null)
+            {
+                memory = actor.gameObject.AddComponent<CharacterSocialMemory>();
+            }
+
+            memory.Bind(actor);
+            return memory;
+        }
+    }
+
+    private sealed class EditorCharacterDialogueBubbleFactory : ICharacterDialogueBubbleFactory
+    {
+        public TextMeshPro Create(Transform parent)
+        {
+            GameObject bubbleObject = new GameObject("EditorCharacterDialogueBubble", typeof(TextMeshPro));
+            bubbleObject.transform.SetParent(parent, false);
+            return bubbleObject.GetComponent<TextMeshPro>();
+        }
+    }
+
+    private sealed class OptionalMainCameraProvider : IMainCameraProvider
+    {
+        public Camera Camera => UnityEngine.Object.FindFirstObjectByType<Camera>(FindObjectsInactive.Include);
+    }
+
+    private sealed class NoopCharacterFeedbackBubbleFactory : ICharacterFeedbackBubbleFactory
+    {
+        public CharacterFeedbackBubble GetOrAdd(CharacterActor actor) => null;
+    }
+
+    private sealed class EditorOwnerCandidateCatalog : IOwnerCandidateCatalog
+    {
+        public IReadOnlyCollection<CharacterSO> OwnerCandidates => AssetDatabase
+            .FindAssets("t:CharacterSO", new[] { "Assets/Resources/SO/Character/Owners" })
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Select(AssetDatabase.LoadAssetAtPath<CharacterSO>)
+            .Where(candidate => candidate != null && candidate.IsOwnerCandidate)
+            .OrderBy(candidate => candidate.id)
+            .ToArray();
+    }
+
+    private sealed class EditorOwnerCharacterFactory : IOwnerCharacterFactory
+    {
+        private readonly OwnerRunManager manager;
+
+        public EditorOwnerCharacterFactory(OwnerRunManager manager)
+        {
+            this.manager = manager ?? throw new ArgumentNullException(nameof(manager));
         }
 
-        public ILocalLlmRuntime GetRequiredRuntime()
+        public CharacterActor CreateOwner(
+            CharacterSO ownerData,
+            GameObject ownerPrefab,
+            Transform ownerSpawnPoint,
+            Vector2Int ownerSpawnGridPosition)
         {
-            throw new InvalidOperationException("Editor AI fixture has no Local LLM runtime.");
+            GameObject ownerObject = ownerPrefab != null
+                ? UnityEngine.Object.Instantiate(ownerPrefab)
+                : new GameObject(ownerData.characterName);
+
+            if (!ownerObject.TryGetComponent(out SpriteRenderer _))
+            {
+                ownerObject.AddComponent<SpriteRenderer>();
+            }
+
+            CharacterActor owner = ownerObject.GetComponent<CharacterActor>()
+                ?? ownerObject.AddComponent<CharacterActor>();
+            if (!ownerObject.TryGetComponent(out AbilityMove _))
+            {
+                ownerObject.AddComponent<AbilityMove>();
+            }
+            if (!ownerObject.TryGetComponent(out AbilityWork _))
+            {
+                ownerObject.AddComponent<AbilityWork>();
+            }
+            if (!ownerObject.TryGetComponent(out AIBrain _))
+            {
+                ownerObject.AddComponent<AIBrain>();
+            }
+
+            ownerObject.transform.position = ownerSpawnPoint != null
+                ? ownerSpawnPoint.position
+                : Vector3.zero;
+            Inject(ownerObject);
+            ownerObject.GetComponent<CharacterStats>()?.ConstructCharacterStats(
+                StaffDiscontent,
+                new EditorOwnerRunLifecycleService(manager),
+                MetaProgression);
+            owner.EnsureRuntimeState();
+            owner.RefreshAbilityCache();
+            owner.Initialization(ownerData);
+            owner.SetLifecycleState(CharacterLifecycleState.Active);
+            owner.Brain?.UseOwnerWorkActions();
+            return owner;
+        }
+    }
+
+    private sealed class EditorOwnerRunLifecycleService : IOwnerRunLifecycleService
+    {
+        private readonly OwnerRunManager manager;
+
+        public EditorOwnerRunLifecycleService(OwnerRunManager manager)
+        {
+            this.manager = manager ?? throw new ArgumentNullException(nameof(manager));
+        }
+
+        public void HandleOwnerDeath(CharacterActor owner, string reason)
+        {
+            manager.HandleOwnerDeath(owner, reason);
+        }
+    }
+
+    private sealed class EmptyFacilityShopCatalog : IFacilityShopCatalog
+    {
+        public IReadOnlyCollection<BuildingSO> Buildings => Array.Empty<BuildingSO>();
+        public IReadOnlyCollection<FacilityBlueprintSO> Blueprints => Array.Empty<FacilityBlueprintSO>();
+        public BuildingSO FindBuildingById(int buildingId) => null;
+    }
+
+    private sealed class NeutralRunVariableReader : IRunVariableRuntimeReader
+    {
+        public int GetInitialShopSeed() => 0;
+        public IReadOnlyList<int> GetStartingBlueprintCandidateIds() => Array.Empty<int>();
+        public float GetGuestDemandMultiplier(string speciesTag) => 1f;
+        public float GetStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFacilityShopCostMultiplier(BuildingSO building) => 1f;
+        public float GetBlueprintCostMultiplier(FacilityBlueprintSO blueprint) => 1f;
+        public float GetThreatRiseMultiplier() => 1f;
+        public float GetWarningThresholdMultiplier() => 1f;
+        public InvasionIntruderSettings ApplyInvasionSettings(InvasionIntruderSettings source) => source;
+    }
+
+    private sealed class EditorRootSceneComponentQuery : IDungeonSceneComponentQuery
+    {
+        private readonly IEnumerable<GameObject> roots;
+
+        public EditorRootSceneComponentQuery(IEnumerable<GameObject> roots)
+        {
+            this.roots = roots ?? Array.Empty<GameObject>();
+        }
+
+        public T First<T>(bool includeInactive = false) where T : Component
+        {
+            return All<T>(includeInactive).FirstOrDefault();
+        }
+
+        public IReadOnlyList<T> All<T>(bool includeInactive = false) where T : Component
+        {
+            return roots
+                .Where(root => root != null)
+                .SelectMany(root => root.GetComponentsInChildren<T>(includeInactive))
+                .Where(component => component != null)
+                .Distinct()
+                .ToArray();
         }
     }
 
@@ -242,6 +519,28 @@ internal static class CharacterAiEditorTestDependencies
         public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender) => false;
     }
 
+    private sealed class EditorStaffDiscontentRuntimeService : IStaffDiscontentRuntimeService
+    {
+        private readonly StaffDiscontentRuntime runtime;
+
+        public EditorStaffDiscontentRuntimeService(StaffDiscontentRuntime runtime)
+        {
+            this.runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        }
+
+        public float GetWorkEfficiencyMultiplier(CharacterActor staff) =>
+            runtime.GetWorkEfficiencyMultiplier(staff);
+
+        public bool ShouldBlockWork(CharacterActor staff, out string reason) =>
+            runtime.ShouldBlockWork(staff, out reason);
+
+        public bool IsRebellionTarget(CharacterActor target) =>
+            runtime.IsRebellionTarget(target);
+
+        public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender) =>
+            runtime.ResolveSuppressedRebel(rebel, defender);
+    }
+
     private sealed class NoopOwnerRunLifecycleService : IOwnerRunLifecycleService
     {
         public void HandleOwnerDeath(CharacterActor owner, string reason) { }
@@ -253,6 +552,9 @@ internal static class CharacterAiEditorTestDependencies
         public int GetStartingOwnerTraitCandidateBonus() => 0;
         public float GetOwnerMaxHealthMultiplier() => 1f;
         public float GetInvasionWarningThresholdMultiplier() => 1f;
+        public float GetCommerceStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFortressFacilityCostMultiplier(BuildingSO building) => 1f;
+        public float GetArcaneResearchWorkMultiplier() => 1f;
         public bool IsRecipePreserved(string recipeId) => false;
 
         public IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(
@@ -394,5 +696,6 @@ internal static class CharacterAiEditorTestDependencies
     private sealed class NoopWorkforceReplanService : IWorkforceReplanService
     {
         public void RequestIdleWorkersToReplan(bool clearFailures = true) { }
+        public void RequestOneWorkerToReplanFor(FacilityWorkType workType, bool clearFailures = true) { }
     }
 }

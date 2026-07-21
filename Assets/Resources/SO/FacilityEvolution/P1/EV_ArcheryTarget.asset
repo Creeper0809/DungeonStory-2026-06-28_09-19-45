@@ -1,0 +1,71 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7be3e50469ab0014fb12b8050afa04d6, type: 3}
+  m_Name: EV_ArcheryTarget
+  m_EditorClassIdentifier: Assembly-CSharp::FacilityEvolutionRecipeSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 9104
+  evolutionId: evolve_training_dummy_to_archery_target
+  displayName: "\uC694\uC0C8 \uD6C8\uB828 \uC9C4\uD654"
+  description: "\uACBD\uBE44 \uCCB4\uACC4\uAC00 \uAC16\uCDB0\uC9C4 \uD6C8\uB828\uC2E4\uC5D0\uC11C
+    \uD5C8\uC218\uC544\uBE44\uB97C \uC815\uBC00 \uC0AC\uACA9\uACFC\uB141\uC73C\uB85C
+    \uC9C4\uD654\uC2DC\uD0A8\uB2E4."
+  resultBuilding: {fileID: 11400000, guid: a6cb8bd04813b0940a2b9195992e6018, type: 2}
+  fromFacilities:
+  - {fileID: 11400000, guid: 9f5a16ec101f88c4ab6ecec6784ce646, type: 2}
+  fromLineageTags: []
+  requiredStarGrade: 1
+  resultStarGrade: 2
+  publicByDefault: 1
+  requiredResearchRecipeId: 
+  requireUsableRoom: 1
+  requiredRoomScores:
+  - key: Combat
+    requireMin: 1
+    minValue: 10
+    requireMax: 0
+    maxValue: 0
+  - key: Defense
+    requireMin: 1
+    minValue: 4
+    requireMax: 0
+    maxValue: 0
+  - key: Security
+    requireMin: 1
+    minValue: 5
+    requireMax: 0
+    maxValue: 0
+  requiredRoomMetrics: []
+  requiredRoomTags: []
+  requiredUniqueFixtures:
+  - {fileID: 11400000, guid: 539355e8aaa8ca240a721eb414955229, type: 2}
+  - {fileID: 11400000, guid: 1c846eda7c3fc364e888b19ad2de9d1d, type: 2}
+  requiredRecordTokens: []
+  requiredMaterials: []
+  allowedMutationTags:
+  - Combat
+  - Security
+  consumeRecordTokens: 0
+  identityPressureWeights:
+  - key: Combat
+    value: 0.55
+  - key: Security
+    value: 0.45
+  minimumIdentityScore: 0.2

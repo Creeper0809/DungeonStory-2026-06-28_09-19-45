@@ -51,8 +51,7 @@ public sealed class CodexPanelFactory : ICodexPanelFactory
             new Vector2(1f, 0.5f),
             new Vector2(1f, 0.5f),
             new Vector2(-24f, 0f),
-            new Vector2(520f, 680f),
-            new Color(0.07f, 0.08f, 0.1f, 0.9f));
+            new Vector2(520f, 680f));
         TMP_Text text = CreateSummaryText(panelObject.transform, 20f, new Vector2(20f, 20f), new Vector2(-20f, -20f));
 
         CodexPanel panel = panelObject.AddComponent<CodexPanel>();
@@ -101,8 +100,7 @@ public sealed class FacilitySynthesisPanelFactory : IFacilitySynthesisPanelFacto
             new Vector2(1f, 0.5f),
             new Vector2(1f, 0.5f),
             new Vector2(-24f, 0f),
-            new Vector2(420f, 520f),
-            new Color(0.08f, 0.08f, 0.1f, 0.88f));
+            new Vector2(420f, 520f));
         TMP_Text text = RuntimePanelFactoryUtility.CreateSummaryText(
             panelObject.transform,
             tmpKoreanFontService,
@@ -151,8 +149,7 @@ public sealed class FacilityEvolutionPanelFactory : IFacilityEvolutionPanelFacto
             new Vector2(1f, 0.5f),
             new Vector2(1f, 0.5f),
             new Vector2(-468f, 0f),
-            new Vector2(420f, 560f),
-            new Color(0.07f, 0.08f, 0.09f, 0.9f));
+            new Vector2(420f, 560f));
         TMP_Text text = RuntimePanelFactoryUtility.CreateSummaryText(
             panelObject.transform,
             tmpKoreanFontService,
@@ -189,8 +186,7 @@ internal static class RuntimePanelFactoryUtility
         Vector2 anchorMax,
         Vector2 pivot,
         Vector2 anchoredPosition,
-        Vector2 sizeDelta,
-        Color color)
+        Vector2 sizeDelta)
     {
         GameObject panelObject = new GameObject(name, typeof(RectTransform), typeof(Image));
         panelObject.transform.SetParent(parent, false);

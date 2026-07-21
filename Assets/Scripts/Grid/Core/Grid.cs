@@ -10,7 +10,93 @@ public enum GridLayer
     Character = 2,
     WallFixture = 3,
     CeilingFixture = 4,
-    FloorOverlay = 5
+    FloorOverlay = 5,
+    Item = 6
+}
+
+public enum GridCellAreaType
+{
+    DungeonInterior = 0,
+    Entrance = 1,
+    DropZone = 2,
+    ExteriorPath = 3,
+    BlockedExterior = 4
+}
+
+public static class GridCellAreaRules
+{
+    public static bool IsWalkableArea(GridCellAreaType areaType)
+    {
+        return areaType != GridCellAreaType.BlockedExterior;
+    }
+
+    public static bool IsBuildableArea(GridCellAreaType areaType)
+    {
+        return areaType == GridCellAreaType.DungeonInterior;
+    }
+
+    public static bool AllowsItemDrop(GridCellAreaType areaType)
+    {
+        return areaType != GridCellAreaType.BlockedExterior;
+    }
+
+    public static bool AllowsLayer(GridCellAreaType areaType, GridLayer layer)
+    {
+        if (!IsWalkableArea(areaType))
+        {
+            return false;
+        }
+
+        if (areaType == GridCellAreaType.DungeonInterior)
+        {
+            return true;
+        }
+
+        if (areaType == GridCellAreaType.Entrance)
+        {
+            return layer == GridLayer.Hallway
+                || layer == GridLayer.Character
+                || layer == GridLayer.Item
+                || layer == GridLayer.Building;
+        }
+
+        return layer == GridLayer.Hallway
+            || layer == GridLayer.Building
+            || layer == GridLayer.Character
+            || layer == GridLayer.Item;
+    }
+
+    public static bool CanBuildInArea(GridCellAreaType areaType, BuildingSO buildingData)
+    {
+        if (buildingData == null || !IsWalkableArea(areaType))
+        {
+            return false;
+        }
+
+        if (areaType == GridCellAreaType.DungeonInterior)
+        {
+            return true;
+        }
+
+        if (buildingData.IsDoor && !buildingData.IsInteriorDoor)
+        {
+            return true;
+        }
+
+        if (buildingData.Placement.Layer == GridLayer.Hallway)
+        {
+            return areaType == GridCellAreaType.Entrance
+                || areaType == GridCellAreaType.DropZone
+                || areaType == GridCellAreaType.ExteriorPath;
+        }
+
+        if (areaType == GridCellAreaType.Entrance)
+        {
+            return buildingData.IsDoor || buildingData.IsStructuralWall;
+        }
+
+        return false;
+    }
 }
 
 public enum GridMoveType
@@ -485,6 +571,23 @@ public class Grid
         }
     }
 
+    public bool SetAreaType(Vector2Int pos, GridCellAreaType areaType)
+    {
+        GridCell cell = GetGridCell(pos);
+        if (cell == null)
+        {
+            return false;
+        }
+
+        bool changed = cell.SetAreaType(areaType);
+        if (changed)
+        {
+            version++;
+        }
+
+        return changed;
+    }
+
     public Grid TryExpandGrid(int x, int y)
     {
         int newWidth = width + x;
@@ -556,6 +659,57 @@ public class Grid
             {
                 cell.SetTraversalLinks(null);
             }
+        }
+
+        if (changed)
+        {
+            version++;
+        }
+
+        return changed;
+    }
+
+    public bool RemoveOccupant(
+        IGridOccupant expectedOccupant,
+        GridLayer layer,
+        IReadOnlyList<Vector2Int> positions,
+        bool disconnectPositions)
+    {
+        if (expectedOccupant == null || positions == null)
+        {
+            return false;
+        }
+
+        List<Vector2Int> targetPositions = positions.Distinct().ToList();
+        if (!targetPositions.Any())
+        {
+            return false;
+        }
+
+        foreach (Vector2Int position in targetPositions)
+        {
+            if (GetGridCell(position) == null)
+            {
+                return false;
+            }
+        }
+
+        bool changed = false;
+        foreach (Vector2Int position in targetPositions)
+        {
+            GridCell cell = GetGridCell(position);
+            if (!ReferenceEquals(cell.GetOccupant(layer), expectedOccupant))
+            {
+                continue;
+            }
+
+            cell.RemoveOccupantByLayer(layer);
+            if (disconnectPositions)
+            {
+                cell.SetTraversalLinks(null);
+            }
+
+            changed = true;
         }
 
         if (changed)
@@ -718,10 +872,20 @@ public class Grid
         GridCell cell = GetGridCell(pos);
         if (cell == null) return false;
 
+        if (!cell.IsWalkableArea)
+        {
+            return false;
+        }
+
         BuildableObject building = cell.GetOccupant(GridLayer.Building) as BuildableObject;
         if (IsMovementBlockedByWall(pos))
         {
             return false;
+        }
+
+        if (cell.AreaType != GridCellAreaType.DungeonInterior)
+        {
+            return true;
         }
 
         if (building != null && IsWalkableFacilityCell(building))

@@ -64,6 +64,7 @@ public sealed class CodexEntryRecord
 {
     private readonly List<CodexInfoLine> lines = new List<CodexInfoLine>();
     private readonly HashSet<string> lineSet = new HashSet<string>();
+    private readonly IReadOnlyList<CodexInfoLine> linesView;
 
     public CodexEntryRecord(CodexEntryCategory category, string entryId, string title)
     {
@@ -71,13 +72,14 @@ public sealed class CodexEntryRecord
         EntryId = entryId ?? string.Empty;
         Title = string.IsNullOrWhiteSpace(title) ? EntryId : title;
         Discovered = true;
+        linesView = ReadOnlyView.List(lines);
     }
 
     public CodexEntryCategory Category { get; }
     public string EntryId { get; }
     public string Title { get; private set; }
     public bool Discovered { get; private set; }
-    public IReadOnlyList<CodexInfoLine> Lines => lines;
+    public IReadOnlyList<CodexInfoLine> Lines => linesView;
 
     public void Rename(string title)
     {
@@ -121,8 +123,14 @@ public sealed class CodexEntryRecord
 public sealed class CodexState
 {
     private readonly Dictionary<string, CodexEntryRecord> entries = new Dictionary<string, CodexEntryRecord>();
+    private readonly IReadOnlyCollection<CodexEntryRecord> entriesView;
 
-    public IReadOnlyCollection<CodexEntryRecord> Entries => entries.Values;
+    public CodexState()
+    {
+        entriesView = ReadOnlyView.Collection(entries.Values);
+    }
+
+    public IReadOnlyCollection<CodexEntryRecord> Entries => entriesView;
 
     public CodexEntryRecord GetOrCreate(CodexEntryCategory category, string entryId, string title)
     {
@@ -168,6 +176,11 @@ public sealed class CodexState
             : null;
     }
 
+    public void ClearForRestore()
+    {
+        entries.Clear();
+    }
+
     private static string GetKey(CodexEntryCategory category, string entryId)
     {
         return $"{category}:{entryId ?? string.Empty}";
@@ -185,10 +198,9 @@ public struct CodexUpdatedEvent
         this.entryId = entryId ?? string.Empty;
     }
 
-    private static CodexUpdatedEvent e;
-
     public static void Trigger(CodexEntryCategory category, string entryId)
     {
+        CodexUpdatedEvent e = new CodexUpdatedEvent();
         e.category = category;
         e.entryId = entryId ?? string.Empty;
         EventObserver.TriggerEvent(e);
@@ -232,12 +244,12 @@ public static class CodexService
         CodexObservationRecorder.ObserveFacility(state, building, source);
     }
 
-    public static void RecordDefenseObservation(CodexState state, DefenseActivationReport report)
+    public static void RecordDefenseObservation(CodexState state, DefenseActivationSnapshot report)
     {
         CodexInvasionRecorder.RecordDefenseObservation(state, report);
     }
 
-    public static void RecordCombatReport(CodexState state, InvasionCombatReport report)
+    public static void RecordCombatReport(CodexState state, InvasionCombatReportSnapshot report)
     {
         CodexInvasionRecorder.RecordCombatReport(state, report);
     }

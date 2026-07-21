@@ -27,6 +27,7 @@ public static class InteriorDoorVisualLayout
 
 public sealed class InteriorDoor : Door
 {
+    public override bool IsDungeonEntrance => false;
     protected override bool ChangesCharacterLayerDuringTraversal => false;
 
     public override void Initialization(BuildingSO buildingSO, Vector2Int buildPos)

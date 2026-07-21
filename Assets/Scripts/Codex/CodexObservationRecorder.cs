@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 public static class CodexObservationRecorder
 {
@@ -95,14 +96,15 @@ public static class CodexObservationRecorder
             entry.AddInfo($"수용: {facility.capacity}", source);
         }
 
-        if (facility != null && facility.requiresStock)
+        if (building.RequiresStockForUse())
         {
-            entry.AddInfo($"재고 필요: 내부 재고 {facility.internalStockMax}", source);
+            entry.AddInfo($"재고 필요: 내부 재고 {building.GetInternalStockCapacity()}", source);
         }
 
-        if (facility != null && facility.preferredSpeciesTags != null && facility.preferredSpeciesTags.Length > 0)
+        string[] preferredSpeciesTags = building.GetPreferredSpeciesTags().ToArray();
+        if (preferredSpeciesTags.Length > 0)
         {
-            entry.AddInfo($"시너지 대상: {string.Join(", ", facility.preferredSpeciesTags)}", source);
+            entry.AddInfo($"시너지 대상: {string.Join(", ", preferredSpeciesTags)}", source);
         }
 
         DefenseFacilityData defense = building.Defense;

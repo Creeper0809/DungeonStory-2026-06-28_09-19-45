@@ -9,10 +9,9 @@ public struct CharacterDeathEvent
         Reason = reason;
     }
 
-    private static CharacterDeathEvent e;
-
     public static void Trigger(CharacterActor actor, string reason)
     {
+        CharacterDeathEvent e = new CharacterDeathEvent();
         e.Actor = actor;
         e.Reason = reason;
         EventObserver.TriggerEvent(e);

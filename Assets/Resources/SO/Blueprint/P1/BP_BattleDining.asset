@@ -22,13 +22,20 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   id: 6191
-  blueprintName: "\uC804\uC7A5\uC758 \uC2DD\uB2F9 \uC124\uACC4\uB3C4"
-  description: "\uC804\uD22C \uC2DD\uB2F9\uACFC \uBCD1\uC601\uC744 \uC787\uB294 \uC870\uD569\uC2DD
-    \uD78C\uD2B8."
+  blueprintName: "\uC0C1\uAD8C \uD1B5\uD569 \uC124\uACC4\uB3C4"
+  description: "\uC9C4\uC5F4\uACFC \uBCF4\uAD00 \uBD80\uD488\uC744 \uACB0\uD569\uD574
+    \uC7A0\uAE08\uC9C4\uC5F4\uC7A5\uC73C\uB85C \uAC1C\uC870\uD558\uB294 \uD76C\uADC0
+    \uC870\uD569\uC2DD\uC774\uB2E4."
   rarity: 1
   defaultCost: 260
   researchWorkRequired: 45
-  unlockBuildingIds: 
-  unlockBasicPurchaseBuildingIds: 
-  unlockRecipeIds:
-  - recipe_battlefield_dining_2
+  unlocks:
+    items:
+    - rid: 7302563078173904438
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302563078173904438
+      type: {class: BlueprintRecipeUnlock, ns: , asm: Assembly-CSharp}
+      data:
+        recipeId: recipe_commerce_secure_display_2

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -19,10 +19,13 @@ public enum InvasionThreatStage
 [Serializable]
 public class InvasionThreatSettings
 {
+    public const float DefaultInitialSafetyDurationSeconds = 180f;
+
     [Header("Thresholds")]
     [Range(1f, 100f)] public float warningThreshold = 70f;
     [Range(1f, 200f)] public float candidateThreshold = 100f;
     [Min(0f)] public float warningCooldownSeconds = 45f;
+    [Min(0f)] public float initialSafetyDurationSeconds = 180f;
     [Min(0f)] public float safetyDurationSeconds = 30f;
     [Min(0f)] public float minCandidateDelaySeconds = 5f;
     [Min(0f)] public float maxCandidateDelaySeconds = 12f;
@@ -55,6 +58,13 @@ public class InvasionThreatSettings
         float min = Mathf.Max(0f, minCandidateDelaySeconds);
         float max = Mathf.Max(min, maxCandidateDelaySeconds);
         return UnityEngine.Random.Range(min, max);
+    }
+
+    public float GetInitialSafetyDuration()
+    {
+        return initialSafetyDurationSeconds > 0f
+            ? initialSafetyDurationSeconds
+            : DefaultInitialSafetyDurationSeconds;
     }
 }
 
@@ -106,10 +116,9 @@ public struct InvasionThreatWarningEvent
         this.snapshot = snapshot;
     }
 
-    private static InvasionThreatWarningEvent e;
-
     public static void Trigger(InvasionThreatSnapshot snapshot)
     {
+        InvasionThreatWarningEvent e = new InvasionThreatWarningEvent();
         e.snapshot = snapshot;
         EventObserver.TriggerEvent(e);
     }
@@ -124,10 +133,9 @@ public struct InvasionCandidateEvent
         this.snapshot = snapshot;
     }
 
-    private static InvasionCandidateEvent e;
-
     public static void Trigger(InvasionThreatSnapshot snapshot)
     {
+        InvasionCandidateEvent e = new InvasionCandidateEvent();
         e.snapshot = snapshot;
         EventObserver.TriggerEvent(e);
     }
@@ -142,10 +150,9 @@ public struct InvasionStartedEvent
         this.snapshot = snapshot;
     }
 
-    private static InvasionStartedEvent e;
-
     public static void Trigger(InvasionThreatSnapshot snapshot)
     {
+        InvasionStartedEvent e = new InvasionStartedEvent();
         e.snapshot = snapshot;
         EventObserver.TriggerEvent(e);
     }
@@ -162,10 +169,9 @@ public struct InvasionResolvedEvent
         this.residualRisk = Mathf.Max(0f, residualRisk);
     }
 
-    private static InvasionResolvedEvent e;
-
     public static void Trigger(bool defended, float residualRisk = 0f)
     {
+        InvasionResolvedEvent e = new InvasionResolvedEvent();
         e.defended = defended;
         e.residualRisk = Mathf.Max(0f, residualRisk);
         EventObserver.TriggerEvent(e);
@@ -230,5 +236,22 @@ public static class InvasionThreatCalculator
     public static string BuildCandidateDetail(InvasionThreatSnapshot snapshot)
     {
         return "수상한 정찰대가 던전 근처에서 목격되었습니다.\n침입이 임박한 것 같습니다.";
+    }
+}
+
+public readonly struct BossInvasionStartedEvent
+{
+    public CharacterActor Intruder { get; }
+    public InvasionThreatSnapshot Snapshot { get; }
+
+    public BossInvasionStartedEvent(CharacterActor intruder, InvasionThreatSnapshot snapshot)
+    {
+        Intruder = intruder;
+        Snapshot = snapshot;
+    }
+
+    public static void Trigger(CharacterActor intruder, InvasionThreatSnapshot snapshot)
+    {
+        EventObserver.TriggerEvent(new BossInvasionStartedEvent(intruder, snapshot));
     }
 }

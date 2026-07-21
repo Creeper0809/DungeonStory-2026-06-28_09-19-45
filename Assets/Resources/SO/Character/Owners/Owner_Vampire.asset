@@ -19,26 +19,54 @@ MonoBehaviour:
   speciesTag: Vampire
   species: {fileID: 11400000, guid: acd4481ed200a4d9bbd2fe13e47321ae, type: 2}
   baseStats:
-    attack: 5
-    sales: 6
-    research: 8
-    moveSpeed: 5
-    strength: 4
-    toughness: 5
-    dexterity: 6
-    cleaning: 4
-    endurance: 8
+    entries:
+    - statId: stat:attack
+      value: 5
+    - statId: stat:sales
+      value: 6
+    - statId: stat:research
+      value: 8
+    - statId: stat:move-speed
+      value: 5
+    - statId: stat:strength
+      value: 4
+    - statId: stat:toughness
+      value: 5
+    - statId: stat:dexterity
+      value: 6
+    - statId: stat:cleaning
+      value: 4
+    - statId: stat:endurance
+      value: 8
   traits:
   - {fileID: 11400000, guid: 07093fb8e63486ce6ab79eba8236cdc9, type: 2}
   defaultWorkPriorities:
-    operate: 1
-    restock: 2
-    repair: 2
-    clean: 3
-    research: 3
-    guard: 3
-    rescue: 2
-    rest: 3
+    schemaVersion: 1
+    priorities:
+    - workTypeId: work:operate
+      priority: 1
+    - workTypeId: work:restock
+      priority: 2
+    - workTypeId: work:repair
+      priority: 2
+    - workTypeId: work:clean
+      priority: 3
+    - workTypeId: work:research
+      priority: 2
+    - workTypeId: work:guard
+      priority: 3
+    - workTypeId: work:rescue
+      priority: 2
+    - workTypeId: work:rest
+      priority: 3
+    legacyOperate: 1
+    legacyRestock: 2
+    legacyRepair: 2
+    legacyClean: 3
+    legacyResearch: 2
+    legacyGuard: 3
+    legacyRescue: 2
+    legacyRest: 3
   aiPersonality:
     diligence: 1
     curiosity: 1

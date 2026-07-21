@@ -125,7 +125,6 @@ public sealed class CharacterDialogueRuntime : MonoBehaviour
         if (!queue.GenerateBubbleLineAsync(BuildPrompt(entry), original, OnBubbleResult))
         {
             lastError = "Bubble request was not accepted by LocalLlmRequestQueue.";
-            Debug.LogWarning($"{name}: {lastError}", this);
             HideLine();
         }
     }
@@ -148,10 +147,17 @@ public sealed class CharacterDialogueRuntime : MonoBehaviour
             return;
         }
 
+        if (result.IsCancelled)
+        {
+            lastError = string.Empty;
+            HideLine();
+            return;
+        }
+
         lastError = $"{result.Status}: {result.Error}";
         if (result.Status != LocalLlmRequestStatus.Dropped)
         {
-            Debug.LogWarning($"{name}: Bubble request failed: {lastError}", this);
+            Debug.Log($"{name}: Bubble request failed: {lastError}", this);
         }
 
         HideLine();
@@ -170,7 +176,7 @@ public sealed class CharacterDialogueRuntime : MonoBehaviour
         }
 
         lastError = $"{nameof(LocalLlmRequestQueue)} is missing.";
-        Debug.LogWarning($"{name}: {lastError}", this);
+        Debug.Log($"{name}: {lastError}", this);
         return false;
     }
 
@@ -202,37 +208,17 @@ public sealed class CharacterDialogueRuntime : MonoBehaviour
             + "The line must be 80 characters or fewer. Use 4 to 10 words. No narration, no markdown, no extra keys.\n"
             + "Do not copy the original event text verbatim; rewrite it as a natural speech bubble.\n"
             + $"persona: {persona}\n"
-            + $"eventTag: {entry.Tag}\n"
+            + $"eventKind: {entry.Activity?.KindId}\n"
+            + $"outcome: {entry.Activity?.OutcomeId}\n"
+            + $"reasonCode: {entry.Activity?.ReasonCode}\n"
             + $"event: {entry.OriginalMessage}";
     }
 
     private static bool ShouldRequestBubble(CharacterLogEntry entry)
     {
-        string value = $"{entry.Tag} {entry.OriginalMessage}";
-        return ContainsAny(
-            value,
-            "stock",
-            "path",
-            "money",
-            "failure",
-            "anger",
-            "exit",
-            "재고",
-            "계산 대기",
-            "길 막힘",
-            "돈 부족",
-            "반복",
-            "실패",
-            "분노",
-            "퇴장",
-            "warning",
-            "complaint",
-            "blocked",
-            "no path",
-            "destination",
-            "occupied",
-            "failed",
-            "unhappy");
+        return entry.Activity != null
+            && entry.Activity.VisibleToPlayer
+            && entry.Activity.BubbleEligible;
     }
 
     private void EnsureText()
@@ -266,26 +252,20 @@ public sealed class CharacterDialogueRuntime : MonoBehaviour
 
     private void EnsureRuntimeReferences()
     {
-        actor ??= GetComponent<CharacterActor>();
-        characterLog ??= GetComponent<CharacterLog>();
-        visual ??= GetComponent<CharacterVisual>();
-    }
-
-    private static bool ContainsAny(string value, params string[] patterns)
-    {
-        if (string.IsNullOrWhiteSpace(value))
+        if (actor == null)
         {
-            return false;
+            actor = GetComponent<CharacterActor>();
         }
 
-        foreach (string pattern in patterns)
+        if (characterLog == null)
         {
-            if (value.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return true;
-            }
+            characterLog = GetComponent<CharacterLog>();
         }
 
-        return false;
+        if (visual == null)
+        {
+            visual = GetComponent<CharacterVisual>();
+        }
     }
+
 }

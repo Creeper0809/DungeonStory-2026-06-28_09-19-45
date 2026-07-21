@@ -16,6 +16,25 @@ public abstract class AIActionSet : SerializedScriptableObject
     public virtual bool IsContinuous => false;
     public virtual float MinimumDuration => 0f;
     public virtual int InterruptPriority => defaultInterruptPriority;
+    public virtual CharacterAiActionDescriptor Descriptor => CharacterAiActionDescriptor.None;
+    public CharacterAiBranch Branch => Descriptor?.Branch ?? CharacterAiBranch.None;
+
+    public bool HasSemanticTag(string tag)
+    {
+        return Descriptor != null && Descriptor.HasTag(tag);
+    }
+
+    public string GetDisplayLabel()
+    {
+        if (!string.IsNullOrWhiteSpace(actionName))
+        {
+            return actionName;
+        }
+
+        return !string.IsNullOrWhiteSpace(Descriptor?.DefaultLabel)
+            ? Descriptor.DefaultLabel
+            : GetType().Name;
+    }
 
     public virtual bool CanStart(CharacterActor actor)
     {
@@ -27,15 +46,25 @@ public abstract class AIActionSet : SerializedScriptableObject
         return Mathf.Clamp01(baseScore);
     }
 
-    public virtual bool CanStartWithContext(
+    public bool CanStartWithContext(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out string failureReason)
     {
-        failureReason = string.Empty;
+        bool canStart = CanStartWithFailure(actor, searchResult, out AIActionFailure failure);
+        failureReason = failure.ToString();
+        return canStart;
+    }
+
+    public virtual bool CanStartWithFailure(
+        CharacterActor actor,
+        GridPathSearchResult searchResult,
+        out AIActionFailure failure)
+    {
+        failure = AIActionFailure.None;
         if (!CanStart(actor))
         {
-            failureReason = "cannot start";
+            failure = AIActionFailure.Create(AIActionFailureKind.CannotStart);
             return false;
         }
 
@@ -44,11 +73,11 @@ public abstract class AIActionSet : SerializedScriptableObject
             return true;
         }
 
-        if (!TryResolveDestination(actor, searchResult, out BuildableObject destination, out failureReason))
+        if (!TryResolveDestinationWithFailure(actor, searchResult, out BuildableObject destination, out failure))
         {
-            if (string.IsNullOrWhiteSpace(failureReason))
+            if (!failure.HasFailure)
             {
-                failureReason = "no destination";
+                failure = AIActionFailure.Create(AIActionFailureKind.NoDestination);
             }
 
             return false;
@@ -56,28 +85,11 @@ public abstract class AIActionSet : SerializedScriptableObject
 
         if (destination == null)
         {
-            failureReason = "no destination";
+            failure = AIActionFailure.Create(AIActionFailureKind.NoDestination);
             return false;
         }
 
         return true;
-    }
-
-    public virtual bool CanStartWithFailure(
-        CharacterActor actor,
-        GridPathSearchResult searchResult,
-        out AIActionFailure failure)
-    {
-        if (CanStartWithContext(actor, searchResult, out string failureReason))
-        {
-            failure = AIActionFailure.None;
-            return true;
-        }
-
-        failure = AIActionFailure.FromReason(
-            failureReason,
-            AIActionFailureKind.CannotStart);
-        return false;
     }
 
     public virtual bool CanContinue(CharacterActor actor, AIAction runningAction, out string stopReason)
@@ -119,14 +131,29 @@ public abstract class AIActionSet : SerializedScriptableObject
             : null;
     }
 
-    public virtual bool TryResolveDestination(
+    public bool TryResolveDestination(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
         out string failureReason)
     {
+        bool resolved = TryResolveDestinationWithFailure(
+            actor,
+            searchResult,
+            out destination,
+            out AIActionFailure failure);
+        failureReason = failure.ToString();
+        return resolved;
+    }
+
+    public virtual bool TryResolveDestinationWithFailure(
+        CharacterActor actor,
+        GridPathSearchResult searchResult,
+        out BuildableObject destination,
+        out AIActionFailure failure)
+    {
         destination = null;
-        failureReason = string.Empty;
+        failure = AIActionFailure.None;
 
         if (!RequiresDestination)
         {
@@ -136,37 +163,18 @@ public abstract class AIActionSet : SerializedScriptableObject
         IReadOnlyList<BuildableObject> candidates = GetDestinationCandidates(actor, searchResult);
         if (candidates == null || candidates.Count == 0)
         {
-            failureReason = "목적지 없음";
+            failure = AIActionFailure.Create(AIActionFailureKind.NoDestination);
             return false;
         }
 
         destination = SelectDestination(actor, candidates);
         if (destination == null)
         {
-            failureReason = "목적지 선택 실패";
+            failure = AIActionFailure.Create(AIActionFailureKind.DestinationSelectionFailed);
             return false;
         }
 
         return true;
-    }
-
-    public virtual bool TryResolveDestinationWithFailure(
-        CharacterActor actor,
-        GridPathSearchResult searchResult,
-        out BuildableObject destination,
-        out AIActionFailure failure)
-    {
-        if (TryResolveDestination(actor, searchResult, out destination, out string failureReason))
-        {
-            failure = AIActionFailure.None;
-            return true;
-        }
-
-        failure = AIActionFailure.FromReason(
-            failureReason,
-            AIActionFailureKind.NoDestination,
-            destination);
-        return false;
     }
 
     public virtual bool TryReserveDestination(

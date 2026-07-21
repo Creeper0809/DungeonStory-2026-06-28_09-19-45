@@ -24,10 +24,12 @@ public static class BlueprintResearchDebugScenarios
 
         List<string> errors = new List<string>();
         RunScenario("설계도 연구 데이터", VerifyBlueprintResearchData, errors);
+        RunScenario("설계도 해금 Inspector 목록", VerifyUnlockAuthoringList, errors);
         RunScenario("구매 이벤트 연구 대기열", VerifyBlueprintPurchaseQueuesResearch, errors);
         RunScenario("연구 중단/재개 진행도", VerifyResearchProgressPersistsUntilCompletion, errors);
-        RunScenario("연구 완료 기본 구매 해금", VerifyCompletionUnlocksBasicPurchase, errors);
+        RunScenario("연구 완료 모듈 건축 조기 해금", VerifyCompletionUnlocksModularConstruction, errors);
         RunScenario("연구 완료 조합식 해금", VerifyCompletionUnlocksRecipes, errors);
+        RunScenario("개방형 설계도 해금", VerifyOpenUnlockEntry, errors);
         RunScenario("연구 속도 보정", VerifyResearchSpeedUsesCharacterAndFacilityModifiers, errors);
         RunScenario("연구 작업 후보 조건", VerifyResearchWorkCandidateRequiresQueuedBlueprint, errors);
 
@@ -70,10 +72,18 @@ public static class BlueprintResearchDebugScenarios
 
         return commercial != null
             && commercial.researchWorkRequired > 0f
-            && commercial.unlockBasicPurchaseBuildingIds.Length > 0
+            && commercial.Unlocks.OfType<BlueprintBuildingUnlock>().Count() >= 5
+            && commercial.Unlocks
+                .OfType<BlueprintBuildingUnlock>()
+                .Select(unlock => new EditorFacilityShopCatalog().FindBuildingById(unlock.buildingId))
+                .All(building => building != null
+                    && building.IsModularFacility()
+                    && building.GetUnlockPhase() > 1)
             && rare != null
             && rare.researchWorkRequired > commercial.researchWorkRequired
-            && rare.unlockRecipeIds.Contains("recipe_battlefield_dining_2");
+            && rare.Unlocks
+                .OfType<BlueprintRecipeUnlock>()
+                .Any(unlock => unlock.recipeId == "recipe_commerce_secure_display_2");
     }
 
     private static bool VerifyBlueprintPurchaseQueuesResearch()
@@ -81,7 +91,7 @@ public static class BlueprintResearchDebugScenarios
         FacilityBlueprintSO blueprint = LoadBlueprint("BP_CommercialBasics");
         GameData gameData = CreateGameData(500);
         FacilityShopUnlockState state = new FacilityShopUnlockState();
-        FacilityShopOffer offer = new FacilityShopOffer(blueprint, 100, blueprint.rarity, true);
+        FacilityShopOffer offer = new FacilityBlueprintOffer(blueprint, 100, blueprint.rarity, true);
         GameObject runtimeObject = new GameObject("BlueprintResearchRuntime_Purchase_Test");
         BlueprintResearchRuntime runtime = runtimeObject.AddComponent<BlueprintResearchRuntime>();
         runtime.EventStartListening<FacilityShopPurchasedEvent>();
@@ -89,7 +99,8 @@ public static class BlueprintResearchDebugScenarios
         bool purchased = FacilityShopService.TryPurchaseOffer(gameData, offer, state, out FacilityShopPurchaseResult result);
         bool valid = purchased
             && result.success
-            && result.blueprint == blueprint
+            && result.TryGetBlueprint(out FacilityBlueprintSO purchasedBlueprint)
+            && purchasedBlueprint == blueprint
             && state.IsBlueprintAcquired(blueprint)
             && runtime.State.Tasks.Count == 1
             && runtime.State.Tasks[0].Blueprint == blueprint;
@@ -120,25 +131,29 @@ public static class BlueprintResearchDebugScenarios
             && runtime.State.IsCompleted(blueprint);
     }
 
-    private static bool VerifyCompletionUnlocksBasicPurchase()
+    private static bool VerifyCompletionUnlocksModularConstruction()
     {
         using ResearchScenarioWorld world = new ResearchScenarioWorld();
         BlueprintResearchRuntime runtime = world.CreateResearchRuntime();
         FacilityBlueprintSO blueprint = LoadBlueprint("BP_DefenseBasics");
         BuildableObject lab = world.Place("P1_ResearchLab", new Vector2Int(2, 0));
         CharacterActor researcher = world.CreateCharacter("Species_Vampire", "Trait_Researcher");
+        BuildingSO tacticalMap = LoadModularBuilding("G04_전술지도탁자");
+        GameData dayOne = CreateGameData(500);
+        bool assetUnlockBefore = tacticalMap != null && tacticalMap.unlocked;
+        bool blockedBeforeResearch = tacticalMap != null
+            && !FacilityProgression.IsUnlocked(tacticalMap, dayOne);
 
         runtime.EnqueueBlueprint(blueprint);
         BlueprintResearchWorkResult result = runtime.ApplyResearchWork(CharacterActor.From(researcher), lab, 999f);
-        IReadOnlyList<FacilityShopOffer> offers = FacilityShopService.CreateBasicPurchaseOffers(
-            new[] { LoadBuilding("P1_SpikeTrap"), LoadBuilding("P1_GuardRoom") },
-            runtime.ShopUnlockState,
-            Array.Empty<int>(),
-            DefaultBuildingCostMultiplier);
-
-        return result.Completed
-            && offers.Any((offer) => offer.Building == LoadBuilding("P1_SpikeTrap"))
-            && offers.Any((offer) => offer.Building == LoadBuilding("P1_GuardRoom"));
+        bool valid = result.Completed
+            && tacticalMap != null
+            && runtime.State.IsBuildingUnlocked(tacticalMap.id)
+            && FacilityProgression.IsUnlocked(tacticalMap, dayOne, runtime.State)
+            && tacticalMap.unlocked == assetUnlockBefore
+            && blockedBeforeResearch;
+        Object.DestroyImmediate(dayOne);
+        return valid;
     }
 
     private static bool VerifyCompletionUnlocksRecipes()
@@ -153,7 +168,62 @@ public static class BlueprintResearchDebugScenarios
         BlueprintResearchWorkResult result = runtime.ApplyResearchWork(CharacterActor.From(researcher), lab, 999f);
 
         return result.Completed
-            && runtime.State.UnlockedRecipeIds.Contains("recipe_battlefield_dining_2");
+            && runtime.State.UnlockedRecipeIds.Contains("recipe_commerce_secure_display_2");
+    }
+
+    private static bool VerifyOpenUnlockEntry()
+    {
+        FacilityBlueprintSO blueprint = ScriptableObject.CreateInstance<FacilityBlueprintSO>();
+        BuildingSO building = LoadBuilding("P1_ResearchLab");
+        DebugBlueprintUnlock debugUnlock = new DebugBlueprintUnlock();
+        blueprint.blueprintName = "확장 해금 테스트";
+        blueprint.unlocks.Add(debugUnlock);
+        BlueprintResearchState state = new BlueprintResearchState();
+        BlueprintResearchUnlockResult result = BlueprintResearchService.ApplyCompletion(
+            blueprint,
+            state,
+            new FacilityShopUnlockState(),
+            new FixedFacilityShopCatalog(building));
+
+        bool valid = debugUnlock.ApplyCount == 1
+            && result.Unlocks.Count == 1
+            && result.Unlocks[0].UnlockTypeId == DebugBlueprintUnlock.TypeId
+            && result.FormatSummaryLines().Single() == "확장 해금: 테스트 보상";
+        Object.DestroyImmediate(blueprint);
+        return valid;
+    }
+
+    private static bool VerifyUnlockAuthoringList()
+    {
+        FacilityBlueprintSO blueprint = ScriptableObject.CreateInstance<FacilityBlueprintSO>();
+        bool addFirst = BlueprintUnlockListDrawer.AddUnlock(
+            blueprint,
+            "unlocks.items",
+            typeof(BlueprintRecipeUnlock));
+        bool addSecond = BlueprintUnlockListDrawer.AddUnlock(
+            blueprint,
+            "unlocks.items",
+            typeof(BlueprintRecipeUnlock));
+
+        SerializedObject serialized = new SerializedObject(blueprint);
+        SerializedProperty items = serialized.FindProperty("unlocks.items");
+        bool duplicateEntriesSupported = items != null
+            && items.arraySize == 2
+            && items.GetArrayElementAtIndex(0).managedReferenceValue is BlueprintRecipeUnlock
+            && items.GetArrayElementAtIndex(1).managedReferenceValue is BlueprintRecipeUnlock;
+        bool removed = BlueprintUnlockListDrawer.RemoveSelected(items, 0);
+        serialized.Update();
+        bool valid = addFirst
+            && addSecond
+            && duplicateEntriesSupported
+            && removed
+            && serialized.FindProperty("unlocks.items")?.arraySize == 1
+            && BlueprintUnlockListDrawer.AddableTypes.Contains(typeof(BlueprintBuildingUnlock))
+            && BlueprintUnlockListDrawer.AddableTypes.Contains(typeof(BlueprintBasicPurchaseUnlock))
+            && BlueprintUnlockListDrawer.AddableTypes.Contains(typeof(BlueprintRecipeUnlock))
+            && !BlueprintUnlockListDrawer.AddableTypes.Contains(typeof(DebugBlueprintUnlock));
+        Object.DestroyImmediate(blueprint);
+        return valid;
     }
 
     private static bool VerifyResearchSpeedUsesCharacterAndFacilityModifiers()
@@ -205,14 +275,15 @@ public static class BlueprintResearchDebugScenarios
         return AssetDatabase.LoadAssetAtPath<FacilityBlueprintSO>($"Assets/Resources/SO/Blueprint/P1/{assetName}.asset");
     }
 
-    private static float DefaultBuildingCostMultiplier(BuildingSO building)
-    {
-        return 1f;
-    }
-
     private static BuildingSO LoadBuilding(string assetName)
     {
         return AssetDatabase.LoadAssetAtPath<BuildingSO>($"Assets/Resources/SO/Building/P1/{assetName}.asset");
+    }
+
+    private static BuildingSO LoadModularBuilding(string assetName)
+    {
+        return AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            $"Assets/Resources/SO/Building/Modular/{assetName}.asset");
     }
 
     private static GameData CreateGameData(int holdingMoney)
@@ -221,6 +292,45 @@ public static class BlueprintResearchDebugScenarios
         gameData.holdingMoney = new Data<int>();
         gameData.holdingMoney.Initialize(holdingMoney);
         return gameData;
+    }
+
+    private sealed class DebugBlueprintUnlock : BlueprintUnlock
+    {
+        public const string TypeId = "debug.blueprint-unlock";
+
+        public int ApplyCount { get; private set; }
+        public override string UnlockTypeId => TypeId;
+        public override bool IsConfigured => true;
+
+        public override BlueprintUnlockRecord Apply(BlueprintUnlockContext context)
+        {
+            ApplyCount++;
+            return new BlueprintUnlockRecord(
+                UnlockTypeId,
+                "확장 해금",
+                "debug-reward",
+                "테스트 보상");
+        }
+    }
+
+    private sealed class FixedFacilityShopCatalog : IFacilityShopCatalog
+    {
+        private readonly BuildingSO building;
+
+        public FixedFacilityShopCatalog(BuildingSO building)
+        {
+            this.building = building;
+        }
+
+        public IReadOnlyCollection<BuildingSO> Buildings => building != null
+            ? new[] { building }
+            : Array.Empty<BuildingSO>();
+        public IReadOnlyCollection<FacilityBlueprintSO> Blueprints => Array.Empty<FacilityBlueprintSO>();
+
+        public BuildingSO FindBuildingById(int buildingId)
+        {
+            return building != null && building.id == buildingId ? building : null;
+        }
     }
 
     private sealed class ResearchScenarioWorld : IDisposable
@@ -262,8 +372,13 @@ public static class BlueprintResearchDebugScenarios
         {
             GameObject obj = new GameObject("BlueprintResearchRuntime_Test");
             objects.Add(obj);
-            obj.AddComponent<DailyFacilityShopRuntime>();
+            DailyFacilityShopRuntime shopRuntime = obj.AddComponent<DailyFacilityShopRuntime>();
             BlueprintResearchRuntime runtime = obj.AddComponent<BlueprintResearchRuntime>();
+            runtime.Construct(
+                new FixedFacilityShopUnlockStateService(shopRuntime.UnlockState),
+                new EditorFacilityShopCatalog(),
+                new FacilityCandidateCacheStore(),
+                new DungeonWorkforceReplanService(new DungeonSceneComponentQuery()));
             runtime.EventStartListening<FacilityShopPurchasedEvent>();
             return runtime;
         }
@@ -284,6 +399,11 @@ public static class BlueprintResearchDebugScenarios
             }
 
             objects.Add(building.gameObject);
+            CharacterAiEditorTestDependencies.Inject(building);
+            if (building is Shop shop)
+            {
+                CharacterAiEditorTestDependencies.InjectShop(shop);
+            }
             building.SetGrid(Grid);
             building.Initialization(buildingData, position);
             bool registered = Grid.RegisterOccupant(
@@ -309,6 +429,7 @@ public static class BlueprintResearchDebugScenarios
             AIBrain brain = obj.AddComponent<AIBrain>();
             brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
             CharacterActor character = obj.AddComponent<CharacterActor>();
+            CharacterAiEditorTestDependencies.Inject(obj);
             CharacterAwakeMethod?.Invoke(character, null);
 
             CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
@@ -344,6 +465,42 @@ public static class BlueprintResearchDebugScenarios
             }
 
             GridSystemInstanceField?.SetValue(null, previousGridSystem);
+        }
+    }
+
+    private sealed class FixedFacilityShopUnlockStateService : IFacilityShopUnlockStateService
+    {
+        private readonly FacilityShopUnlockState state;
+
+        public FixedFacilityShopUnlockStateService(FacilityShopUnlockState state)
+        {
+            this.state = state;
+        }
+
+        public FacilityShopUnlockState GetUnlockState()
+        {
+            return state;
+        }
+    }
+
+    private sealed class EditorFacilityShopCatalog : IFacilityShopCatalog
+    {
+        public IReadOnlyCollection<BuildingSO> Buildings => LoadAssets<BuildingSO>("Assets/Resources/SO/Building");
+        public IReadOnlyCollection<FacilityBlueprintSO> Blueprints => LoadAssets<FacilityBlueprintSO>("Assets/Resources/SO/Blueprint");
+
+        public BuildingSO FindBuildingById(int buildingId)
+        {
+            return Buildings.FirstOrDefault(building => building != null && building.id == buildingId);
+        }
+
+        private static IReadOnlyCollection<TAsset> LoadAssets<TAsset>(string folder)
+            where TAsset : UnityEngine.Object
+        {
+            return AssetDatabase.FindAssets($"t:{typeof(TAsset).Name}", new[] { folder })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(AssetDatabase.LoadAssetAtPath<TAsset>)
+                .Where(asset => asset != null)
+                .ToArray();
         }
     }
 

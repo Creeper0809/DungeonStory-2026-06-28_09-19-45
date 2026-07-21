@@ -452,7 +452,7 @@ public sealed class SocialRumorJsonDto : ILlmJsonPayload
     public string targetType;
     public int targetFacilityId = -1;
     public string targetFacilityTag;
-    public int targetCharacterId = -1;
+    public string targetCharacterId = string.Empty;
     public string targetCharacterName;
     public float sentiment;
     public string summary;
@@ -561,7 +561,7 @@ public sealed class SocialRumorJsonDto : ILlmJsonPayload
         }
 
         if (parsedTargetType == SocialRumorTargetType.Character
-            && targetCharacterId < 0
+            && string.IsNullOrWhiteSpace(targetCharacterId)
             && string.IsNullOrWhiteSpace(targetCharacterName))
         {
             error = "Character rumors require targetCharacterId or targetCharacterName.";
@@ -574,10 +574,17 @@ public sealed class SocialRumorJsonDto : ILlmJsonPayload
     public static bool ValidateRawJson(string json, out string error)
     {
         error = string.Empty;
-        if (!HasRawInteger(json, nameof(targetFacilityId))
-            || !HasRawInteger(json, nameof(targetCharacterId)))
+        if (!HasRawInteger(json, nameof(targetFacilityId)))
         {
-            error = "target ids must be JSON numbers, not strings or null.";
+            error = "targetFacilityId must be a JSON number, not a string or null.";
+            return false;
+        }
+
+        if (!Regex.IsMatch(
+                json ?? string.Empty,
+                $"\"{Regex.Escape(nameof(targetCharacterId))}\"\\s*:\\s*\"[^\"]*\""))
+        {
+            error = "targetCharacterId must be a JSON string, not a number or null.";
             return false;
         }
 
@@ -601,7 +608,9 @@ public sealed class SocialRumorJsonDto : ILlmJsonPayload
         {
             type = parsedRumorType,
             targetType = parsedTargetType,
-            sourceActorId = speaker != null && speaker.Identity != null ? speaker.Identity.StableId : -1,
+            sourceActorId = speaker != null && speaker.Identity != null
+                ? speaker.Identity.PersistentId
+                : string.Empty,
             sourceActorName = SocialRumorUtility.GetActorLabel(speaker),
             targetFacilityId = targetFacilityId,
             targetFacilityTag = targetFacilityTag,

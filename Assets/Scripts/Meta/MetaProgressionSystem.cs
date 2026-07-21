@@ -28,6 +28,8 @@ public class MetaProgressionRuntime :
 
     public MetaProgressionState State => state;
     public RunResultSnapshot LatestResult { get; private set; }
+    public MetaRunProgressTracker RunProgress => runProgress;
+    public bool HasEnded => ended;
 
     [Inject]
     public void Construct(
@@ -57,11 +59,18 @@ public class MetaProgressionRuntime :
         LatestResult = null;
     }
 
-    public bool TryPurchaseUpgrade(MetaUpgradeId id, out string message)
+    public void RestoreRunState(bool hasEnded, RunResultSnapshot latestResult)
+    {
+        ended = hasEnded;
+        LatestResult = latestResult;
+    }
+
+    public bool TryPurchaseUpgrade(string id, out string message)
     {
         bool success = state.TryPurchaseUpgrade(id, out message);
         if (success)
         {
+            MetaUpgradePurchasedEvent.Trigger(id);
             EventAlertService.Raise("계승 강화", message, EventAlertImportance.Medium, "계승");
         }
 
@@ -70,22 +79,50 @@ public class MetaProgressionRuntime :
 
     public int GetStartingFacilityCandidateBonus()
     {
-        return state.GetUpgradeLevel(MetaUpgradeId.StartingFacilityCandidatePlusOne);
+        return MetaProgressionEffects.GetIntegerBonus(
+            state,
+            MetaUpgradeEffectIds.StartingFacilityCandidates);
     }
 
     public int GetStartingOwnerTraitCandidateBonus()
     {
-        return state.GetUpgradeLevel(MetaUpgradeId.StartingOwnerTraitCandidatePlusOne);
+        return MetaProgressionEffects.GetIntegerBonus(
+            state,
+            MetaUpgradeEffectIds.StartingOwnerTraitCandidates);
     }
 
     public float GetOwnerMaxHealthMultiplier()
     {
-        return 1f + (state.GetUpgradeLevel(MetaUpgradeId.OwnerSurvivalBonus) * 0.08f);
+        return MetaProgressionEffects.GetMultiplier(state, MetaUpgradeEffectIds.OwnerMaxHealth);
     }
 
     public float GetInvasionWarningThresholdMultiplier()
     {
-        return 1f - (state.GetUpgradeLevel(MetaUpgradeId.InvasionWarningAccuracy) * 0.08f);
+        return MetaProgressionEffects.GetMultiplier(
+            state,
+            MetaUpgradeEffectIds.InvasionWarningThreshold);
+    }
+
+    public float GetCommerceStockCostMultiplier(StockCategory category)
+    {
+        if (category != StockCategory.Food && category != StockCategory.General)
+        {
+            return 1f;
+        }
+
+        return MetaProgressionEffects.GetMultiplier(state, MetaUpgradeEffectIds.CommerceStockCost);
+    }
+
+    public float GetFortressFacilityCostMultiplier(BuildingSO building)
+    {
+        return building?.Defense != null && building.Defense.IsDefenseFacility
+            ? MetaProgressionEffects.GetMultiplier(state, MetaUpgradeEffectIds.FortressDefenseFacilityCost)
+            : 1f;
+    }
+
+    public float GetArcaneResearchWorkMultiplier()
+    {
+        return MetaProgressionEffects.GetMultiplier(state, MetaUpgradeEffectIds.ArcaneResearchWork);
     }
 
     public bool IsRecipePreserved(string recipeId)
@@ -96,7 +133,9 @@ public class MetaProgressionRuntime :
 
     public IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(IEnumerable<BuildingSO> buildings)
     {
-        int count = state.GetUpgradeLevel(MetaUpgradeId.BasicPurchaseListExpansion);
+        int count = MetaProgressionEffects.GetIntegerBonus(
+            state,
+            MetaUpgradeEffectIds.BasicPurchaseEntries);
         if (count <= 0)
         {
             return Array.Empty<int>();
@@ -171,10 +210,18 @@ public class MetaProgressionRuntime :
 
     public void OnTriggerEvent(OwnerRunEndedEvent eventType)
     {
-        EndRun(eventType.OwnerActor, eventType.Reason);
+        EndRun(eventType.OwnerActor, eventType.Reason, eventType.Outcome);
     }
 
     public RunResultSnapshot EndRun(CharacterActor owner, string reason)
+    {
+        return EndRun(owner, reason, DungeonRunOutcome.Defeat);
+    }
+
+    public RunResultSnapshot EndRun(
+        CharacterActor owner,
+        string reason,
+        DungeonRunOutcome outcome)
     {
         if (ended && LatestResult != null)
         {
@@ -182,9 +229,11 @@ public class MetaProgressionRuntime :
         }
 
         ended = true;
-        RunResultSnapshot result = ResolveRunResultBuilder().Build(runProgress.CreateResultContext(owner, reason));
-        result.legacyCurrency = MetaProgressionCalculator.CalculateLegacyCurrency(result);
+        RunResultSnapshot result = ResolveRunResultBuilder().Build(
+            runProgress.CreateResultContext(owner, reason, outcome));
+        result = result.WithLegacyCurrency(MetaProgressionCalculator.CalculateLegacyCurrency(result));
         state.AddCurrency(result.legacyCurrency);
+        state.RecordRunCompleted();
         PreserveRunRecipes();
         LatestResult = result;
 
@@ -212,7 +261,9 @@ public class MetaProgressionRuntime :
 
     private void PreserveRunRecipes()
     {
-        int slots = state.GetUpgradeLevel(MetaUpgradeId.SpecialRecipeRecordSlot);
+        int slots = MetaProgressionEffects.GetIntegerBonus(
+            state,
+            MetaUpgradeEffectIds.PreservedRecipeSlots);
         state.PreserveRecipes(runProgress.UnlockedRecipeIds.OrderBy((id) => id), slots);
     }
 

@@ -22,13 +22,19 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   id: 6192
-  blueprintName: "\uC5F0\uC1C4 \uD568\uC815 \uC124\uACC4\uB3C4"
-  description: "\uBC88\uAC1C\uC640 \uB0C9\uAE30 \uBC29\uC5B4 \uC2DC\uC124\uC744 \uC787\uB294
-    \uD2B9\uC218 \uC870\uD569\uC2DD \uD78C\uD2B8."
+  blueprintName: "\uC804\uC220 \uC9C0\uD718 \uC124\uACC4\uB3C4"
+  description: "\uC21C\uCC30 \uCCB4\uACC4\uC640 \uC138\uB825 \uD45C\uC2DD\uC744 \uACB0\uD569\uD574
+    \uC804\uD22C\uAE43\uBC1C\uC744 \uB9CC\uB4DC\uB294 \uD76C\uADC0 \uC870\uD569\uC2DD\uC774\uB2E4."
   rarity: 1
   defaultCost: 280
   researchWorkRequired: 50
-  unlockBuildingIds: 
-  unlockBasicPurchaseBuildingIds: 
-  unlockRecipeIds:
-  - recipe_trap_chain_2
+  unlocks:
+    items:
+    - rid: 7302563078173904432
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302563078173904432
+      type: {class: BlueprintRecipeUnlock, ns: , asm: Assembly-CSharp}
+      data:
+        recipeId: recipe_fortress_banner_2

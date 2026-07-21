@@ -65,6 +65,5 @@ MonoBehaviour:
     - Name: 
       Entry: 8
       Data: 
-  type: 2
   shopId: 5
   multifly: 1

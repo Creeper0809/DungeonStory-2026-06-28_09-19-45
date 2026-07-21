@@ -13,13 +13,13 @@ public enum RoomEnvironmentStatus
 
 public sealed class RoomRoleContribution
 {
-    public RoomRoleContribution(RoomRole role, IReadOnlyList<BuildableObject> fixtures)
+    public RoomRoleContribution(FacilityRole role, IReadOnlyList<BuildableObject> fixtures)
     {
         Role = role;
         Fixtures = fixtures ?? Array.Empty<BuildableObject>();
     }
 
-    public RoomRole Role { get; }
+    public FacilityRole Role { get; }
     public IReadOnlyList<BuildableObject> Fixtures { get; }
     public int Count => Fixtures.Count;
 }
@@ -32,7 +32,7 @@ public sealed class RoomEnvironmentSnapshot
         RoomEnvironmentStatus status,
         IReadOnlyList<BuildableObject> fixtures,
         IReadOnlyList<RoomRoleContribution> roleContributions,
-        RoomRole primaryRole,
+        FacilityRole primaryRole,
         bool usesMixedColor,
         int occupiedCells,
         float luxury,
@@ -67,7 +67,7 @@ public sealed class RoomEnvironmentSnapshot
     public RoomEnvironmentStatus Status { get; }
     public IReadOnlyList<BuildableObject> Fixtures { get; }
     public IReadOnlyList<RoomRoleContribution> RoleContributions { get; }
-    public RoomRole PrimaryRole { get; }
+    public FacilityRole PrimaryRole { get; }
     public bool UsesMixedColor { get; }
     public int OccupiedCells { get; }
     public float Luxury { get; }
@@ -82,7 +82,7 @@ public sealed class RoomEnvironmentSnapshot
     public int FreeCells => Mathf.Max(0, Area - OccupiedCells);
     public int DoorCount => Room?.Doors.Count ?? 0;
     public int WallCount => Room?.SolidBoundaryCount ?? 0;
-    public RoomRole Roles => Room?.Roles ?? RoomRole.None;
+    public FacilityRole Roles => Room?.Roles ?? FacilityRole.None;
     public bool IsEnvironmentActive => Status == RoomEnvironmentStatus.Usable;
 }
 
@@ -91,23 +91,135 @@ public interface IRoomEnvironmentEvaluator
     RoomEnvironmentSnapshot Evaluate(Grid grid, RoomInstance room);
 }
 
+public interface IRoomEnvironmentQuery
+{
+    bool TryGetSnapshot(BuildableObject facility, out RoomEnvironmentSnapshot snapshot);
+    float GetWorkEnvironmentScore(BuildableObject facility);
+    float GetWorkDurationMultiplier(BuildableObject facility, FacilityWorkType workType);
+    float GetFacilityPreferenceScore(BuildableObject facility);
+}
+
+public sealed class RoomEnvironmentQuery : IRoomEnvironmentQuery
+{
+    private sealed class CachedSnapshot
+    {
+        public int GridVersion = -1;
+        public int FacilityStateVersion = -1;
+        public RoomEnvironmentSnapshot Snapshot;
+    }
+
+    private const int MaxCachedFacilities = 512;
+
+    private readonly IRoomLayoutCache roomLayoutCache;
+    private readonly IRoomEnvironmentEvaluator evaluator;
+    private readonly IFacilityCandidateCache facilityCandidateCache;
+    private readonly Dictionary<BuildableObject, CachedSnapshot> cacheByFacility =
+        new Dictionary<BuildableObject, CachedSnapshot>();
+
+    public RoomEnvironmentQuery(
+        IRoomLayoutCache roomLayoutCache,
+        IRoomEnvironmentEvaluator evaluator,
+        IFacilityCandidateCache facilityCandidateCache)
+    {
+        this.roomLayoutCache = roomLayoutCache
+            ?? throw new ArgumentNullException(nameof(roomLayoutCache));
+        this.evaluator = evaluator
+            ?? throw new ArgumentNullException(nameof(evaluator));
+        this.facilityCandidateCache = facilityCandidateCache
+            ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
+    }
+
+    public bool TryGetSnapshot(BuildableObject facility, out RoomEnvironmentSnapshot snapshot)
+    {
+        snapshot = null;
+        if (facility == null
+            || facility.isDestroy
+            || facility.Grid == null
+            || !roomLayoutCache.TryGetRoom(facility, out RoomInstance room)
+            || room == null
+            || room.IsSelfContained)
+        {
+            return false;
+        }
+
+        if (!cacheByFacility.TryGetValue(facility, out CachedSnapshot cache))
+        {
+            if (cacheByFacility.Count >= MaxCachedFacilities)
+            {
+                cacheByFacility.Clear();
+            }
+
+            cache = new CachedSnapshot();
+            cacheByFacility[facility] = cache;
+        }
+
+        int gridVersion = facility.Grid.version;
+        int stateVersion = facilityCandidateCache.DynamicStateVersion;
+        if (cache.Snapshot == null
+            || cache.GridVersion != gridVersion
+            || cache.FacilityStateVersion != stateVersion)
+        {
+            cache.GridVersion = gridVersion;
+            cache.FacilityStateVersion = stateVersion;
+            cache.Snapshot = evaluator.Evaluate(facility.Grid, room);
+        }
+
+        snapshot = cache.Snapshot;
+        return snapshot != null;
+    }
+
+    public float GetWorkEnvironmentScore(BuildableObject facility)
+    {
+        return TryGetSnapshot(facility, out RoomEnvironmentSnapshot snapshot)
+            && snapshot.IsEnvironmentActive
+                ? Mathf.Clamp(snapshot.Impressiveness * 0.6f + snapshot.Cleanliness * 0.4f, 0f, 100f)
+                : 50f;
+    }
+
+    public float GetWorkDurationMultiplier(BuildableObject facility, FacilityWorkType workType)
+    {
+        if (!UsesWorkEnvironment(workType)
+            || !TryGetSnapshot(facility, out RoomEnvironmentSnapshot snapshot)
+            || !snapshot.IsEnvironmentActive)
+        {
+            return 1f;
+        }
+
+        float score = Mathf.Clamp(snapshot.Impressiveness * 0.6f + snapshot.Cleanliness * 0.4f, 0f, 100f);
+        float speedMultiplier = Mathf.Clamp(0.85f + score * 0.003f, 0.85f, 1.15f);
+        return 1f / speedMultiplier;
+    }
+
+    public float GetFacilityPreferenceScore(BuildableObject facility)
+    {
+        if (!TryGetSnapshot(facility, out RoomEnvironmentSnapshot snapshot))
+        {
+            return 8f;
+        }
+
+        if (!snapshot.IsEnvironmentActive)
+        {
+            return facility != null && facility.BuildingData != null && facility.BuildingData.RequiresRoomRole()
+                ? -15f
+                : 0f;
+        }
+
+        float score = Mathf.Clamp(snapshot.Impressiveness * 0.6f + snapshot.Cleanliness * 0.4f, 0f, 100f);
+        return Mathf.Lerp(8f, 28f, score / 100f);
+    }
+
+    private static bool UsesWorkEnvironment(FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Operate
+            || workType == FacilityWorkType.Research
+            || workType == FacilityWorkType.Restock
+            || workType == FacilityWorkType.Guard
+            || workType == FacilityWorkType.Craft;
+    }
+}
+
 public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
 {
-    private static readonly RoomRole[] OrderedRoles =
-    {
-        RoomRole.Dining,
-        RoomRole.Shop,
-        RoomRole.Rest,
-        RoomRole.Training,
-        RoomRole.Research,
-        RoomRole.Mana,
-        RoomRole.Storage,
-        RoomRole.Toilet,
-        RoomRole.Hygiene,
-        RoomRole.Administration,
-        RoomRole.Security
-    };
-
     private readonly IRoomEnvironmentSettingsProvider settingsProvider;
     private readonly IFacilityEvolutionRecordProvider recordProvider;
 
@@ -137,7 +249,7 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
         List<BuildableObject> fixtures = CollectInteriorFixtures(grid, room);
         HashSet<Vector2Int> occupiedCells = CollectOccupiedCells(room, fixtures);
         List<RoomRoleContribution> contributions = BuildRoleContributions(room);
-        ResolvePrimaryRole(contributions, out RoomRole primaryRole, out bool usesMixedColor);
+        ResolvePrimaryRole(contributions, out FacilityRole primaryRole, out bool usesMixedColor);
 
         float luxury = 0f;
         float hygiene = 0f;
@@ -162,7 +274,7 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
                 damagedFixtures++;
             }
 
-            operationalCleanlinessTotal += fixture.OperationalState.cleanliness;
+            operationalCleanlinessTotal += fixture.FacilityState.cleanliness;
         }
 
         int area = Mathf.Max(1, room.Cells.Count);
@@ -273,21 +385,15 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
     private static List<RoomRoleContribution> BuildRoleContributions(RoomInstance room)
     {
         List<RoomRoleContribution> result = new List<RoomRoleContribution>();
-        foreach (RoomRole role in OrderedRoles)
+        foreach (FacilityRoleDefinition definition in FacilityRoleCatalog.Enumerate(room.Roles))
         {
-            if ((room.Roles & role) == 0)
-            {
-                continue;
-            }
-
-            FacilityRole facilityRole = RoomRoleUtility.ToFacilityRoles(role);
             List<BuildableObject> fixtures = room.Furniture
                 .Where((fixture) => fixture != null
                     && !fixture.isDestroy
-                    && fixture.SupportsFacilityRole(facilityRole))
+                    && fixture.SupportsFacilityRole(definition.Role))
                 .Distinct()
                 .ToList();
-            result.Add(new RoomRoleContribution(role, fixtures));
+            result.Add(new RoomRoleContribution(definition.Role, fixtures));
         }
 
         return result;
@@ -295,10 +401,10 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
 
     private static void ResolvePrimaryRole(
         IReadOnlyList<RoomRoleContribution> contributions,
-        out RoomRole primaryRole,
+        out FacilityRole primaryRole,
         out bool usesMixedColor)
     {
-        primaryRole = RoomRole.None;
+        primaryRole = FacilityRole.None;
         usesMixedColor = false;
         if (contributions == null || contributions.Count == 0)
         {
@@ -352,54 +458,31 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
 
 public static class RoomEnvironmentPresentation
 {
-    private static readonly RoomRole[] OrderedRoles =
+    public static string GetRoomName(FacilityRole roles)
     {
-        RoomRole.Dining,
-        RoomRole.Shop,
-        RoomRole.Rest,
-        RoomRole.Training,
-        RoomRole.Research,
-        RoomRole.Mana,
-        RoomRole.Storage,
-        RoomRole.Toilet,
-        RoomRole.Hygiene,
-        RoomRole.Administration,
-        RoomRole.Security
-    };
-
-    public static string GetRoomName(RoomRole roles)
-    {
-        if (roles == RoomRole.None)
+        if (roles == FacilityRole.None)
         {
             return "미지정 방";
         }
 
-        List<string> labels = OrderedRoles
-            .Where((role) => (roles & role) != 0)
-            .Select(GetRoleLabel)
+        List<FacilityRoleDefinition> definitions = FacilityRoleCatalog
+            .Enumerate(roles)
             .ToList();
-        return labels.Count == 1
-            ? GetSingleRoomName(OrderedRoles.First((role) => (roles & role) != 0))
-            : string.Join(" + ", labels);
+        if (definitions.Count == 0)
+        {
+            return "미지정 방";
+        }
+
+        return definitions.Count == 1
+            ? definitions[0].RoomName
+            : string.Join(" + ", definitions.Select((definition) => definition.RoomLabel));
     }
 
-    public static string GetRoleLabel(RoomRole role)
+    public static string GetRoleLabel(FacilityRole role)
     {
-        return role switch
-        {
-            RoomRole.Dining => "식사",
-            RoomRole.Shop => "상점",
-            RoomRole.Rest => "휴식",
-            RoomRole.Training => "훈련",
-            RoomRole.Research => "연구",
-            RoomRole.Mana => "마나",
-            RoomRole.Storage => "창고",
-            RoomRole.Toilet => "화장실",
-            RoomRole.Hygiene => "위생",
-            RoomRole.Administration => "집무",
-            RoomRole.Security => "경비",
-            _ => "미지정"
-        };
+        return FacilityRoleCatalog.TryGet(role, out FacilityRoleDefinition definition)
+            ? definition.RoomLabel
+            : "미지정";
     }
 
     public static string GetStatusLabel(RoomEnvironmentStatus status)
@@ -431,22 +514,4 @@ public static class RoomEnvironmentPresentation
             : fixture.name;
     }
 
-    private static string GetSingleRoomName(RoomRole role)
-    {
-        return role switch
-        {
-            RoomRole.Dining => "식당",
-            RoomRole.Shop => "상점",
-            RoomRole.Rest => "휴게실",
-            RoomRole.Training => "훈련실",
-            RoomRole.Research => "연구실",
-            RoomRole.Mana => "마나실",
-            RoomRole.Storage => "창고",
-            RoomRole.Toilet => "화장실",
-            RoomRole.Hygiene => "세면실",
-            RoomRole.Administration => "사장실",
-            RoomRole.Security => "경비실",
-            _ => "미지정 방"
-        };
-    }
 }

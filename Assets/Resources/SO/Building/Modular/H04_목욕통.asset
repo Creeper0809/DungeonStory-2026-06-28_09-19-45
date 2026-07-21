@@ -40,6 +40,16 @@ MonoBehaviour:
   objectName: "\uBAA9\uC695\uD1B5"
   sprite: {fileID: 21300000, guid: 82837bd385cbe1a4fa4e145349a3211a, type: 3}
   icon: {fileID: 21300000, guid: 82837bd385cbe1a4fa4e145349a3211a, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562995605602456
+    - rid: 7302562995605602457
+    - rid: 7302562995605602458
+    - rid: 7302562995605602459
+    - rid: 7302562995605602460
+    - rid: 7302562995605602461
+    - rid: 7302562995605602462
+    - rid: 7302563076257874039
   width: 2
   height: 1
   layer: 1
@@ -48,72 +58,75 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 4
-  facility:
-    roles: 260
-    capacity: 1
-    useDuration: 1.5
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 1
-    supportedWorkTypes: 12
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Hygiene
-    - Rest
-    scores:
-    - key: Hygiene
-      value: 3
-    - key: Rest
-      value: 2
-    metrics: []
-  operational:
-    code: H04
-    functions: 3145856
-    recovery:
-      sleep: 12
-      mood: 10
-      fun: 0
-      hunger: 0
-      excretion: 0
-      hygiene: 85
-    storageCategory: 1
-    storageCapacity: 0
-    seatCapacity: 0
-    tableCapacity: 0
-    serviceCapacity: 0
-    workOutputAmount: 0
-    constructionCost: 135
-    unlockPhase: 2
-    demolitionRefundRate: 0.5
-    lightIntensity: 0
-    lightRadius: 0
+  facilityAnchors:
+    slots: []
   unlocked: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562995605602456
+      type: {class: BuildingFacilityPartAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityPartAbility
+        code: H04
+    - rid: 7302562995605602457
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 135
+        maintenance: 4
+        unlockPhase: 2
+        demolitionRefundRate: 0.5
+    - rid: 7302562995605602458
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 260
+          capacity: 1
+          useDuration: 1.5
+          requiredWorkers: 1
+          supportedWorkTypes: 12
+          disabledWhenDamaged: 1
+    - rid: 7302562995605602459
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562995605602460
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Hygiene
+          - Rest
+          scores:
+          - key: Hygiene
+            value: 3
+          - key: Rest
+            value: 2
+          metrics: []
+    - rid: 7302562995605602461
+      type: {class: BuildingNeedRecoveryAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingNeedRecoveryAbility
+        recovery:
+          sleep: 12
+          mood: 10
+          fun: 0
+          hunger: 0
+          excretion: 0
+          hygiene: 85
+    - rid: 7302562995605602462
+      type: {class: BuildingCleaningAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingCleaningAbility
+        restoredCleanliness: 100
+    - rid: 7302563076257874039
+      type: {class: BuildingExpeditionRecoveryAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingExpeditionRecoveryAbility
+        healthHealRatio: 0.08
+        injuryReduction: 0.12
+        stressRecovery: 26

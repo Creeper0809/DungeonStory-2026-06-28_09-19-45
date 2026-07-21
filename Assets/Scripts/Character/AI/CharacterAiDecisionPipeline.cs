@@ -341,11 +341,17 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
             blackboard.ClearCommitment(CharacterAiInterruptReason.ManualReplan, "Idle behavior selected.");
             blackboard.RecordSelectedUtilitySummary($"AmbientIdle utility=explicit behavior={behaviorName}");
             blackboard.SetIntent(CharacterAiBranch.Idle, behaviorName, "RunIdleBehavior", behaviorName);
-            actor.AddLog($"AI idle: {behaviorName}");
+            actor.AddActivity(CharacterActivityEvent.InternalAi(
+                CharacterActivityOutcomes.Started,
+                "idle-selected",
+                $"AI idle: {behaviorName}"));
             return Result(true, CharacterAiBranch.Idle, "RunIdleBehavior", behaviorName, blackboard);
         }
 
-        actor.AddLog($"AI idle failed: {failureReason}");
+        actor.AddActivity(CharacterActivityEvent.InternalAi(
+            CharacterActivityOutcomes.Failed,
+            "idle-failed",
+            $"AI idle failed: {failureReason}"));
         if (actor.Brain != null)
         {
             actor.Brain.isBestActionEnd = true;
@@ -475,7 +481,14 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
             return Result(false, CharacterAiBranch.MacroGoal, "Complain", "Macro goal is missing.", blackboard);
         }
 
-        actor.AddLog($"AI macro complain: {goal.reason}");
+        actor.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Social,
+            CharacterActivityOutcomes.Responded,
+            $"불만을 털어놓았다: {goal.reason}",
+            actionId: "macro:complain",
+            reasonCode: goal.reason,
+            sentiment: -0.65f,
+            bubbleEligible: true));
         blackboard.ClearMacroGoal("Complain emitted.");
         return Result(true, CharacterAiBranch.MacroGoal, "Complain", "Complain.", blackboard);
     }
@@ -527,7 +540,20 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
             return Result(false, CharacterAiBranch.MacroGoal, "ExitDungeon", "AbilityMove is missing.", blackboard);
         }
 
-        actor.AddLog($"AI macro exit: {goal.reason}");
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out _))
+        {
+            blackboard.ClearMacroGoal("Workers cannot exit through ordinary mood macros.");
+            return Result(false, CharacterAiBranch.MacroGoal, "ExitDungeon", "Worker exit is handled by staff systems.", blackboard);
+        }
+
+        actor.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Lifecycle,
+            CharacterActivityOutcomes.Departed,
+            $"던전을 떠나기로 했다: {goal.reason}",
+            actionId: "macro:exit-dungeon",
+            reasonCode: goal.reason,
+            sentiment: -0.8f,
+            bubbleEligible: true));
         blackboard.ClearCommitment(CharacterAiInterruptReason.MacroGoalChanged, "ExitDungeon macro.");
         blackboard.ClearMacroGoal("ExitDungeon started.");
         if (actor.Brain != null)
@@ -558,21 +584,35 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
         if (target == null)
         {
             blackboard.ClearMacroGoal("Vandalize target not found.");
-            actor.AddLog($"AI macro vandalize failed: target not found - {goal.reason}");
+            actor.AddActivity(CharacterActivityEvent.InternalAi(
+                CharacterActivityOutcomes.Failed,
+                "vandalize-target-missing",
+                $"AI macro vandalize failed: target not found - {goal.reason}"));
             return Result(false, CharacterAiBranch.MacroGoal, "Vandalize", "Target facility not found.", blackboard);
         }
 
         if (!CanVandalize(target, out string failureReason))
         {
             blackboard.ClearMacroGoal($"Vandalize target rejected: {failureReason}");
-            actor.AddLog($"AI macro vandalize failed: {failureReason}");
+            actor.AddActivity(CharacterActivityEvent.InternalAi(
+                CharacterActivityOutcomes.Failed,
+                "vandalize-target-rejected",
+                $"AI macro vandalize failed: {failureReason}"));
             return Result(false, CharacterAiBranch.MacroGoal, "Vandalize", failureReason, blackboard);
         }
 
         target.SetDamaged(true);
         blackboard.ClearCommitment(CharacterAiInterruptReason.MacroGoalChanged, "Vandalize macro executed.");
         blackboard.ClearMacroGoal("Vandalize completed.");
-        actor.AddLog($"AI macro vandalize: {GetBuildingLabel(target)}");
+        actor.AddActivity(CharacterActivityEvent.Facility(
+            CharacterActivityKinds.Combat,
+            CharacterActivityOutcomes.Damaged,
+            $"{GetBuildingLabel(target)}을 파손했다",
+            target,
+            actionId: "macro:vandalize",
+            reasonCode: goal.reason,
+            value: 1f,
+            bubbleEligible: true));
         return Result(true, CharacterAiBranch.MacroGoal, "Vandalize", GetBuildingLabel(target), blackboard);
     }
 
@@ -593,17 +633,7 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(tag)
-            && building.BuildingData != null
-            && !string.IsNullOrWhiteSpace(building.BuildingData.objectName)
-            && building.BuildingData.objectName.IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return true;
-        }
-
-        return !string.IsNullOrWhiteSpace(tag)
-            && building.Facility != null
-            && building.Facility.roles.ToString().IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0;
+        return building.HasSemanticTag(tag);
     }
 
     private static ICharacterAiFacilityLookup RequireFacilityLookup(CharacterActor actor)
@@ -678,19 +708,7 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
 
     public static CharacterAiBranch GetBranchForActionSet(AIActionSet actionSet)
     {
-        return actionSet switch
-        {
-            AIExitDungeon => CharacterAiBranch.ExitDungeon,
-            AIEat => CharacterAiBranch.Eat,
-            AIRest => CharacterAiBranch.Rest,
-            AIFacilityRoleAction roleAction when roleAction.Role == FacilityRole.Toilet => CharacterAiBranch.Toilet,
-            AIFacilityRoleAction roleAction when roleAction.Role == FacilityRole.Hygiene => CharacterAiBranch.Hygiene,
-            AIWork => CharacterAiBranch.Work,
-            AIShopping => CharacterAiBranch.Shopping,
-            AILookAround => CharacterAiBranch.LookAround,
-            AIWait => CharacterAiBranch.Wait,
-            _ => CharacterAiBranch.None
-        };
+        return actionSet?.Branch ?? CharacterAiBranch.None;
     }
 
     public static string GetActionLabel(AIActionSet actionSet)
@@ -700,9 +718,7 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
             return "None";
         }
 
-        return !string.IsNullOrWhiteSpace(actionSet.actionName)
-            ? actionSet.actionName
-            : actionSet.GetType().Name;
+        return actionSet.GetDisplayLabel();
     }
 
     private static bool TryPrepare(

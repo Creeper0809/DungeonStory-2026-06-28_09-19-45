@@ -7,6 +7,7 @@ using UnityEngine;
 public class CharacterAbilityCache : SerializedMonoBehaviour
 {
     private CharacterAbility[] characterAbilities;
+    private IReadOnlyList<CharacterAbility> characterAbilitiesView;
     private bool isAbilityCache;
 
     public IReadOnlyList<CharacterAbility> Abilities
@@ -14,7 +15,8 @@ public class CharacterAbilityCache : SerializedMonoBehaviour
         get
         {
             CacheAbility();
-            return characterAbilities ?? Array.Empty<CharacterAbility>();
+            return characterAbilitiesView ??= ReadOnlyView.List(
+                characterAbilities ?? Array.Empty<CharacterAbility>());
         }
     }
 
@@ -32,6 +34,7 @@ public class CharacterAbilityCache : SerializedMonoBehaviour
     public void RefreshAbilityCache()
     {
         characterAbilities = GetComponents<CharacterAbility>();
+        characterAbilitiesView = ReadOnlyView.List(characterAbilities);
         isAbilityCache = true;
     }
 

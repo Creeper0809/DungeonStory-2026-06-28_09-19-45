@@ -7,22 +7,20 @@ using VContainer;
 public class DungeonSceneBackdropFitter : MonoBehaviour
 {
     [SerializeField] private Transform backgroundRoot;
+    [SerializeField] private SpriteRenderer solidBackground;
     [SerializeField] private Tilemap groundTilemap;
     [SerializeField] private Vector2Int horizontalPaddingTiles = new Vector2Int(8, 8);
 
     private IGridSystemProvider gridSystemProvider;
-    private IDungeonBackdropReferenceProvider backdropReferenceProvider;
     private IDungeonBackdropSpriteTilingFactory spriteTilingFactory;
     private GridSystemManager gridSystemManager;
 
     [Inject]
     public void Construct(
         IGridSystemProvider gridSystemProvider,
-        IDungeonBackdropReferenceProvider backdropReferenceProvider,
         IDungeonBackdropSpriteTilingFactory spriteTilingFactory)
     {
         this.gridSystemProvider = gridSystemProvider ?? throw new ArgumentNullException(nameof(gridSystemProvider));
-        this.backdropReferenceProvider = backdropReferenceProvider ?? throw new ArgumentNullException(nameof(backdropReferenceProvider));
         this.spriteTilingFactory = spriteTilingFactory ?? throw new ArgumentNullException(nameof(spriteTilingFactory));
         SubscribeToGridExpansionIfInjected();
     }
@@ -97,12 +95,6 @@ public class DungeonSceneBackdropFitter : MonoBehaviour
             ?? throw new InvalidOperationException($"{nameof(DungeonSceneBackdropFitter)} requires {nameof(IGridSystemProvider)} injection.");
     }
 
-    private IDungeonBackdropReferenceProvider RequireBackdropReferenceProvider()
-    {
-        return backdropReferenceProvider
-            ?? throw new InvalidOperationException($"{nameof(DungeonSceneBackdropFitter)} requires {nameof(IDungeonBackdropReferenceProvider)} injection.");
-    }
-
     private IDungeonBackdropSpriteTilingFactory RequireSpriteTilingFactory()
     {
         return spriteTilingFactory
@@ -111,16 +103,26 @@ public class DungeonSceneBackdropFitter : MonoBehaviour
 
     private Transform ResolveBackgroundRoot()
     {
-        if (backgroundRoot != null) return backgroundRoot;
-
-        return RequireBackdropReferenceProvider().BackgroundRoot;
+        return backgroundRoot != null
+            ? backgroundRoot
+            : throw new InvalidOperationException(
+                $"{nameof(DungeonSceneBackdropFitter)} on '{name}' requires a serialized {nameof(backgroundRoot)} reference.");
     }
 
     private Tilemap ResolveGroundTilemap()
     {
-        if (groundTilemap != null) return groundTilemap;
+        return groundTilemap != null
+            ? groundTilemap
+            : throw new InvalidOperationException(
+                $"{nameof(DungeonSceneBackdropFitter)} on '{name}' requires a serialized {nameof(groundTilemap)} reference.");
+    }
 
-        return RequireBackdropReferenceProvider().GroundTilemap;
+    private SpriteRenderer ResolveSolidBackground()
+    {
+        return solidBackground != null
+            ? solidBackground
+            : throw new InvalidOperationException(
+                $"{nameof(DungeonSceneBackdropFitter)} on '{name}' requires a serialized {nameof(solidBackground)} reference.");
     }
 
     private void ExtendGround(int leftTile, int rightTile)
@@ -157,11 +159,12 @@ public class DungeonSceneBackdropFitter : MonoBehaviour
     private void ExtendBackgroundSprites(int leftTile, int rightTile)
     {
         Transform targetBackgroundRoot = ResolveBackgroundRoot();
+        SpriteRenderer solid = ResolveSolidBackground();
 
         Dictionary<string, List<SpriteRenderer>> renderersBySprite = new Dictionary<string, List<SpriteRenderer>>();
         foreach (SpriteRenderer renderer in targetBackgroundRoot.GetComponentsInChildren<SpriteRenderer>(true))
         {
-            if (!IsTiledBackgroundRenderer(renderer)) continue;
+            if (renderer == solid || !IsTiledBackgroundRenderer(renderer)) continue;
 
             string spriteName = renderer.sprite.name;
             if (!renderersBySprite.TryGetValue(spriteName, out List<SpriteRenderer> renderers))
@@ -181,10 +184,7 @@ public class DungeonSceneBackdropFitter : MonoBehaviour
 
     private static bool IsTiledBackgroundRenderer(SpriteRenderer renderer)
     {
-        return renderer != null
-            && renderer.sprite != null
-            && renderer.sprite.name.StartsWith("BACKGROUND")
-            && renderer.sprite.name != "Square";
+        return renderer != null && renderer.sprite != null;
     }
 
     private void ExtendBackgroundSpriteGroup(List<SpriteRenderer> renderers, int leftTile, int rightTile)
@@ -215,20 +215,14 @@ public class DungeonSceneBackdropFitter : MonoBehaviour
 
     private void FitSolidBackground(int leftTile, int rightTile)
     {
-        Transform targetBackgroundRoot = ResolveBackgroundRoot();
+        SpriteRenderer renderer = ResolveSolidBackground();
+        Vector3 position = renderer.transform.position;
+        position.x = (leftTile + rightTile) * 0.5f;
+        renderer.transform.position = position;
 
-        foreach (SpriteRenderer renderer in targetBackgroundRoot.GetComponentsInChildren<SpriteRenderer>(true))
-        {
-            if (renderer == null || renderer.sprite == null || renderer.sprite.name != "Square") continue;
-
-            Vector3 position = renderer.transform.position;
-            position.x = (leftTile + rightTile) * 0.5f;
-            renderer.transform.position = position;
-
-            Vector3 scale = renderer.transform.localScale;
-            scale.x = Mathf.Max(scale.x, Mathf.Abs(rightTile - leftTile) + 4f);
-            renderer.transform.localScale = scale;
-        }
+        Vector3 scale = renderer.transform.localScale;
+        scale.x = Mathf.Max(scale.x, Mathf.Abs(rightTile - leftTile) + 4f);
+        renderer.transform.localScale = scale;
     }
 
     private static float GetMinX(IEnumerable<SpriteRenderer> renderers)

@@ -1,5 +1,14 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+
+[Serializable]
+public sealed class FacilityRoleColorOverride
+{
+    public string roleId;
+    public Color color = Color.white;
+}
 
 [CreateAssetMenu(fileName = "RoomEnvironmentSettings", menuName = "DungeonStory/Rooms/Environment Settings", order = 0)]
 public sealed class RoomEnvironmentSettingsSO : ScriptableObject
@@ -38,17 +47,8 @@ public sealed class RoomEnvironmentSettingsSO : ScriptableObject
     [SerializeField] private float cleanRoomMood = 2f;
 
     [Header("Room Role Colors")]
-    [SerializeField] private Color diningColor = new Color(0.84f, 0.65f, 0.29f, 1f);
-    [SerializeField] private Color shopColor = new Color(0.91f, 0.78f, 0.36f, 1f);
-    [SerializeField] private Color restColor = new Color(0.31f, 0.65f, 0.78f, 1f);
-    [SerializeField] private Color trainingColor = new Color(0.79f, 0.36f, 0.36f, 1f);
-    [SerializeField] private Color researchColor = new Color(0.31f, 0.69f, 0.46f, 1f);
-    [SerializeField] private Color manaColor = new Color(0.60f, 0.42f, 0.78f, 1f);
-    [SerializeField] private Color storageColor = new Color(0.53f, 0.56f, 0.61f, 1f);
-    [SerializeField] private Color toiletColor = new Color(0.31f, 0.51f, 0.72f, 1f);
-    [SerializeField] private Color hygieneColor = new Color(0.33f, 0.72f, 0.63f, 1f);
-    [SerializeField] private Color administrationColor = new Color(0.74f, 0.57f, 0.32f, 1f);
-    [SerializeField] private Color securityColor = new Color(0.67f, 0.33f, 0.31f, 1f);
+    [SerializeField] private List<FacilityRoleColorOverride> roleColorOverrides =
+        new List<FacilityRoleColorOverride>();
     [SerializeField] private Color mixedColor = new Color(0.77f, 0.80f, 0.83f, 1f);
     [SerializeField] private Color undefinedColor = new Color(0.55f, 0.58f, 0.61f, 1f);
 
@@ -92,25 +92,19 @@ public sealed class RoomEnvironmentSettingsSO : ScriptableObject
         return cleanRoomMood;
     }
 
-    public Color GetRoleColor(RoomRole role, bool mixed)
+    public Color GetRoleColor(FacilityRole role, bool mixed)
     {
         if (mixed) return mixedColor;
 
-        return role switch
+        if (!FacilityRoleCatalog.TryGet(role, out FacilityRoleDefinition definition))
         {
-            RoomRole.Dining => diningColor,
-            RoomRole.Shop => shopColor,
-            RoomRole.Rest => restColor,
-            RoomRole.Training => trainingColor,
-            RoomRole.Research => researchColor,
-            RoomRole.Mana => manaColor,
-            RoomRole.Storage => storageColor,
-            RoomRole.Toilet => toiletColor,
-            RoomRole.Hygiene => hygieneColor,
-            RoomRole.Administration => administrationColor,
-            RoomRole.Security => securityColor,
-            _ => undefinedColor
-        };
+            return undefinedColor;
+        }
+
+        FacilityRoleColorOverride colorOverride = roleColorOverrides?
+            .FirstOrDefault((entry) => entry != null
+                && string.Equals(entry.roleId, definition.Id, StringComparison.Ordinal));
+        return colorOverride != null ? colorOverride.color : definition.Color;
     }
 }
 
@@ -132,6 +126,16 @@ public sealed class ResourceRoomEnvironmentSettingsProvider : IRoomEnvironmentSe
             ?? throw new ArgumentNullException(nameof(assetLoader));
     }
 
-    public RoomEnvironmentSettingsSO Settings =>
-        settings ??= assetLoader.LoadRequired<RoomEnvironmentSettingsSO>(ResourcePath);
+    public RoomEnvironmentSettingsSO Settings
+    {
+        get
+        {
+            if (settings == null)
+            {
+                settings = assetLoader.LoadRequired<RoomEnvironmentSettingsSO>(ResourcePath);
+            }
+
+            return settings;
+        }
+    }
 }

@@ -163,7 +163,11 @@ public abstract class GridPlacementGhostPresenter : MonoBehaviour
 
     private bool TryInitializeLocalGhostObject()
     {
-        ghostObject ??= GetComponent<GridGhostObject>();
+        if (ghostObject == null)
+        {
+            ghostObject = GetComponent<GridGhostObject>();
+        }
+
         if (ghostObject == null)
         {
             return false;

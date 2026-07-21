@@ -9,11 +9,16 @@ public interface IInvasionThreatWorldSampler
 public sealed class InvasionThreatWorldSampler : IInvasionThreatWorldSampler
 {
     private readonly IDungeonSceneComponentQuery sceneQuery;
+    private readonly IFacilityCrimeRiskEvaluator crimeRiskEvaluator;
 
-    public InvasionThreatWorldSampler(IDungeonSceneComponentQuery sceneQuery)
+    public InvasionThreatWorldSampler(
+        IDungeonSceneComponentQuery sceneQuery,
+        IFacilityCrimeRiskEvaluator crimeRiskEvaluator)
     {
         this.sceneQuery = sceneQuery
             ?? throw new System.ArgumentNullException(nameof(sceneQuery));
+        this.crimeRiskEvaluator = crimeRiskEvaluator
+            ?? throw new System.ArgumentNullException(nameof(crimeRiskEvaluator));
     }
 
     public InvasionThreatFactors Sample(float secondsSinceLastInvasion)
@@ -30,31 +35,7 @@ public sealed class InvasionThreatWorldSampler : IInvasionThreatWorldSampler
 
     private static float CalculateDungeonValue(IEnumerable<BuildableObject> buildings)
     {
-        if (buildings == null)
-        {
-            return 0f;
-        }
-
-        float value = 0f;
-        foreach (BuildableObject building in buildings)
-        {
-            if (building == null || building.isDestroy)
-            {
-                continue;
-            }
-
-            value += 1f;
-            if (building.BuildingData != null)
-            {
-                value += Mathf.Max(0, building.BuildingData.maintenance) / 100f;
-                if (building.BuildingData.Facility != null && building.BuildingData.Facility.roles != FacilityRole.None)
-                {
-                    value += 0.5f;
-                }
-            }
-        }
-
-        return value;
+        return InvasionThreatValueCalculator.CalculateDungeonValue(buildings);
     }
 
     private static float CalculateReputation(IEnumerable<CharacterActor> characters)
@@ -90,7 +71,7 @@ public sealed class InvasionThreatWorldSampler : IInvasionThreatWorldSampler
         return customers + (mood / Mathf.Max(1, customers));
     }
 
-    private static float CalculateRisk(IEnumerable<BuildableObject> buildings)
+    private float CalculateRisk(IEnumerable<BuildableObject> buildings)
     {
         if (buildings == null)
         {
@@ -110,20 +91,20 @@ public sealed class InvasionThreatWorldSampler : IInvasionThreatWorldSampler
                 risk += 1.5f;
             }
 
-            if (building is Shop shop && shop.Facility != null)
+            if (building is IRetailFacility retail && building.Facility != null)
             {
-                risk += FacilityCrimeRiskUtility.CalculateOperationalRisk(new FacilityCrimeRiskContext(
-                    shop.Facility,
+                risk += crimeRiskEvaluator.CalculateOperationalRisk(new FacilityCrimeRiskContext(
+                    building,
                     actor: null,
-                    shop.HasServingWorker,
-                    shop.HasWaitingCheckout,
-                    shop.CurrentUserCount,
+                    retail.HasServingWorker,
+                    retail.HasWaitingCheckout,
+                    building.CurrentUserCount,
                     cartItemCount: 1,
                     cartValue: 0,
-                    shop.CurrentStock,
-                    shop.IsDamaged));
+                    retail.CurrentStock,
+                    building.IsDamaged));
 
-                if (shop.CurrentStock <= shop.Facility.restockRequestThreshold)
+                if (retail.CurrentStock <= building.GetRestockRequestThreshold())
                 {
                     risk += 0.5f;
                 }
@@ -131,5 +112,63 @@ public sealed class InvasionThreatWorldSampler : IInvasionThreatWorldSampler
         }
 
         return risk;
+    }
+}
+
+public static class InvasionThreatValueCalculator
+{
+    public static float CalculateDungeonValue(IEnumerable<BuildableObject> buildings)
+    {
+        if (buildings == null)
+        {
+            return 0f;
+        }
+
+        float value = 0f;
+        foreach (BuildableObject building in buildings)
+        {
+            if (building == null || building.isDestroy)
+            {
+                continue;
+            }
+
+            value += CalculateBuildingValue(building.BuildingData);
+        }
+
+        return Mathf.Max(0f, value);
+    }
+
+    public static float CalculateBuildingValue(BuildingSO building)
+    {
+        if (building == null
+            || building.IsWall
+            || building.IsDoor
+            || building.IsGridMovement)
+        {
+            return 0f;
+        }
+
+        float constructionValue = building.GetConstructionCost() / 100f;
+        float maintenanceValue = building.GetMaintenanceCost() / 100f;
+        float operationalValue = 0f;
+
+        FacilityData facility = building.Facility;
+        if (facility != null && facility.roles != FacilityRole.None)
+        {
+            operationalValue += 0.5f;
+        }
+
+        if (building.Defense != null && building.Defense.IsDefenseFacility)
+        {
+            operationalValue += 0.5f;
+        }
+
+        int stockCapacity = building.GetInternalStockCapacity();
+        if (stockCapacity > 0)
+        {
+            operationalValue += Mathf.Min(0.5f, stockCapacity / 100f);
+        }
+
+        return Mathf.Max(0.1f, constructionValue + maintenanceValue + operationalValue);
     }
 }

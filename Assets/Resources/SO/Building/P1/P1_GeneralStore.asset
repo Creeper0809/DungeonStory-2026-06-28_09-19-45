@@ -40,6 +40,14 @@ MonoBehaviour:
   objectName: "\uC7A1\uD654\uC810"
   sprite: {fileID: 21300000, guid: 96c6456aa30350e4d90c738dae4fc04f, type: 3}
   icon: {fileID: 21300000, guid: 96c6456aa30350e4d90c738dae4fc04f, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562978982527584
+    - rid: 7302562985835495579
+    - rid: 7302562985835495580
+    - rid: 7302562985835495581
+    - rid: 7302562985835495582
+    - rid: 7302562987322638429
   width: 3
   height: 1
   layer: 1
@@ -48,48 +56,47 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 0
-  facility:
-    roles: 2
-    capacity: 2
-    useDuration: 1.2
-    internalStockMax: 18
-    restockRequestThreshold: 4
-    requiredWorkers: 1
-    supportedWorkTypes: 7
-    preferredSpeciesTags:
-    - Slime
-    - Goblin
-    dislikedSpeciesTags:
-    - Demon
-    disabledWhenDamaged: 1
-    requiresStock: 1
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 1
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags: []
-    scores: []
-    metrics: []
+  facilityAnchors:
+    slots: []
   unlocked: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562978982527584
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 2
+          capacity: 2
+          useDuration: 1.2
+          requiredWorkers: 1
+          supportedWorkTypes: 7
+          disabledWhenDamaged: 1
+    - rid: 7302562985835495579
+      type: {class: BuildingInternalStockAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingInternalStockAbility
+        capacity: 18
+        restockRequestThreshold: 4
+    - rid: 7302562985835495580
+      type: {class: BuildingRequiresStockAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRequiresStockAbility
+    - rid: 7302562985835495581
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562985835495582
+      type: {class: BuildingSelfContainedRoomAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSelfContainedRoomAbility
+    - rid: 7302562987322638429
+      type: {class: BuildingSpeciesAffinityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSpeciesAffinityAbility
+        preferredTags:
+        - Goblin
+        - Slime
+        dislikedTags:
+        - Demon

@@ -21,6 +21,7 @@ public static class RoomEnvironmentDebugScenarios
         Run("Mixed room roles keep all contributors", VerifyMixedRoles, errors);
         Run("Incomplete and self-contained rooms disable effects", VerifyInvalidRooms, errors);
         Run("Room cache resolves a room by grid cell", VerifyCellLookup, errors);
+        Run("Room environment query drives work multipliers", VerifyEnvironmentQueryWorkMultiplier, errors);
         Run("Mood thresholds match the room grade bands", VerifyMoodThresholds, errors);
 
         if (errors.Count > 0)
@@ -105,11 +106,11 @@ public static class RoomEnvironmentDebugScenarios
         RoomEnvironmentSnapshot snapshot = world.CreateEvaluator().Evaluate(world.Grid, room);
 
         return mana != null
-            && (snapshot.Roles & RoomRole.Research) != 0
-            && (snapshot.Roles & RoomRole.Mana) != 0
+            && (snapshot.Roles & FacilityRole.Research) != 0
+            && (snapshot.Roles & FacilityRole.Mana) != 0
             && snapshot.RoleContributions.Count == 2
             && snapshot.RoleContributions.All((entry) => entry.Count == 1)
-            && snapshot.PrimaryRole == RoomRole.None
+            && snapshot.PrimaryRole == FacilityRole.None
             && snapshot.UsesMixedColor;
     }
 
@@ -164,6 +165,37 @@ public static class RoomEnvironmentDebugScenarios
             && room.IsUsable;
     }
 
+    private static bool VerifyEnvironmentQueryWorkMultiplier()
+    {
+        using ScenarioWorld world = ScenarioWorld.Create();
+        FacilityCandidateCacheStore facilityCache = new FacilityCandidateCacheStore();
+        RoomEnvironmentQuery query = new RoomEnvironmentQuery(
+            new RoomLayoutCache(),
+            world.CreateEvaluator(),
+            facilityCache);
+
+        Require(query.TryGetSnapshot(world.MainFixture, out RoomEnvironmentSnapshot baseline),
+            "Room environment query did not resolve the main fixture room.");
+        float score = Mathf.Clamp(baseline.Impressiveness * 0.6f + baseline.Cleanliness * 0.4f, 0f, 100f);
+        float expectedDuration = 1f / Mathf.Clamp(0.85f + score * 0.003f, 0.85f, 1.15f);
+        Require(Mathf.Abs(query.GetWorkDurationMultiplier(world.MainFixture, FacilityWorkType.Research) - expectedDuration) < 0.001f,
+            "Research duration multiplier did not use the shared room environment score.");
+        Require(Mathf.Abs(query.GetWorkDurationMultiplier(world.MainFixture, FacilityWorkType.Craft) - expectedDuration) < 0.001f,
+            "Craft duration multiplier did not use the shared room environment score.");
+        Require(Mathf.Approximately(query.GetWorkDurationMultiplier(world.MainFixture, FacilityWorkType.Clean), 1f)
+                && Mathf.Approximately(query.GetWorkDurationMultiplier(world.MainFixture, FacilityWorkType.Repair), 1f)
+                && Mathf.Approximately(query.GetWorkDurationMultiplier(world.MainFixture, FacilityWorkType.Rest), 1f),
+            "Recovery or repair work incorrectly used the room environment multiplier.");
+
+        world.MainFixture.FacilityState.cleanliness = 0f;
+        facilityCache.MarkDynamicStateDirty();
+        Require(query.TryGetSnapshot(world.MainFixture, out RoomEnvironmentSnapshot dirty),
+            "Room environment query failed after dynamic state invalidation.");
+        Require(dirty.Cleanliness < baseline.Cleanliness,
+            "Room environment query did not refresh after facility state changed.");
+        return true;
+    }
+
     private static bool VerifyMoodThresholds()
     {
         RoomEnvironmentSettingsSO settings = ScriptableObject.CreateInstance<RoomEnvironmentSettingsSO>();
@@ -191,6 +223,14 @@ public static class RoomEnvironmentDebugScenarios
             "isDamaged",
             BindingFlags.Instance | BindingFlags.NonPublic);
         field?.SetValue(fixture, value);
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
     }
 
     private sealed class ScenarioWorld : IDisposable
@@ -272,14 +312,16 @@ public static class RoomEnvironmentDebugScenarios
             data.height = 1;
             data.layer = GridLayer.Building;
             data.category = category;
-            data.type = typeof(BuildableObject);
-            data.facility = new FacilityData
+            data.type = category == BuildingCategory.Movement
+                ? typeof(Door)
+                : typeof(BuildableObject);
+            data.Facility = new FacilityData
             {
                 roles = roles,
                 capacity = roles == FacilityRole.None ? 0 : 1,
                 useDuration = 1f
             };
-            data.evolution = new FacilityEvolutionContributionData();
+            data.Evolution = new FacilityEvolutionContributionData();
 
             GameObject obj = new GameObject(name);
             cleanup.Add(obj);

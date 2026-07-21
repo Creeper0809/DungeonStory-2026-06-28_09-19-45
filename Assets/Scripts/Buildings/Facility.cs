@@ -14,26 +14,33 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
     {
         base.Initialization(buildingSO, buildPos);
 
-        if (Operational != null && Operational.storageCapacity > 0)
+        int storageCapacity = this.GetStorageCapacity();
+        if (storageCapacity > 0)
         {
-            bool restrictCategory = !Operational.HasFunction(FacilityFunction.Logistics);
+            bool restrictCategory = !this.StoresAllCategories();
             warehouseInventory = new WarehouseInventory(
-                Operational.storageCapacity,
-                Operational.storageCategory,
+                storageCapacity,
+                this.GetStorageCategory(),
                 restrictCategory);
-            if (Operational.HasFunction(FacilityFunction.Logistics))
+            if (this.StoresAllCategories())
             {
                 warehouseInventory.ApplySnapshot(
-                    WarehouseInventory.CreateSeeded(Operational.storageCapacity).CreateSnapshot());
+                    WarehouseInventory.CreateSeeded(storageCapacity).CreateSnapshot());
             }
         }
         else
         {
+            int internalStockCapacity = BuildingData.GetInternalStockCapacity();
             warehouseInventory = Facility != null
                 && Facility.SupportsRole(FacilityRole.Logistics)
-                && Facility.internalStockMax > 0
-                    ? WarehouseInventory.CreateSeeded(Facility.internalStockMax)
+                && internalStockCapacity > 0
+                    ? WarehouseInventory.CreateSeeded(internalStockCapacity)
                     : null;
+        }
+
+        if (warehouseInventory != null)
+        {
+            RegisterStateModule(new WarehouseInventoryStateModule(this));
         }
     }
 
@@ -41,7 +48,13 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
     {
         if (!TryBeginUse(actor, out string failureReason))
         {
-            actor?.AddLog($"{objectNameOrDefault()} 이용 실패: {failureReason}");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.FacilityUse,
+                CharacterActivityOutcomes.Failed,
+                $"{objectNameOrDefault()} 이용 실패: {failureReason}",
+                this,
+                reasonCode: failureReason,
+                bubbleEligible: true));
             yield break;
         }
 
@@ -55,7 +68,7 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
         AIAction currentAction = actor != null && actor.Brain != null
             ? actor.Brain.bestAction
             : null;
-        Vector3 usePosition = GetFacilityAnchorWorldPosition(FacilityAnchorKind.Use, actor.transform.position);
+        Vector3 usePosition = GetFacilityAnchorWorldPosition(FacilityAnchorPurposeIds.Use, actor.transform.position);
         actor?.Brain?.SetActionPhase("\uC2DC\uC124 \uC811\uADFC", this);
         yield return moveable.Move2PosBySpeed(usePosition, 0.7f, currentAction);
         actor?.Brain?.SetActionPhase("\uC790\uB9AC \uC7A1\uAE30", this);
@@ -81,42 +94,56 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
             RoomExperienceActivity.FacilityUse);
         actor?.Brain?.SetActionPhase("\uC774\uC6A9 \uC815\uB9AC", this);
         yield return Linger(actor, 0.12f, currentAction);
-        actor?.AddLog($"{objectNameOrDefault()} 이용 완료");
+        actor?.AddActivity(CharacterActivityEvent.Facility(
+            CharacterActivityKinds.FacilityUse,
+            CharacterActivityOutcomes.Completed,
+            $"{objectNameOrDefault()} 이용 완료",
+            this));
         EndUse(actor);
     }
 
-    public bool CanAssignWorker(CharacterActor actor, out string failureReason)
+    public FacilityAssignmentStatus GetWorkerAssignmentStatus(CharacterActor actor)
     {
         PruneInvalidWorker();
-        bool hasAssignableWork = false;
-        failureReason = "지원하지 않는 작업";
+        FacilityAssignmentStatus workStatus = FacilityAssignmentStatus.Rejected(
+            FacilityAssignmentFailureKind.UnsupportedWork,
+            "지원하지 않는 작업");
         foreach (FacilityWorkType workType in WorkTaskCatalog.GetSingleTypes(Facility != null ? Facility.supportedWorkTypes : FacilityWorkType.None))
         {
-            if (CanAssignWork(workType, out failureReason))
+            workStatus = GetWorkAssignmentStatus(workType);
+            if (workStatus.IsAllowed)
             {
-                hasAssignableWork = true;
                 break;
             }
         }
 
-        if (!hasAssignableWork)
+        if (!workStatus.IsAllowed)
         {
-            return false;
+            return workStatus;
         }
 
         if (worker != null && worker != actor)
         {
-            failureReason = "이미 근무자가 있음";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.Occupied,
+                "이미 근무자가 있음");
         }
 
         if (HasWorkerReservationForOther(actor))
         {
-            failureReason = "이미 작업 예약됨";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.Reserved,
+                "이미 작업 예약됨");
         }
 
-        return true;
+        return FacilityAssignmentStatus.Allowed();
+    }
+
+    public bool CanAssignWorker(CharacterActor actor, out string failureReason)
+    {
+        FacilityAssignmentStatus status = GetWorkerAssignmentStatus(actor);
+        failureReason = status.Reason;
+        return status.IsAllowed;
     }
 
     public IEnumerator AllocateWorker(CharacterActor actor)
@@ -135,7 +162,7 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
         AIAction currentAction = actor != null && actor.Brain != null
             ? actor.Brain.bestAction
             : null;
-        Vector3 workPosition = GetFacilityAnchorWorldPosition(FacilityAnchorKind.Work, actor.transform.position);
+        Vector3 workPosition = GetFacilityAnchorWorldPosition(FacilityAnchorPurposeIds.Work, actor.transform.position);
         actor?.Brain?.SetActionPhase("\uC791\uC5C5\uB300 \uC811\uADFC", this);
         yield return moveable.Move2PosBySpeed(workPosition, 1f, currentAction);
         actor.ChangeLayer("DungeonMiddleObject");
@@ -246,7 +273,9 @@ public class Facility : BuildableObject, IInteractable, IWorkableFacility, IWare
             return;
         }
 
-        FacilityNeedRecoveryData configured = Operational != null ? Operational.recovery : default;
+        FacilityNeedRecoveryData configured = BuildingData != null
+            ? BuildingData.GetNeedRecovery()
+            : default;
         float sleep = configured.sleep;
         float mood = configured.mood;
         float fun = configured.fun;

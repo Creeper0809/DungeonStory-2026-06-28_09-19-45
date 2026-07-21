@@ -7,6 +7,8 @@ using TMPro;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.UI;
 
 public static class UnifiedUiPlayModeVerifier
@@ -16,6 +18,9 @@ public static class UnifiedUiPlayModeVerifier
     public const string CharacterCapturePath = "Temp/phase43-character-notice-verification.png";
     public const string CharacterRecordsCapturePath = "Temp/phase48-character-records-tab.png";
     public const string CharacterMoodCapturePath = "Temp/phase54-character-mood-tab.png";
+    public const string CharacterGrowthCapturePath = "Temp/phase67-character-growth-tab.png";
+    public const string CharacterSkillAlertCapturePath = "Temp/phase68-character-skill-alert.png";
+    public const string StartPartyCapturePath = "Temp/phase67-start-party-preparation.png";
     public const string StaffCapturePath = "Temp/phase43-staff-profile-verification.png";
     public const string BuildingPreviewCapturePath = "Temp/phase64-building-info-preview.png";
 
@@ -74,20 +79,180 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
     private readonly List<string> failures = new List<string>();
     private readonly List<string> capturedErrors = new List<string>();
     private readonly List<string> capturedWarnings = new List<string>();
+    private Mouse verificationMouse;
+    private Mouse originalMouse;
+    private InputSettings.EditorInputBehaviorInPlayMode originalInputBehavior;
 
     private IEnumerator Start()
     {
         Directory.CreateDirectory("Temp");
+        PlayModeVerificationPersistenceSnapshot.CaptureCurrent("unified-ui");
         Application.logMessageReceived += OnLogMessageReceived;
+        SetupInput();
         yield return null;
         yield return null;
 
+        yield return EnsurePlayableRun();
         yield return VerifyCharacterSummaryAndNotices();
         yield return VerifyStaffProfile();
         yield return VerifyBuildingInfoPreview();
+        TeardownInput();
         Application.logMessageReceived -= OnLogMessageReceived;
         Finish();
         Destroy(gameObject);
+        EditorApplication.ExitPlaymode();
+    }
+
+    private IEnumerator EnsurePlayableRun()
+    {
+        Button continueButton = FindSceneButton("ContinueLatestButton");
+        if (continueButton != null && continueButton.gameObject.activeInHierarchy && continueButton.interactable)
+        {
+            PressButton(continueButton);
+            yield return new WaitForSecondsRealtime(0.25f);
+        }
+
+        GameObject saveModal = FindSceneObject("SaveModal");
+        if (saveModal != null && saveModal.activeInHierarchy)
+        {
+            Button startNewButton = FindSceneButton("StartNewRunButton");
+            if (startNewButton != null && startNewButton.interactable)
+            {
+                PressButton(startNewButton);
+                yield return null;
+                if (saveModal.activeInHierarchy)
+                {
+                    PressButton(startNewButton);
+                    yield return null;
+                }
+            }
+        }
+
+        Button ownerButton = Resources.FindObjectsOfTypeAll<Button>()
+            .FirstOrDefault(button => button != null
+                && button.gameObject.scene.IsValid()
+                && button.gameObject.activeInHierarchy
+                && button.interactable
+                && button.name.StartsWith("OwnerOption_", StringComparison.Ordinal));
+        if (ownerButton != null)
+        {
+            PressButton(ownerButton);
+            yield return new WaitForSecondsRealtime(0.25f);
+            yield return CompleteStartPartyPreparation();
+        }
+
+        bool ownerSelectionVisible = Resources.FindObjectsOfTypeAll<OwnerSelectionPanel>()
+            .Any(panel => panel != null
+                && panel.gameObject.scene.IsValid()
+                && panel.gameObject.activeInHierarchy);
+        Check((saveModal == null || !saveModal.activeInHierarchy) && !ownerSelectionVisible,
+            "RUN_READY",
+            "title and any legacy owner selection are closed before unified UI checks");
+    }
+
+    private IEnumerator CompleteStartPartyPreparation()
+    {
+        Button[] tabs = Resources.FindObjectsOfTypeAll<Button>()
+            .Where(button => IsActiveSceneButton(button)
+                && button.name.StartsWith("PreparationTab_", StringComparison.Ordinal))
+            .ToArray();
+        Check(tabs.Length == 9,
+            "START_PARTY_TABS",
+            $"expected nine identity/aptitude/skill tabs, got {tabs.Length}");
+
+        Button partialIdentity = FindVisibleButtonByName("PartialReroll_0_Identity");
+        Check(partialIdentity != null, "START_PARTY_PARTIAL_REROLL", "identity partial reroll resolved");
+        if (partialIdentity != null)
+        {
+            PressButton(partialIdentity);
+            yield return null;
+            partialIdentity = FindVisibleButtonByName("PartialReroll_0_Identity");
+            string partialText = partialIdentity != null
+                ? partialIdentity.GetComponentInChildren<TMP_Text>(true)?.text
+                : string.Empty;
+            Check(partialText != null && partialText.Contains("2/3"),
+                "START_PARTY_PARTIAL_CHARGE",
+                partialText ?? "missing");
+        }
+
+        Button fullReroll = FindVisibleButtonByName("FullReroll_0");
+        Check(fullReroll != null, "START_PARTY_FULL_REROLL", "full reroll resolved");
+        if (fullReroll != null)
+        {
+            PressButton(fullReroll);
+            yield return null;
+            partialIdentity = FindVisibleButtonByName("PartialReroll_0_Identity");
+            string resetText = partialIdentity != null
+                ? partialIdentity.GetComponentInChildren<TMP_Text>(true)?.text
+                : string.Empty;
+            Check(resetText != null && resetText.Contains("3/3"),
+                "START_PARTY_FULL_RECHARGE",
+                resetText ?? "missing");
+        }
+
+        Button skillTab = FindVisibleButtonByName("PreparationTab_0_Skill");
+        if (skillTab != null)
+        {
+            PressButton(skillTab);
+            yield return null;
+        }
+        yield return CaptureScreenshot(UnifiedUiPlayModeVerifier.StartPartyCapturePath);
+
+        for (int memberIndex = 0; memberIndex < 3; memberIndex++)
+        {
+            Button memberSkillTab = FindVisibleButtonByName($"PreparationTab_{memberIndex}_Skill");
+            if (memberSkillTab != null)
+            {
+                PressButton(memberSkillTab);
+                yield return null;
+            }
+
+            float deadline = Time.realtimeSinceStartup + 120f;
+            Button candidate = null;
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                candidate = FindVisibleButtonByName($"StartSkillCandidate_{memberIndex}_0");
+                if (candidate != null && candidate.interactable)
+                {
+                    break;
+                }
+
+                yield return new WaitForSecondsRealtime(0.25f);
+            }
+
+            Check(candidate != null && candidate.interactable,
+                $"START_PARTY_CANDIDATE_{memberIndex}",
+                candidate != null ? "candidate became ready" : "timed out waiting for candidate");
+            if (candidate == null || !candidate.interactable)
+            {
+                continue;
+            }
+
+            PressButton(candidate);
+            yield return null;
+            candidate = FindVisibleButtonByName($"StartSkillCandidate_{memberIndex}_0");
+            string armedText = candidate != null
+                ? candidate.GetComponentInChildren<TMP_Text>(true)?.text
+                : string.Empty;
+            Check(armedText != null && armedText.Contains("다시 눌러 확정"),
+                $"START_PARTY_CONFIRM_ARMED_{memberIndex}",
+                armedText ?? "missing");
+            if (candidate != null)
+            {
+                PressButton(candidate);
+                yield return null;
+            }
+        }
+
+        Button confirm = FindVisibleButtonByName("StartPartyConfirm");
+        Check(confirm != null && confirm.interactable,
+            "START_PARTY_READY",
+            confirm != null ? $"interactable={confirm.interactable}" : "missing");
+        if (confirm != null && confirm.interactable)
+        {
+            PressButton(confirm);
+            yield return new WaitForSecondsRealtime(0.5f);
+        }
     }
 
     private IEnumerator VerifyBuildingInfoPreview()
@@ -171,7 +336,7 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
 
         InfoFeedEvent.Trigger(actor);
         yield return null;
-        yield return new WaitForEndOfFrame();
+        yield return PlayModeVerificationFrameWait.CaptureReady();
 
         Transform generated = summary.UI != null
             ? summary.UI.transform.Find("CharacterSummaryGeneratedView")
@@ -182,6 +347,9 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         GameObject statusContent = generated != null
             ? generated.Find("Content/StatusContent")?.gameObject
             : null;
+        GameObject growthContent = generated != null
+            ? generated.Find("Content/GrowthContent")?.gameObject
+            : null;
         GameObject moodContent = generated != null
             ? generated.Find("Content/MoodContent")?.gameObject
             : null;
@@ -191,6 +359,9 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         Button statusTab = generated != null
             ? generated.Find("TabBar/StatusTab")?.GetComponent<Button>()
             : null;
+        Button growthTab = generated != null
+            ? generated.Find("TabBar/GrowthTab")?.GetComponent<Button>()
+            : null;
         Button moodTab = generated != null
             ? generated.Find("TabBar/MoodTab")?.GetComponent<Button>()
             : null;
@@ -198,7 +369,7 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             ? generated.Find("TabBar/RecordsTab")?.GetComponent<Button>()
             : null;
         Slider[] needs = { summary.hunger, summary.fun, summary.sleep, summary.excretion, summary.hygiene };
-        string[] requiredLabels = { "상태", "기분", "기록", "체력", "현재 기분", "기분 요인", "포만감", "재미", "휴식", "배변", "위생" };
+        string[] requiredLabels = { "상태", "성장", "기분", "기록", "체력", "경험치", "기술 슬롯과 후보", "현재 기분", "기분 요인", "포만감", "재미", "휴식", "배변", "위생" };
         TMP_Text[] generatedTexts = generated != null
             ? generated.GetComponentsInChildren<TMP_Text>(true)
             : Array.Empty<TMP_Text>();
@@ -210,11 +381,13 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         Check(summary.UI != null && summary.UI.activeInHierarchy, "CHARACTER_OPEN", "summary opened");
         Check(generated != null && generated.gameObject.activeInHierarchy, "CHARACTER_GENERATED", "generated view active");
         Check(health != null && summary.mood != null && needs.All(item => item != null), "CHARACTER_METERS", "health + mood + five needs bound");
-        Check(statusTab != null && moodTab != null && recordsTab != null, "CHARACTER_TABS", "status, mood, and records tabs resolved");
+        Check(statusTab != null && growthTab != null && moodTab != null && recordsTab != null,
+            "CHARACTER_TABS", "status, growth, mood, and records tabs resolved");
         Check(statusContent != null && statusContent.activeInHierarchy
+            && growthContent != null && !growthContent.activeSelf
             && moodContent != null && !moodContent.activeSelf
             && recordsContent != null && !recordsContent.activeSelf,
-            "CHARACTER_STATUS_TAB_DEFAULT", "status visible; mood and records hidden on open");
+            "CHARACTER_STATUS_TAB_DEFAULT", "status visible; growth, mood, and records hidden on open");
         Check(statusContent != null
             && !statusContent.GetComponentsInChildren<TMP_Text>(true).Any(item => item != null && item.text == "기분")
             && summary.mood != null
@@ -226,6 +399,123 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             && summary.ObjectName.text != "New Text", "CHARACTER_NAME", summary.ObjectName?.text ?? "null");
         Check(!generatedTexts.Any(item => item != null && item.text == "New Text"), "NO_PLACEHOLDER", "generated text contains no placeholder");
         Check(IsRectInsideScreen(summary.UI.GetComponent<RectTransform>()), "CHARACTER_BOUNDS", "summary is inside screen");
+
+        CharacterSkillDraft notificationDraft = new CharacterSkillDraft
+        {
+            kind = CharacterSkillKind.Active,
+            unlockLevel = 5,
+            isReady = true,
+            requestKey = "qa:skill-alert",
+            candidates = new List<CharacterSkillInstance>
+            {
+                CreateNotificationCandidate(0),
+                CreateNotificationCandidate(1),
+                CreateNotificationCandidate(2)
+            }
+        };
+        actor.Progression.OnDraftReady(notificationDraft);
+        yield return null;
+        yield return PlayModeVerificationFrameWait.CaptureReady();
+
+        EventAlertRuntime alertRuntime = UnityEngine.Object.FindFirstObjectByType<EventAlertRuntime>();
+        EventAlertRecord skillAlert = alertRuntime?.EventLog
+            .LastOrDefault(record => record != null
+                && record.Choices.Any(choice => choice?.Callback != null));
+        Button skillAlertButton = skillAlert != null
+            ? FindVisibleButtonByName($"EventAlertButton_{skillAlert.Id}")
+            : null;
+        bool playerFacingCopy = skillAlert != null
+            && !skillAlert.Title.Contains("LLM", StringComparison.OrdinalIgnoreCase)
+            && !skillAlert.Detail.Contains("LLM", StringComparison.OrdinalIgnoreCase)
+            && !skillAlert.Detail.Contains("request", StringComparison.OrdinalIgnoreCase);
+        Check(alertRuntime != null && skillAlert != null && skillAlert.Choices.Count == 1,
+            "SKILL_ALERT_CREATED",
+            skillAlert != null ? $"title={skillAlert.Title}; choices={skillAlert.Choices.Count}" : "missing");
+        Check(playerFacingCopy, "SKILL_ALERT_PLAYER_COPY", skillAlert?.Detail ?? "missing");
+        Check(skillAlertButton != null && IsRectInsideScreen(skillAlertButton.transform as RectTransform),
+            "SKILL_ALERT_BUTTON_VISIBLE",
+            skillAlertButton != null ? skillAlertButton.name : "missing");
+
+        if (skillAlertButton != null)
+        {
+            yield return ClickWithInput(skillAlertButton);
+        }
+
+        Button growthChoice = FindVisibleButtonByName("EventChoice_1");
+        Check(alertRuntime != null && alertRuntime.IsDetailVisible && growthChoice != null,
+            "SKILL_ALERT_DETAIL_OPEN",
+            $"detail={alertRuntime?.IsDetailVisible}; choice={growthChoice != null}");
+        yield return CaptureScreenshot(UnifiedUiPlayModeVerifier.CharacterSkillAlertCapturePath);
+        if (growthChoice != null)
+        {
+            yield return ClickWithInput(growthChoice);
+        }
+
+        Check(alertRuntime != null && !alertRuntime.IsDetailVisible
+            && growthContent != null && growthContent.activeInHierarchy
+            && statusContent != null && !statusContent.activeSelf,
+            "SKILL_ALERT_OPENS_GROWTH",
+            "actual pointer choice closed the alert and selected Growth");
+        PressButton(statusTab);
+        yield return null;
+
+        PressButton(growthTab);
+        yield return null;
+        yield return PlayModeVerificationFrameWait.CaptureReady();
+        Transform growthList = growthContent != null
+            ? growthContent.transform.Find("GrowthList")
+            : null;
+        Slider experience = growthContent != null
+            ? (growthList ?? growthContent.transform).Find("Experience/Track")?.GetComponent<Slider>()
+            : null;
+        TMP_Text progressionSummary = growthContent != null
+            ? (growthList ?? growthContent.transform).Find("ProgressionSummaryText")?.GetComponent<TMP_Text>()
+            : null;
+        Button[] skillButtons = growthContent != null
+            ? growthContent.GetComponentsInChildren<Button>(true)
+                .Where(button => button != null && button.name.StartsWith("Skill_", StringComparison.Ordinal))
+                .OrderBy(button => button.name)
+                .ToArray()
+            : Array.Empty<Button>();
+        CharacterProgression progression = actor.Progression;
+        string[] skillSlotTexts = skillButtons
+            .Take(7)
+            .Select(button => button != null
+                ? button.GetComponentInChildren<TMP_Text>(true)?.text ?? string.Empty
+                : string.Empty)
+            .ToArray();
+        bool fixedSlotsVisible = skillButtons.Length == 10
+            && skillSlotTexts.Length == 7
+            && skillSlotTexts[0].StartsWith("종족기", StringComparison.Ordinal)
+            && skillSlotTexts[1].StartsWith("액티브 1", StringComparison.Ordinal)
+            && skillSlotTexts[2].StartsWith("액티브 2", StringComparison.Ordinal)
+            && skillSlotTexts[3].StartsWith("액티브 3", StringComparison.Ordinal)
+            && skillSlotTexts[4].StartsWith("패시브 1", StringComparison.Ordinal)
+            && skillSlotTexts[5].StartsWith("패시브 2", StringComparison.Ordinal)
+            && skillSlotTexts[6].StartsWith("궁극기", StringComparison.Ordinal);
+        Check(growthContent != null && growthContent.activeInHierarchy
+            && statusContent != null && !statusContent.activeSelf,
+            "CHARACTER_GROWTH_TAB_OPEN", "growth visible and status hidden after click");
+        Check(experience != null
+            && progressionSummary != null
+            && progressionSummary.text.Contains($"Lv.{progression?.Level ?? 1}")
+            && progressionSummary.text.Contains("능력치", StringComparison.Ordinal)
+            && progressionSummary.text.Contains("종족·특성", StringComparison.Ordinal)
+            && progressionSummary.text.Contains("장비", StringComparison.Ordinal)
+            && progressionSummary.text.Contains("조건부", StringComparison.Ordinal)
+            && skillButtons.Length > 0,
+            "CHARACTER_GROWTH_DETAILS", progressionSummary != null ? progressionSummary.text : "null");
+        Check(fixedSlotsVisible,
+            "CHARACTER_SKILL_FIXED_SLOTS",
+            string.Join(" | ", skillSlotTexts));
+        Image growthTabImage = growthTab != null
+            ? growthTab.targetGraphic as Image ?? growthTab.GetComponent<Image>()
+            : null;
+        Check(growthTabImage != null && ColorsMatch(growthTabImage.color, DungeonUiTheme.Accent),
+            "CHARACTER_GROWTH_SELECTED", "growth tab owns selected accent");
+        yield return CaptureScreenshot(UnifiedUiPlayModeVerifier.CharacterGrowthCapturePath);
+        PressButton(statusTab);
+        yield return null;
 
         CharacterStats stats = actor.Stats;
         Dictionary<CharacterCondition, float> originalStats = Enum.GetValues(typeof(CharacterCondition))
@@ -281,7 +571,7 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             && Mathf.Approximately(stats.CurrentHealth, healthBeforeInteraction);
         PressButton(moodTab);
         yield return null;
-        yield return new WaitForEndOfFrame();
+        yield return PlayModeVerificationFrameWait.CaptureReady();
         TMP_Text moodSummary = moodContent != null
             ? moodContent.transform.Find("MoodSummaryText")?.GetComponent<TMP_Text>()
             : null;
@@ -314,7 +604,10 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             "CHARACTER_MOOD_SELECTED", "mood tab owns selected accent");
         yield return CaptureScreenshot(UnifiedUiPlayModeVerifier.CharacterMoodCapturePath);
 
+        float pausedTimeScale = Time.timeScale;
+        Time.timeScale = 1f;
         yield return new WaitForSecondsRealtime(0.65f);
+        Time.timeScale = pausedTimeScale;
         CharacterMoodSnapshot expiredSnapshot = stats.GetMoodSnapshot();
         summary.RefreshMoodDetails();
         Check(!expiredSnapshot.Factors.Any(item => item.Id == "qa:brief-discomfort")
@@ -346,8 +639,14 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         List<CharacterLogEntry> addedRecords = new List<CharacterLogEntry>();
         Action<CharacterLogEntry> recordHandler = entry => addedRecords.Add(entry);
         actor.OnLogAdded += recordHandler;
-        actor.AddLog("작업 시작 · 연구 · 연구실");
-        actor.AddLog("작업 종료 · 연구 · 연구실 · 연구 완료");
+        actor.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Research,
+            CharacterActivityOutcomes.Started,
+            "작업 시작 · 연구 · 연구실"));
+        actor.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Research,
+            CharacterActivityOutcomes.Completed,
+            "작업 종료 · 연구 · 연구실 · 연구 완료"));
         actor.OnLogAdded -= recordHandler;
         PressButton(recordsTab);
         yield return new WaitForSecondsRealtime(0.25f);
@@ -395,7 +694,7 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         }
 
         yield return null;
-        yield return new WaitForEndOfFrame();
+        yield return PlayModeVerificationFrameWait.CaptureReady();
 
         NoticeFeed feed = UnityEngine.Object.FindFirstObjectByType<NoticeFeed>();
         List<RectTransform> activeNotices = feed != null
@@ -454,7 +753,7 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
 
         PressButton(managementMode);
         yield return null;
-        yield return new WaitForEndOfFrame();
+        yield return PlayModeVerificationFrameWait.CaptureReady();
 
         Button priorityMode = FindVisibleButtonByName("P1Action_StaffModePriorities");
         Image managementImage = managementMode.targetGraphic as Image ?? managementMode.GetComponent<Image>();
@@ -490,7 +789,7 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             Bounds bounds = RectTransformUtility.CalculateRelativeRectTransformBounds(scroll.viewport, profileCard);
             scroll.content.anchoredPosition += new Vector2(0f, -bounds.center.y);
             Canvas.ForceUpdateCanvases();
-            yield return new WaitForEndOfFrame();
+            yield return PlayModeVerificationFrameWait.CaptureReady();
         }
 
         yield return CaptureScreenshot(UnifiedUiPlayModeVerifier.StaffCapturePath);
@@ -501,8 +800,14 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
 
     private IEnumerator CaptureScreenshot(string path)
     {
-        yield return new WaitForEndOfFrame();
-        Texture2D capture = ScreenCapture.CaptureScreenshotAsTexture();
+        yield return PlayModeVerificationFrameWait.CaptureReady();
+        Texture2D capture = PlayModeVerificationFrameWait.CaptureScreenshotAsTexture();
+        if (capture == null)
+        {
+            Check(false, "CAPTURE", path + " returned null");
+            yield break;
+        }
+
         File.WriteAllBytes(path, capture.EncodeToPNG());
         Destroy(capture);
         report.Add($"capture={path}");
@@ -559,6 +864,22 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
                     .Any(text => text != null && text.text == label));
     }
 
+    private static Button FindSceneButton(string name)
+    {
+        return Resources.FindObjectsOfTypeAll<Button>()
+            .FirstOrDefault(button => button != null
+                && button.gameObject.scene.IsValid()
+                && button.name == name);
+    }
+
+    private static GameObject FindSceneObject(string name)
+    {
+        return Resources.FindObjectsOfTypeAll<Transform>()
+            .Where(transform => transform != null && transform.gameObject.scene.IsValid())
+            .Select(transform => transform.gameObject)
+            .FirstOrDefault(gameObject => gameObject.name == name);
+    }
+
     private static Button FindVisibleButtonByName(string objectName)
     {
         return UnityEngine.Object.FindObjectsByType<Button>(
@@ -569,6 +890,13 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
                 && button.name == objectName);
     }
 
+    private static bool IsActiveSceneButton(Button button)
+    {
+        return button != null
+            && button.gameObject.scene.IsValid()
+            && button.gameObject.activeInHierarchy;
+    }
+
     private static void PressButton(Button button)
     {
         PointerEventData eventData = new PointerEventData(EventSystem.current)
@@ -576,6 +904,81 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             button = PointerEventData.InputButton.Left
         };
         button.OnPointerClick(eventData);
+    }
+
+    private IEnumerator ClickWithInput(Button button)
+    {
+        if (button == null || verificationMouse == null)
+        {
+            yield break;
+        }
+
+        RectTransform rect = button.transform as RectTransform;
+        Vector2 point = RectTransformUtility.WorldToScreenPoint(
+            null,
+            rect != null ? rect.TransformPoint(rect.rect.center) : button.transform.position);
+        verificationMouse.MakeCurrent();
+        InputSystem.QueueStateEvent(
+            verificationMouse,
+            new MouseState { position = point }.WithButton(MouseButton.Left, true));
+        yield return null;
+        yield return null;
+        verificationMouse.MakeCurrent();
+        InputSystem.QueueStateEvent(verificationMouse, new MouseState { position = point });
+        yield return null;
+        yield return null;
+        Canvas.ForceUpdateCanvases();
+        yield return null;
+    }
+
+    private void SetupInput()
+    {
+        originalInputBehavior = InputSystem.settings.editorInputBehaviorInPlayMode;
+        InputSystem.settings.editorInputBehaviorInPlayMode =
+            InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+        originalMouse = Mouse.current;
+        if (originalMouse != null)
+        {
+            InputSystem.DisableDevice(originalMouse);
+        }
+
+        verificationMouse = InputSystem.AddDevice<Mouse>("UnifiedUiVerificationMouse");
+        verificationMouse.MakeCurrent();
+    }
+
+    private void TeardownInput()
+    {
+        if (verificationMouse != null && verificationMouse.added)
+        {
+            InputSystem.RemoveDevice(verificationMouse);
+        }
+
+        if (originalMouse != null && originalMouse.added)
+        {
+            InputSystem.EnableDevice(originalMouse);
+            originalMouse.MakeCurrent();
+        }
+
+        InputSystem.settings.editorInputBehaviorInPlayMode = originalInputBehavior;
+    }
+
+    private static CharacterSkillInstance CreateNotificationCandidate(int index)
+    {
+        return new CharacterSkillInstance
+        {
+            id = $"qa-alert-candidate-{index}",
+            displayName = $"QA Candidate {index + 1}",
+            description = "Candidate ready for pointer verification.",
+            narrativeReason = "Verified growth milestone.",
+            kind = CharacterSkillKind.Active,
+            rarity = CharacterSkillRarity.Advanced,
+            trigger = CharacterSkillTrigger.ManualCombat,
+            target = CharacterSkillTarget.Enemy,
+            modules = new List<CharacterSkillModuleSelection>
+            {
+                new CharacterSkillModuleSelection { moduleId = "damage", variantId = "light" }
+            }
+        };
     }
 
     private static bool IsRectInsideScreen(RectTransform rect)

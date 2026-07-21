@@ -3,87 +3,234 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-[ExecuteAlways]
 public static class EventObserver
 {
-    private static Dictionary<Type, List<UtilEventListenerBase>> _subscribersList;
+    private static readonly Dictionary<Type, List<UtilEventListenerBase>> SubscribersByType =
+        new Dictionary<Type, List<UtilEventListenerBase>>();
 
-    static EventObserver()
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
     {
-        _subscribersList = new Dictionary<Type, List<UtilEventListenerBase>>();
+        SubscribersByType.Clear();
     }
+
     public static void AddListener<Event>(UtilEventListener<Event> listener) where Event : struct
     {
-        Type eventType = typeof(Event);
-
-        if (!_subscribersList.ContainsKey(eventType))
+        if (!IsAlive(listener))
         {
-            _subscribersList[eventType] = new List<UtilEventListenerBase>();
+            return;
         }
 
-        if (!SubscriptionExists(eventType, listener))
+        Type eventType = typeof(Event);
+        if (!SubscribersByType.TryGetValue(eventType, out List<UtilEventListenerBase> listeners))
         {
-            _subscribersList[eventType].Add(listener);
+            listeners = new List<UtilEventListenerBase>();
+            SubscribersByType[eventType] = listeners;
+        }
+
+        PruneDeadListeners(listeners);
+        if (!SubscriptionExists(listeners, listener))
+        {
+            listeners.Add(listener);
         }
     }
+
     public static void RemoveListener<Event>(UtilEventListener<Event> listener) where Event : struct
     {
         Type eventType = typeof(Event);
-
-        if (!_subscribersList.ContainsKey(eventType))
+        if (!SubscribersByType.TryGetValue(eventType, out List<UtilEventListenerBase> listeners))
         {
             return;
         }
-        List<UtilEventListenerBase> subscriberList = _subscribersList[eventType];
-        for (int i = subscriberList.Count - 1; i >= 0; i--)
-        {
-            if (subscriberList[i] == listener)
-            {
-                subscriberList.Remove(subscriberList[i]);
-                if (subscriberList.Count == 0)
-                {
-                    _subscribersList.Remove(eventType);
-                }
 
-                return;
+        for (int i = listeners.Count - 1; i >= 0; i--)
+        {
+            UtilEventListenerBase candidate = listeners[i];
+            if (!IsAlive(candidate) || ReferenceEquals(candidate, listener))
+            {
+                listeners.RemoveAt(i);
             }
         }
+
+        RemoveEmptyList(eventType, listeners);
     }
+
     public static void TriggerEvent<Event>(Event newEvent) where Event : struct
     {
-        List<UtilEventListenerBase> list;
-        if (!_subscribersList.TryGetValue(typeof(Event), out list))
-            return;
-        for (int i = list.Count - 1; i >= 0; i--)
+        Type eventType = typeof(Event);
+        if (!SubscribersByType.TryGetValue(eventType, out List<UtilEventListenerBase> listeners))
         {
-            (list[i] as UtilEventListener<Event>).OnTriggerEvent(newEvent);
+            return;
+        }
+
+        PruneDeadListeners(listeners);
+        if (listeners.Count == 0)
+        {
+            return;
+        }
+
+        UtilEventListenerBase[] snapshot = listeners.ToArray();
+        for (int i = snapshot.Length - 1; i >= 0; i--)
+        {
+            if (!IsAlive(snapshot[i]) || snapshot[i] is not UtilEventListener<Event> listener)
+            {
+                continue;
+            }
+
+            try
+            {
+                listener.OnTriggerEvent(newEvent);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
         }
     }
-    private static bool SubscriptionExists(Type type, UtilEventListenerBase receiver)
+
+    private static bool SubscriptionExists(
+        IReadOnlyList<UtilEventListenerBase> listeners,
+        UtilEventListenerBase listener)
     {
-        List<UtilEventListenerBase> receivers;
-
-        if (!_subscribersList.TryGetValue(type, out receivers)) return false;
-
-        bool exists = false;
-
-        for (int i = receivers.Count - 1; i >= 0; i--)
+        for (int i = listeners.Count - 1; i >= 0; i--)
         {
-            if (receivers[i] == receiver)
+            if (ReferenceEquals(listeners[i], listener))
             {
-                exists = true;
-                break;
+                return true;
             }
         }
 
-        return exists;
+        return false;
+    }
+
+    private static void PruneDeadListeners(List<UtilEventListenerBase> listeners)
+    {
+        for (int i = listeners.Count - 1; i >= 0; i--)
+        {
+            if (!IsAlive(listeners[i]))
+            {
+                listeners.RemoveAt(i);
+            }
+        }
+    }
+
+    private static void RemoveEmptyList(Type eventType, List<UtilEventListenerBase> listeners)
+    {
+        if (listeners.Count == 0)
+        {
+            SubscribersByType.Remove(eventType);
+        }
+    }
+
+    private static bool IsAlive(UtilEventListenerBase listener)
+    {
+        if (listener == null)
+        {
+            return false;
+        }
+
+        return listener is not UnityEngine.Object unityObject || unityObject != null;
     }
 }
-public interface UtilEventListenerBase { };
+
+public static class EventPayloadSnapshot
+{
+    public static IReadOnlyList<T> Copy<T>(IReadOnlyList<T> source)
+    {
+        if (source == null || source.Count == 0)
+        {
+            return Array.Empty<T>();
+        }
+
+        T[] copy = new T[source.Count];
+        for (int index = 0; index < source.Count; index++)
+        {
+            copy[index] = source[index];
+        }
+
+        return Array.AsReadOnly(copy);
+    }
+}
+
+public static class ReadOnlyView
+{
+    public static IReadOnlyList<T> List<T>(IList<T> source)
+    {
+        return new ListAdapter<T>(source ?? throw new ArgumentNullException(nameof(source)));
+    }
+
+    public static IReadOnlyCollection<T> Collection<T>(ICollection<T> source)
+    {
+        return new CollectionAdapter<T>(source ?? throw new ArgumentNullException(nameof(source)));
+    }
+
+    public static IReadOnlyDictionary<TKey, TValue> Dictionary<TKey, TValue>(
+        IDictionary<TKey, TValue> source)
+    {
+        return new DictionaryAdapter<TKey, TValue>(
+            source ?? throw new ArgumentNullException(nameof(source)));
+    }
+
+    private sealed class ListAdapter<T> : IReadOnlyList<T>
+    {
+        private readonly IList<T> source;
+
+        public ListAdapter(IList<T> source)
+        {
+            this.source = source;
+        }
+
+        public int Count => source.Count;
+        public T this[int index] => source[index];
+        public IEnumerator<T> GetEnumerator() => source.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class CollectionAdapter<T> : IReadOnlyCollection<T>
+    {
+        private readonly ICollection<T> source;
+
+        public CollectionAdapter(ICollection<T> source)
+        {
+            this.source = source;
+        }
+
+        public int Count => source.Count;
+        public IEnumerator<T> GetEnumerator() => source.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class DictionaryAdapter<TKey, TValue> : IReadOnlyDictionary<TKey, TValue>
+    {
+        private readonly IDictionary<TKey, TValue> source;
+        private readonly IReadOnlyCollection<TKey> keys;
+        private readonly IReadOnlyCollection<TValue> values;
+
+        public DictionaryAdapter(IDictionary<TKey, TValue> source)
+        {
+            this.source = source;
+            keys = new CollectionAdapter<TKey>(source.Keys);
+            values = new CollectionAdapter<TValue>(source.Values);
+        }
+
+        public int Count => source.Count;
+        public TValue this[TKey key] => source[key];
+        public IEnumerable<TKey> Keys => keys;
+        public IEnumerable<TValue> Values => values;
+        public bool ContainsKey(TKey key) => source.ContainsKey(key);
+        public bool TryGetValue(TKey key, out TValue value) => source.TryGetValue(key, out value);
+        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator() => source.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+}
+
+public interface UtilEventListenerBase { }
+
 public interface UtilEventListener<T> : UtilEventListenerBase
 {
     void OnTriggerEvent(T eventType);
 }
+
 public static class EventRegister
 {
     public delegate void Delegate<T>(T eventType);
@@ -143,10 +290,9 @@ public struct GameEvent
     {
         EventName = newName;
     }
-    static GameEvent e;
+
     public static void Trigger(string newName)
     {
-        e.EventName = newName;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new GameEvent(newName));
     }
 }

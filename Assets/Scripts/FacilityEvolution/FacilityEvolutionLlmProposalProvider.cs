@@ -281,6 +281,12 @@ public sealed class CachedLocalLlmFacilityEvolutionProposalProvider : IFacilityE
     {
         pendingSignatures.Remove(signature);
         LastResponse = result.Content;
+        if (result.IsCancelled)
+        {
+            SetStatus(signature, "LLM request cancelled.");
+            return;
+        }
+
         if (!result.IsSuccess)
         {
             SetStatus(signature, $"LLM failed: {result.Status} {result.Error}");

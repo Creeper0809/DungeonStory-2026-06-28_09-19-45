@@ -19,6 +19,7 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
     private readonly IMainCameraProvider mainCameraProvider;
     private readonly IPlayerInputReader inputReader;
     private readonly IUiPointerBlocker uiPointerBlocker;
+    private readonly IWorldItemStackRuntime itemStackRuntime;
     private int lastHandledFrame = -1;
     private UnityEngine.Object lastHandledTarget;
 
@@ -26,12 +27,14 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
         IGridSystemProvider gridSystemProvider,
         IMainCameraProvider mainCameraProvider,
         IPlayerInputReader inputReader,
-        IUiPointerBlocker uiPointerBlocker)
+        IUiPointerBlocker uiPointerBlocker,
+        IWorldItemStackRuntime itemStackRuntime)
     {
         this.gridSystemProvider = gridSystemProvider ?? throw new ArgumentNullException(nameof(gridSystemProvider));
         this.mainCameraProvider = mainCameraProvider ?? throw new ArgumentNullException(nameof(mainCameraProvider));
         this.inputReader = inputReader ?? throw new ArgumentNullException(nameof(inputReader));
         this.uiPointerBlocker = uiPointerBlocker ?? throw new ArgumentNullException(nameof(uiPointerBlocker));
+        this.itemStackRuntime = itemStackRuntime ?? throw new ArgumentNullException(nameof(itemStackRuntime));
     }
 
     public bool TryHandleWorldInfoClick()
@@ -47,7 +50,22 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
         }
 
         bool hasPhysicsHits = TryGetPointerHits(out Collider2D[] hits);
-        if (hasPhysicsHits && TryGetPreferredCharacter(hits, out CharacterActor actor))
+        bool forceItem = inputReader.GetKey(KeyCode.LeftAlt) || inputReader.GetKey(KeyCode.RightAlt);
+        CharacterActor actor;
+        if (!forceItem && hasPhysicsHits && TryGetPreferredCharacter(hits, out actor))
+        {
+            TriggerCharacter(actor);
+            return true;
+        }
+
+        if (TryGetItemPileUnderPointer(out ItemPileInfoTarget itemTarget, out UnityEngine.Object markerObject))
+        {
+            MarkWorldClickHandled(markerObject);
+            InfoFeedEvent.Trigger(itemTarget);
+            return true;
+        }
+
+        if (forceItem && hasPhysicsHits && TryGetPreferredCharacter(hits, out actor))
         {
             TriggerCharacter(actor);
             return true;
@@ -62,6 +80,28 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
         }
 
         return false;
+    }
+
+    private bool TryGetItemPileUnderPointer(
+        out ItemPileInfoTarget target,
+        out UnityEngine.Object markerObject)
+    {
+        target = null;
+        markerObject = null;
+        GridSystemManager manager = gridSystemProvider.Manager;
+        Grid grid = manager != null ? manager.grid : null;
+        Camera camera = mainCameraProvider.Camera;
+        if (grid == null || camera == null)
+        {
+            return false;
+        }
+
+        Vector3 screenPosition = inputReader.MousePosition;
+        screenPosition.z = -camera.transform.position.z;
+        Vector3 worldPosition = camera.ScreenToWorldPoint(screenPosition);
+        Vector2Int cell = grid.GetXY(worldPosition);
+        return grid.IsValidGridPos(cell)
+            && itemStackRuntime.TryGetPileTargetAt(cell, out target, out markerObject);
     }
 
     private bool TryGetGridBuildingUnderPointer(out BuildableObject building)

@@ -25,7 +25,11 @@ public sealed class GameManagerGameDataProvider : IGameDataProvider
 
     public bool TryGetGameData(out GameData gameData)
     {
-        gameManager ??= sceneQuery.First<GameManager>(includeInactive: true);
+        if (gameManager == null)
+        {
+            gameManager = sceneQuery.First<GameManager>(includeInactive: true);
+        }
+
         gameData = gameManager != null ? gameManager.gameData : null;
         return gameData != null;
     }
@@ -58,8 +62,13 @@ public sealed class GameManagerFloatingNumberFeedbackService : IFloatingNumberFe
 
     private GameManager ResolveGameManager()
     {
-        gameManager ??= sceneQuery.First<GameManager>(includeInactive: true);
-        return gameManager
-            ?? throw new InvalidOperationException($"{nameof(IFloatingNumberFeedbackService)} requires a loaded {nameof(GameManager)}.");
+        if (gameManager == null)
+        {
+            gameManager = sceneQuery.First<GameManager>(includeInactive: true);
+        }
+
+        return gameManager != null
+            ? gameManager
+            : throw new InvalidOperationException($"{nameof(IFloatingNumberFeedbackService)} requires a loaded {nameof(GameManager)}.");
     }
 }

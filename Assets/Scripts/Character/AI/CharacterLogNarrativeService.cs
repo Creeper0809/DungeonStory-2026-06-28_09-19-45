@@ -126,19 +126,15 @@ public sealed class CharacterLogNarrativeService : ICharacterLogNarrativeService
     {
         if (entry.EntryId <= 0
             || entry.Count != 1
+            || entry.Activity == null
+            || !entry.Activity.NarrativeEligible
+            || !entry.Activity.VisibleToPlayer
             || string.IsNullOrWhiteSpace(entry.OriginalMessage))
         {
             return false;
         }
 
-        string message = entry.OriginalMessage;
-        bool successfulWait = message.StartsWith("대기 ", StringComparison.Ordinal)
-            && !ContainsAny(message, "실패", "불가", "막힘");
-        return !successfulWait
-            && message.IndexOf("Probe ", StringComparison.OrdinalIgnoreCase) < 0
-            && message.IndexOf("AUTO_", StringComparison.OrdinalIgnoreCase) < 0
-            && message.IndexOf("AI idle", StringComparison.OrdinalIgnoreCase) < 0
-            && message.IndexOf("AI replan", StringComparison.OrdinalIgnoreCase) < 0;
+        return true;
     }
 
     public static string BuildPrompt(
@@ -211,6 +207,14 @@ public sealed class CharacterLogNarrativeService : ICharacterLogNarrativeService
         builder.AppendLine($"role: {role}");
         builder.AppendLine($"personaTrait: {trait}");
         builder.AppendLine($"personaFlavor: {flavor}");
+        builder.AppendLine($"eventKind: {entry.Activity?.KindId}");
+        builder.AppendLine($"actionId: {entry.Activity?.ActionId}");
+        builder.AppendLine($"target: {entry.Activity?.TargetName}");
+        builder.AppendLine($"place: {entry.Activity?.PlaceName}");
+        builder.AppendLine($"outcome: {entry.Activity?.OutcomeId}");
+        builder.AppendLine($"reasonCode: {entry.Activity?.ReasonCode}");
+        builder.AppendLine($"value: {entry.Activity?.Value:0.###}");
+        builder.AppendLine($"quantity: {entry.Activity?.Quantity}");
         builder.AppendLine("Source event:");
         builder.AppendLine($"tag: {entry.Tag}");
         builder.AppendLine($"message: {entry.OriginalMessage}");
@@ -358,6 +362,12 @@ public sealed class CharacterLogNarrativeService : ICharacterLogNarrativeService
     {
         DecrementPending(logId);
         LastResponse = result.Content;
+        if (result.IsCancelled)
+        {
+            LastError = string.Empty;
+            return;
+        }
+
         if (!result.IsSuccess)
         {
             LastError = $"{result.Status}: {result.Error}";

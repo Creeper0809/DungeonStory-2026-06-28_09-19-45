@@ -5985,7 +5985,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 655820d1dce4b434aa77b8da1b2fd7ec, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  defaultGridWidth: 32
+  defaultGridWidth: 36
   defaultGridHeight: 3
   gridOriginPos: {x: 0, y: 0, z: 100}
 --- !u!114 &435964649
@@ -17287,6 +17287,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DungeonSceneBackdropFitter
   backgroundRoot: {fileID: 2025819523}
+  solidBackground: {fileID: 183780937}
   groundTilemap: {fileID: 210129473}
   horizontalPaddingTiles: {x: 8, y: 8}
 --- !u!1001 &2044097973

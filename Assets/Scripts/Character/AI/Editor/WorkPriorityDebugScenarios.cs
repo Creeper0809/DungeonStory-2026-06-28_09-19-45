@@ -36,7 +36,9 @@ public static class WorkPriorityDebugScenarios
         RunScenario("림월드식 우선순위 UI 매트릭스", VerifyPriorityPanelBuildsMatrix, errors);
 
         RunScenario("작업 지속은 AI bestAction 흔들림에 즉시 종료되지 않음", VerifyWorkContinuationIgnoresTransientBestActionLoss, errors);
+        RunScenario("파손으로 중단된 운영은 완료로 집계하지 않음", VerifyInterruptedOperationIsNotCompleted, errors);
         RunScenario("진행 중 작업 우선순위 끄면 즉시 중단", VerifyDisablingCurrentWorkPriorityStopsWork, errors);
+        RunScenario("상향한 최선 작업은 진행 중 작업을 재계획", VerifyRaisedBestPriorityReplansCurrentWork, errors);
         RunScenario("다른 작업 우선순위 변경은 진행 중 작업 유지", VerifyUnrelatedPriorityChangeKeepsCurrentWork, errors);
 
         if (errors.Count > 0)
@@ -74,9 +76,11 @@ public static class WorkPriorityDebugScenarios
     private static bool VerifyPriorityDefaults()
     {
         WorkPriorityProfile priorities = WorkPriorityProfile.CreateDefault();
-        return WorkTaskCatalog.TaskTypes.Length == 8
+        return WorkTaskCatalog.TaskTypes.Length == 9
             && priorities.GetPriority(FacilityWorkType.Operate) == WorkPriorityLevel.Priority1
             && priorities.GetPriority(FacilityWorkType.Restock) == WorkPriorityLevel.Priority2
+            && priorities.GetPriority(FacilityWorkType.Research) == WorkPriorityLevel.Priority2
+            && priorities.GetPriority(FacilityWorkType.Craft) == WorkPriorityLevel.Priority2
             && priorities.GetPriority(FacilityWorkType.Rest) == WorkPriorityLevel.Priority3
             && WorkPriorityLevel.Priority1.Next() == WorkPriorityLevel.Priority2
             && WorkPriorityLevel.Priority3.Next() == WorkPriorityLevel.Off
@@ -317,6 +321,12 @@ public static class WorkPriorityDebugScenarios
     {
         GameObject panelObject = new GameObject("Work Priority Matrix Test", typeof(RectTransform));
         StaffWorkPriorityPanel panel = panelObject.AddComponent<StaffWorkPriorityPanel>();
+        DungeonSceneComponentQuery sceneQuery = new DungeonSceneComponentQuery();
+        panel.ConstructStaffWorkPriorityPanel(
+            new StaffWorkPriorityPanelModelBuilder(
+                new StaffWorkforceRuntimeQueryService(sceneQuery)),
+            new StaffWorkPriorityPanelUiFactory(TMPKoreanFontEditorResolver.CreateService()),
+            sceneQuery);
         CharacterActor orc = CreateCharacter("Owner_Orc");
         CharacterActor slime = CreateCharacter("Owner_Slime");
         AbilityWork orcWork = orc.GetAbility<AbilityWork>();
@@ -442,11 +452,9 @@ public static class WorkPriorityDebugScenarios
                 FacilityWorkType.Operate,
                 world.Grid.SearchPath(worker.GetNowXY()));
             work.isWorking = true;
-            worker.ai.bestAction = new AIAction
-            {
-                actionset = AssetDatabase.LoadAssetAtPath<AIWork>("Assets/Resources/SO/AI/Action/Work.asset"),
-                destination = training
-            };
+            worker.ai.bestAction = new AIAction(
+                AssetDatabase.LoadAssetAtPath<AIWork>("Assets/Resources/SO/AI/Action/Work.asset"),
+                AIActionPlan.AtDestination(training));
             worker.ai.isBestActionEnd = false;
 
             work.SetWorkPriority(FacilityWorkType.Operate, WorkPriorityLevel.Off);
@@ -494,6 +502,112 @@ public static class WorkPriorityDebugScenarios
         }
     }
 
+    private static bool VerifyInterruptedOperationIsNotCompleted()
+    {
+        using WorkScenarioWorld world = new WorkScenarioWorld();
+        BuildableObject training = world.Place("P1_TrainingRoom", new Vector2Int(2, 0));
+        CharacterActor worker = CreateCharacter("Owner_Slime");
+        AbilityWork work = worker.GetAbility<AbilityWork>();
+
+        try
+        {
+            if (training == null
+                || !work.TryAssignWorkTarget(
+                    training,
+                    FacilityWorkType.Operate,
+                    world.Grid.SearchPath(worker.GetNowXY())))
+            {
+                return false;
+            }
+
+            work.isWorking = true;
+            var routine = work.CheckActionWork();
+            bool beganWork = routine.MoveNext() && work.isWorking;
+
+            training.SetDamaged(true);
+            bool yieldedAfterDamage = routine.MoveNext();
+            PropertyInfo completionProperty = typeof(AbilityWork).GetProperty(
+                "LastWorkRunCompleted",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            bool markedCompleted = completionProperty != null
+                && (bool)completionProperty.GetValue(work);
+
+            return beganWork
+                && !yieldedAfterDamage
+                && !work.isWorking
+                && !markedCompleted;
+        }
+        finally
+        {
+            Object.DestroyImmediate(worker.gameObject);
+        }
+    }
+
+    private static bool VerifyRaisedBestPriorityReplansCurrentWork()
+    {
+        using WorkScenarioWorld world = new WorkScenarioWorld();
+        BuildableObject training = world.Place("P1_TrainingRoom", new Vector2Int(2, 0));
+        BuildableObject damaged = world.Place("P1_RestRoom", new Vector2Int(6, 0));
+        damaged.SetDamaged(true);
+        CharacterActor worker = CreateCharacter("Owner_Slime");
+        AbilityWork work = worker.GetAbility<AbilityWork>();
+        GridPathSearchResult search = world.Grid.SearchPath(worker.GetNowXY());
+
+        try
+        {
+            work.WorkPriorities.SetPriority(FacilityWorkType.Operate, WorkPriorityLevel.Priority3);
+            work.WorkPriorities.SetPriority(FacilityWorkType.Repair, WorkPriorityLevel.Priority2);
+            bool assigned = work.TryAssignWorkTarget(
+                training,
+                FacilityWorkType.Operate,
+                search);
+            work.isWorking = true;
+            worker.ai.bestAction = new AIAction(
+                AssetDatabase.LoadAssetAtPath<AIWork>("Assets/Resources/SO/AI/Action/Work.asset"),
+                AIActionPlan.AtDestination(training));
+            worker.ai.isBestActionEnd = false;
+
+            work.SetWorkPriority(
+                FacilityWorkType.Repair,
+                WorkPriorityLevel.Priority1,
+                search);
+
+            bool valid = assigned
+                && damaged.IsDamaged
+                && !work.isWorking
+                && work.assignedShop == null
+                && work.AssignedWorkType == FacilityWorkType.None
+                && worker.ai.bestAction == null
+                && worker.ai.isBestActionEnd;
+            if (!valid)
+            {
+                bool repairFound = work.TryGetBestWorkCandidate(
+                    FacilityWorkType.Repair,
+                    search,
+                    out WorkTargetCandidate repairCandidate);
+                bool overallFound = work.TryGetBestWorkCandidate(
+                    FacilityWorkType.None,
+                    search,
+                    out WorkTargetCandidate overallCandidate);
+                Debug.LogError(
+                    $"Raised priority replan detail: assigned={assigned}, " +
+                    $"damaged={damaged.IsDamaged}, working={work.isWorking}, " +
+                    $"assignedType={work.AssignedWorkType}, " +
+                    $"assignedTarget={(work.assignedShop != null ? work.assignedShop.name : "none")}, " +
+                    $"repair={repairFound}:{repairCandidate.Building?.name}:{repairCandidate.Score:0.##}, " +
+                    $"overall={overallFound}:{overallCandidate.WorkType}:{overallCandidate.Building?.name}:{overallCandidate.Score:0.##}, " +
+                    $"bestAction={(worker.ai.bestAction != null ? worker.ai.bestAction.actionset?.name : "none")}, " +
+                    $"actionEnded={worker.ai.isBestActionEnd}");
+            }
+
+            return valid;
+        }
+        finally
+        {
+            Object.DestroyImmediate(worker.gameObject);
+        }
+    }
+
     private static void SetOnly(AbilityWork work, params FacilityWorkType[] enabledTypes)
     {
         foreach (FacilityWorkType type in WorkTaskCatalog.TaskTypes)
@@ -517,8 +631,9 @@ public static class WorkPriorityDebugScenarios
             return;
         }
 
-        foreach (StockCategory category in Enum.GetValues(typeof(StockCategory)))
+        foreach (StockCategoryDefinition definition in StockCategoryCatalog.All)
         {
+            StockCategory category = definition.Category;
             warehouse.Inventory.Withdraw(category, int.MaxValue);
         }
     }

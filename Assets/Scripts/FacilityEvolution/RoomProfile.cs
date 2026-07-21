@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using UnityEngine;
 
@@ -14,16 +15,35 @@ public sealed class RoomProfile
     private readonly Dictionary<string, float> metrics = new Dictionary<string, float>();
     private readonly Dictionary<string, float> identityPressures = new Dictionary<string, float>();
     private readonly Dictionary<string, int> recordTokens = new Dictionary<string, int>();
-    private readonly HashSet<string> tags = new HashSet<string>();
+    private readonly HashSet<string> tagLookup = new HashSet<string>();
+    private readonly List<string> tags = new List<string>();
     private readonly List<BuildableObject> fixtures = new List<BuildableObject>();
     private readonly List<string> recentEvents = new List<string>();
     private readonly List<string> dominantSignals = new List<string>();
     private readonly List<string> conflictingSignals = new List<string>();
+    private readonly IReadOnlyDictionary<string, float> scoresView;
+    private readonly IReadOnlyDictionary<string, float> metricsView;
+    private readonly IReadOnlyDictionary<string, float> identityPressuresView;
+    private readonly IReadOnlyDictionary<string, int> recordTokensView;
+    private readonly IReadOnlyCollection<string> tagsView;
+    private readonly IReadOnlyList<BuildableObject> fixturesView;
+    private readonly IReadOnlyList<string> recentEventsView;
+    private readonly IReadOnlyList<string> dominantSignalsView;
+    private readonly IReadOnlyList<string> conflictingSignalsView;
 
     public RoomProfile(BuildableObject facility, RoomInstance room)
     {
         Facility = facility;
         Room = room;
+        scoresView = new ReadOnlyDictionary<string, float>(scores);
+        metricsView = new ReadOnlyDictionary<string, float>(metrics);
+        identityPressuresView = new ReadOnlyDictionary<string, float>(identityPressures);
+        recordTokensView = new ReadOnlyDictionary<string, int>(recordTokens);
+        tagsView = tags.AsReadOnly();
+        fixturesView = fixtures.AsReadOnly();
+        recentEventsView = recentEvents.AsReadOnly();
+        dominantSignalsView = dominantSignals.AsReadOnly();
+        conflictingSignalsView = conflictingSignals.AsReadOnly();
     }
 
     public BuildableObject Facility { get; }
@@ -33,15 +53,15 @@ public sealed class RoomProfile
     public bool HasDoor => Room != null && Room.HasDoor;
     public bool IsUsable => Room != null && Room.IsUsable;
     public int Area => Room != null ? Room.Cells.Count : 0;
-    public IReadOnlyDictionary<string, float> Scores => scores;
-    public IReadOnlyDictionary<string, float> Metrics => metrics;
-    public IReadOnlyDictionary<string, float> IdentityPressures => identityPressures;
-    public IReadOnlyDictionary<string, int> RecordTokens => recordTokens;
-    public IReadOnlyCollection<string> Tags => tags;
-    public IReadOnlyList<BuildableObject> Fixtures => fixtures;
-    public IReadOnlyList<string> RecentEvents => recentEvents;
-    public IReadOnlyList<string> DominantSignals => dominantSignals;
-    public IReadOnlyList<string> ConflictingSignals => conflictingSignals;
+    public IReadOnlyDictionary<string, float> Scores => scoresView;
+    public IReadOnlyDictionary<string, float> Metrics => metricsView;
+    public IReadOnlyDictionary<string, float> IdentityPressures => identityPressuresView;
+    public IReadOnlyDictionary<string, int> RecordTokens => recordTokensView;
+    public IReadOnlyCollection<string> Tags => tagsView;
+    public IReadOnlyList<BuildableObject> Fixtures => fixturesView;
+    public IReadOnlyList<string> RecentEvents => recentEventsView;
+    public IReadOnlyList<string> DominantSignals => dominantSignalsView;
+    public IReadOnlyList<string> ConflictingSignals => conflictingSignalsView;
 
     public float GetScore(string key)
     {
@@ -51,6 +71,11 @@ public sealed class RoomProfile
     public float GetMetric(string key)
     {
         return !string.IsNullOrWhiteSpace(key) && metrics.TryGetValue(key, out float value) ? value : 0f;
+    }
+
+    public bool HasMetric(string key)
+    {
+        return !string.IsNullOrWhiteSpace(key) && metrics.ContainsKey(key);
     }
 
     public float GetIdentityPressure(string key)
@@ -65,14 +90,17 @@ public sealed class RoomProfile
 
     public bool HasTag(string tag)
     {
-        return !string.IsNullOrWhiteSpace(tag) && tags.Contains(tag);
+        return !string.IsNullOrWhiteSpace(tag) && tagLookup.Contains(tag);
     }
 
     public void AddTag(string tag)
     {
         if (!string.IsNullOrWhiteSpace(tag))
         {
-            tags.Add(tag);
+            if (tagLookup.Add(tag))
+            {
+                tags.Add(tag);
+            }
         }
     }
 
@@ -344,6 +372,13 @@ public sealed class RoomProfileBuilder : IRoomProfileProvider
 
         foreach (KeyValuePair<string, float> metric in record.Metrics)
         {
+            if (FacilityEvolutionMetricOwnership.IsDerivedRoomMetric(metric.Key)
+                || (FacilityEvolutionMetricOwnership.IsStructureOwned(metric.Key)
+                    && profile.HasMetric(metric.Key)))
+            {
+                continue;
+            }
+
             profile.AddMetric(metric.Key, metric.Value);
         }
 

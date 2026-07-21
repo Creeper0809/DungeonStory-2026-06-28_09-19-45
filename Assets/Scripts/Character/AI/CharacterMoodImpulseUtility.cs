@@ -206,19 +206,7 @@ public static class CharacterMoodImpulseUtility
 
     public static CharacterAiBranch GetBranchForActionSet(AIActionSet actionSet)
     {
-        return actionSet switch
-        {
-            AIExitDungeon => CharacterAiBranch.ExitDungeon,
-            AIEat => CharacterAiBranch.Eat,
-            AIRest => CharacterAiBranch.Rest,
-            AIFacilityRoleAction roleAction when roleAction.Role == FacilityRole.Toilet => CharacterAiBranch.Toilet,
-            AIFacilityRoleAction roleAction when roleAction.Role == FacilityRole.Hygiene => CharacterAiBranch.Hygiene,
-            AIWork => CharacterAiBranch.Work,
-            AIShopping => CharacterAiBranch.Shopping,
-            AILookAround => CharacterAiBranch.LookAround,
-            AIWait => CharacterAiBranch.Wait,
-            _ => CharacterAiBranch.None
-        };
+        return actionSet?.Branch ?? CharacterAiBranch.None;
     }
 
     public static bool MatchesBranch(CharacterMoodImpulseType impulse, CharacterAiBranch branch)
@@ -344,11 +332,7 @@ public static class CharacterMoodImpulseUtility
             return false;
         }
 
-        return (facility.BuildingData != null
-                && !string.IsNullOrWhiteSpace(facility.BuildingData.objectName)
-                && facility.BuildingData.objectName.IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0)
-            || (facility.Facility != null
-                && facility.Facility.roles.ToString().IndexOf(tag, StringComparison.OrdinalIgnoreCase) >= 0);
+        return facility.HasSemanticTag(tag);
     }
 
     private static string AppendImpulseReason(string reason, CharacterMoodImpulse impulse)

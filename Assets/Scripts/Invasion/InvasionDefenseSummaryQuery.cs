@@ -91,7 +91,7 @@ public sealed class InvasionDefenseSummaryService : IInvasionDefenseSummaryServi
                 continue;
             }
 
-            if (building.BuildingData != null && building.BuildingData.Defense.IsDefenseFacility)
+            if (building.BuildingData?.Defense?.IsDefenseFacility == true)
             {
                 defenseFacilities++;
             }

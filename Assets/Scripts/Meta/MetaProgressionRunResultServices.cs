@@ -13,7 +13,8 @@ public readonly struct MetaRunResultBuildContext
         float finalInvasionThreat,
         int discoveredFacilityCount,
         int unlockedRecipeCount,
-        int offenseSuccessCount)
+        int offenseSuccessCount,
+        DungeonRunOutcome outcome = DungeonRunOutcome.Defeat)
     {
         Owner = owner;
         Reason = reason;
@@ -26,6 +27,7 @@ public readonly struct MetaRunResultBuildContext
         DiscoveredFacilityCount = discoveredFacilityCount;
         UnlockedRecipeCount = unlockedRecipeCount;
         OffenseSuccessCount = offenseSuccessCount;
+        Outcome = outcome == DungeonRunOutcome.None ? DungeonRunOutcome.Defeat : outcome;
     }
 
     public CharacterActor Owner { get; }
@@ -39,6 +41,7 @@ public readonly struct MetaRunResultBuildContext
     public int DiscoveredFacilityCount { get; }
     public int UnlockedRecipeCount { get; }
     public int OffenseSuccessCount { get; }
+    public DungeonRunOutcome Outcome { get; }
 }
 
 public interface IMetaRunResultBuilder
@@ -59,32 +62,34 @@ public sealed class MetaRunResultBuilder : IMetaRunResultBuilder
     public RunResultSnapshot Build(MetaRunResultBuildContext context)
     {
         float difficultyMultiplier = 1f;
+        DungeonDifficulty difficulty = DungeonDifficulty.Normal;
         if (threatRuntimeProvider.TryGetRuntime(out InvasionThreatRuntime threatRuntime)
             && threatRuntime.Settings != null)
         {
             difficultyMultiplier = threatRuntime.Settings.GetDifficultyMultiplier();
+            difficulty = DungeonDifficultyRules.FromLegacy(threatRuntime.Settings.difficulty);
         }
 
         CharacterIdentity identity = context.Owner != null ? context.Owner.Identity : null;
-        return new RunResultSnapshot
-        {
-            ownerName = identity != null
+        return new RunResultSnapshot(
+            ownerName: identity != null
                 ? identity.DisplayName
                 : context.Owner != null ? context.Owner.name : "사장",
-            endReason = string.IsNullOrWhiteSpace(context.Reason)
+            endReason: string.IsNullOrWhiteSpace(context.Reason)
                 ? "사장 쓰러짐"
                 : context.Reason,
-            survivalSeconds = Mathf.Max(0f, Time.time - context.RunStartTime),
-            survivedOperatingDays = Mathf.Max(1, context.CurrentDay),
-            settlementCount = Mathf.Max(0, context.SettlementCount),
-            defendedInvasionCount = Mathf.Max(0, context.DefendedInvasionCount),
-            maxThreatStage = context.MaxThreatStage,
-            finalInvasionThreat = Mathf.Max(0f, context.FinalInvasionThreat),
-            firstDiscoveredFacilityCount = Mathf.Max(0, context.DiscoveredFacilityCount),
-            firstUnlockedRecipeCount = Mathf.Max(0, context.UnlockedRecipeCount),
-            offenseSuccessCount = Mathf.Max(0, context.OffenseSuccessCount),
-            difficultyMultiplier = Mathf.Max(0.1f, difficultyMultiplier)
-        };
+            survivalSeconds: Time.time - context.RunStartTime,
+            survivedOperatingDays: Mathf.Max(1, context.CurrentDay),
+            settlementCount: context.SettlementCount,
+            defendedInvasionCount: context.DefendedInvasionCount,
+            maxThreatStage: context.MaxThreatStage,
+            finalInvasionThreat: context.FinalInvasionThreat,
+            firstDiscoveredFacilityCount: context.DiscoveredFacilityCount,
+            firstUnlockedRecipeCount: context.UnlockedRecipeCount,
+            offenseSuccessCount: context.OffenseSuccessCount,
+            difficultyMultiplier: difficultyMultiplier,
+            outcome: context.Outcome,
+            difficulty: difficulty);
     }
 }
 

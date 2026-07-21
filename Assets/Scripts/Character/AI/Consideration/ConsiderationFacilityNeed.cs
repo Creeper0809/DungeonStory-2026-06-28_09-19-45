@@ -19,7 +19,8 @@ public class ConsiderationFacilityNeed : Consideration
             return 0f;
         }
 
-        if (shopping.visitCount <= 0)
+        if (shopping.visitCount <= 0
+            && !CanEvaluateWithoutVisitBudget(actor, role))
         {
             return 0f;
         }
@@ -34,5 +35,17 @@ public class ConsiderationFacilityNeed : Consideration
 
         float needScore = FacilityCandidateScorer.GetNeedScore(actor, role);
         return Mathf.Clamp01(Mathf.Max(minimumScoreWhenAvailable, needScore));
+    }
+
+    private static bool CanEvaluateWithoutVisitBudget(CharacterActor actor, FacilityRole role)
+    {
+        if (!CharacterWorkRoleUtility.TryGetWork(actor, out _))
+        {
+            return false;
+        }
+
+        return (role & FacilityRole.Rest) != 0
+            || (role & FacilityRole.Hygiene) != 0
+            || (role & FacilityRole.Toilet) != 0;
     }
 }

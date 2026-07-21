@@ -13,69 +13,97 @@ public static class P1FacilityShopAssetBuilder
         new BlueprintSpec(
             6101,
             "BP_CommercialBasics",
-            "상업 기초 설계도",
-            "저가 음식점, 고기 식당, 잡화점을 기본 구매 후보로 여는 설계도.",
+            "상업 확장 설계도",
+            "연회 식당과 전문 제작을 위한 2단계 상업 파츠를 즉시 해금한다.",
             FacilityShopRarity.Common,
             120,
             18f,
-            new[] { "P1_LowFoodShop", "P1_MeatRestaurant", "P1_GeneralStore" }),
+            new[]
+            {
+                "D06_대형연회식탁",
+                "D08_푹신한의자",
+                "D11_고기걸이",
+                "D12_술음료장",
+                "S08_대장작업대"
+            }),
         new BlueprintSpec(
             6102,
             "BP_DefenseBasics",
-            "방어 기초 설계도",
-            "가시 함정과 경비실을 기본 구매 후보로 여는 설계도.",
+            "요새화 설계도",
+            "경비 동선과 병영을 강화하는 전술·보안 파츠를 즉시 해금한다.",
             FacilityShopRarity.Common,
             140,
             22f,
-            new[] { "P1_SpikeTrap", "P1_GuardRoom" }),
+            new[]
+            {
+                "G03_순찰상황판",
+                "G04_전술지도탁자",
+                "G06_전리품거치대",
+                "L06_무기로커"
+            }),
         new BlueprintSpec(
             6103,
             "BP_SupportBasics",
-            "지원 기초 설계도",
-            "창고, 훈련장, 연구실을 기본 구매 후보로 여는 설계도.",
+            "생활 지원 설계도",
+            "숙소·위생·식재료 물류를 개선하는 2단계 생활 파츠를 즉시 해금한다.",
             FacilityShopRarity.Common,
             130,
             20f,
-            new[] { "P1_Warehouse", "P1_RestRoom", "P1_Toilet", "P1_Washroom", "P1_TrainingRoom", "P1_ResearchLab" }),
+            new[]
+            {
+                "R02_정식침대",
+                "R03_이층침대",
+                "R05_협탁",
+                "R06_옷장",
+                "H04_목욕통",
+                "H07_바닥배수구",
+                "L05_식재료저장함"
+            }),
         new BlueprintSpec(
             6104,
             "BP_ArcaneBasics",
-            "마력 기초 설계도",
-            "마력 저장소를 기본 구매 후보로 여는 설계도.",
+            "비전 연구 설계도",
+            "전문 연구와 의식·마력 물류를 위한 2단계 비전 파츠를 즉시 해금한다.",
             FacilityShopRarity.Common,
             130,
             24f,
-            new[] { "P1_ManaStorage" }),
+            new[]
+            {
+                "Q05_표본보관장",
+                "Q06_설계판",
+                "L07_마력보관함",
+                "R10_침실용책장"
+            }),
         new BlueprintSpec(
             6191,
             "BP_BattleDining",
-            "전장의 식당 설계도",
-            "전투 식당과 병영을 잇는 조합식 힌트.",
+            "상권 통합 설계도",
+            "진열과 보관 부품을 결합해 잠금진열장으로 개조하는 희귀 조합식이다.",
             FacilityShopRarity.Rare,
             260,
             45f,
             Array.Empty<string>(),
-            new[] { "recipe_battlefield_dining_2" }),
+            unlockRecipeIds: new[] { "recipe_commerce_secure_display_2" }),
         new BlueprintSpec(
             6192,
             "BP_TrapChain",
-            "연쇄 함정 설계도",
-            "번개와 냉기 방어 시설을 잇는 특수 조합식 힌트.",
+            "전술 지휘 설계도",
+            "순찰 체계와 세력 표식을 결합해 전투깃발을 만드는 희귀 조합식이다.",
             FacilityShopRarity.Rare,
             280,
             50f,
             Array.Empty<string>(),
-            new[] { "recipe_trap_chain_2" }),
+            unlockRecipeIds: new[] { "recipe_fortress_banner_2" }),
         new BlueprintSpec(
             6193,
             "BP_StormFireTrap",
-            "폭뢰 분사구 설계도",
-            "화염과 축전 방어 시설을 잇는 특수 조합식 힌트.",
+            "비전 공명 설계도",
+            "룬 안정과 의식 조명을 결합해 의식초점석을 조율하는 희귀 조합식이다.",
             FacilityShopRarity.Rare,
             340,
             60f,
             Array.Empty<string>(),
-            new[] { "recipe_trap_chain_3" })
+            unlockRecipeIds: new[] { "recipe_arcane_ritual_2" })
     };
 
     [MenuItem("DungeonStory/Debug/Facility Shop/Ensure P1 Facility Shop Assets")]
@@ -92,9 +120,7 @@ public static class P1FacilityShopAssetBuilder
             blueprint.rarity = spec.Rarity;
             blueprint.defaultCost = spec.Cost;
             blueprint.researchWorkRequired = spec.ResearchWorkRequired;
-            blueprint.unlockBasicPurchaseBuildingIds = ResolveBuildingIds(spec.BasicPurchaseBuildingAssetNames);
-            blueprint.unlockBuildingIds = Array.Empty<int>();
-            blueprint.unlockRecipeIds = spec.UnlockRecipeIds ?? Array.Empty<string>();
+            blueprint.unlocks = CreateUnlocks(spec);
             EditorUtility.SetDirty(blueprint);
         }
 
@@ -127,6 +153,29 @@ public static class P1FacilityShopAssetBuilder
             ?? Array.Empty<int>();
     }
 
+    private static BlueprintUnlockCollection CreateUnlocks(BlueprintSpec spec)
+    {
+        BlueprintUnlockCollection unlocks = new BlueprintUnlockCollection();
+        foreach (int buildingId in ResolveBuildingIds(spec.ConstructionUnlockAssetNames))
+        {
+            unlocks.Add(new BlueprintBuildingUnlock { buildingId = buildingId });
+        }
+
+        foreach (int buildingId in ResolveBuildingIds(spec.BasicPurchaseBuildingAssetNames))
+        {
+            unlocks.Add(new BlueprintBasicPurchaseUnlock { buildingId = buildingId });
+        }
+
+        foreach (string recipeId in spec.UnlockRecipeIds
+            .Where(recipeId => !string.IsNullOrWhiteSpace(recipeId))
+            .Distinct())
+        {
+            unlocks.Add(new BlueprintRecipeUnlock { recipeId = recipeId });
+        }
+
+        return unlocks;
+    }
+
     private static BuildingSO LoadBuilding(string assetName)
     {
         if (string.IsNullOrWhiteSpace(assetName))
@@ -134,7 +183,11 @@ public static class P1FacilityShopAssetBuilder
             return null;
         }
 
-        return AssetDatabase.LoadAssetAtPath<BuildingSO>($"Assets/Resources/SO/Building/P1/{assetName}.asset");
+        BuildingSO modular = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            $"Assets/Resources/SO/Building/Modular/{assetName}.asset");
+        return modular != null
+            ? modular
+            : AssetDatabase.LoadAssetAtPath<BuildingSO>($"Assets/Resources/SO/Building/P1/{assetName}.asset");
     }
 
     private static void EnsureFolder(string folder)
@@ -162,6 +215,7 @@ public static class P1FacilityShopAssetBuilder
         public readonly FacilityShopRarity Rarity;
         public readonly int Cost;
         public readonly float ResearchWorkRequired;
+        public readonly string[] ConstructionUnlockAssetNames;
         public readonly string[] BasicPurchaseBuildingAssetNames;
         public readonly string[] UnlockRecipeIds;
 
@@ -173,7 +227,8 @@ public static class P1FacilityShopAssetBuilder
             FacilityShopRarity rarity,
             int cost,
             float researchWorkRequired,
-            string[] basicPurchaseBuildingAssetNames,
+            string[] constructionUnlockAssetNames,
+            string[] basicPurchaseBuildingAssetNames = null,
             string[] unlockRecipeIds = null)
         {
             Id = id;
@@ -183,6 +238,7 @@ public static class P1FacilityShopAssetBuilder
             Rarity = rarity;
             Cost = Mathf.Max(0, cost);
             ResearchWorkRequired = Mathf.Max(1f, researchWorkRequired);
+            ConstructionUnlockAssetNames = constructionUnlockAssetNames ?? Array.Empty<string>();
             BasicPurchaseBuildingAssetNames = basicPurchaseBuildingAssetNames ?? Array.Empty<string>();
             UnlockRecipeIds = unlockRecipeIds ?? Array.Empty<string>();
         }

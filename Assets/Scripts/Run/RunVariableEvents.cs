@@ -1,71 +1,75 @@
-public struct RunStartVariablesSelectedEvent
+public sealed class ActiveRunVariableSnapshot
 {
-    public RunStartVariableSnapshot snapshot;
+    public ActiveRunVariableSnapshot(ActiveRunVariable source)
+    {
+        Definition = source?.Definition;
+        StartDay = source?.StartDay ?? 0;
+        RemainingDays = source?.RemainingDays ?? 0;
+        IsExpired = source == null || source.IsExpired;
+    }
 
+    public RunVariableDefinition Definition { get; }
+    public int StartDay { get; }
+    public int RemainingDays { get; }
+    public bool IsExpired { get; }
+}
+
+public readonly struct RunStartVariablesSelectedEvent
+{
     public RunStartVariablesSelectedEvent(RunStartVariableSnapshot snapshot)
     {
         this.snapshot = snapshot;
     }
 
-    private static RunStartVariablesSelectedEvent e;
+    public RunStartVariableSnapshot snapshot { get; }
 
     public static void Trigger(RunStartVariableSnapshot snapshot)
     {
-        e.snapshot = snapshot;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new RunStartVariablesSelectedEvent(snapshot));
     }
 }
 
-public struct RunVariableActivatedEvent
+public readonly struct RunVariableActivatedEvent
 {
-    public ActiveRunVariable activeVariable;
-
     public RunVariableActivatedEvent(ActiveRunVariable activeVariable)
     {
-        this.activeVariable = activeVariable;
+        this.activeVariable = new ActiveRunVariableSnapshot(activeVariable);
     }
 
-    private static RunVariableActivatedEvent e;
+    public ActiveRunVariableSnapshot activeVariable { get; }
 
     public static void Trigger(ActiveRunVariable activeVariable)
     {
-        e.activeVariable = activeVariable;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new RunVariableActivatedEvent(activeVariable));
     }
 }
 
-public struct RunVariableExpiredEvent
+public readonly struct RunVariableExpiredEvent
 {
-    public RunVariableDefinition definition;
-
     public RunVariableExpiredEvent(RunVariableDefinition definition)
     {
         this.definition = definition;
     }
 
-    private static RunVariableExpiredEvent e;
+    public RunVariableDefinition definition { get; }
 
     public static void Trigger(RunVariableDefinition definition)
     {
-        e.definition = definition;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new RunVariableExpiredEvent(definition));
     }
 }
 
-public struct InvasionVariableSelectedEvent
+public readonly struct InvasionVariableSelectedEvent
 {
-    public RunVariableDefinition definition;
-
     public InvasionVariableSelectedEvent(RunVariableDefinition definition)
     {
         this.definition = definition;
     }
 
-    private static InvasionVariableSelectedEvent e;
+    public RunVariableDefinition definition { get; }
 
     public static void Trigger(RunVariableDefinition definition)
     {
-        e.definition = definition;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new InvasionVariableSelectedEvent(definition));
     }
 }

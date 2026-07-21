@@ -4,7 +4,7 @@ public static class CodexInvasionRecorder
 {
     public const string BreakthroughIntruderId = "intruder_breakthrough";
 
-    public static void RecordDefenseObservation(CodexState state, DefenseActivationReport report)
+    public static void RecordDefenseObservation(CodexState state, DefenseActivationSnapshot report)
     {
         if (state == null || report == null)
         {
@@ -32,7 +32,7 @@ public static class CodexInvasionRecorder
         }
     }
 
-    public static void RecordCombatReport(CodexState state, InvasionCombatReport report)
+    public static void RecordCombatReport(CodexState state, InvasionCombatReportSnapshot report)
     {
         if (state == null || report == null)
         {
@@ -48,9 +48,9 @@ public static class CodexInvasionRecorder
                 CodexInfoSource.Observation);
         }
 
-        foreach (BuildableObject facility in report.DamagedFacilities ?? Array.Empty<BuildableObject>())
+        foreach (InvasionFacilitySnapshot facility in report.DamagedFacilities ?? Array.Empty<InvasionFacilitySnapshot>())
         {
-            CodexObservationRecorder.ObserveFacility(state, facility, CodexInfoSource.Observation);
+            CodexObservationRecorder.ObserveFacility(state, facility?.Building, CodexInfoSource.Observation);
             AddInvasionInfo(state, "성향: 시설 파괴 우선", CodexInfoSource.Observation);
         }
     }

@@ -7,10 +7,9 @@ public struct EventAlertRequestedEvent
         this.request = request;
     }
 
-    private static EventAlertRequestedEvent e;
-
     public static void Trigger(EventAlertRequest request)
     {
+        EventAlertRequestedEvent e = new EventAlertRequestedEvent();
         e.request = request;
         EventObserver.TriggerEvent(e);
     }
@@ -18,18 +17,21 @@ public struct EventAlertRequestedEvent
 
 public struct EventAlertLoggedEvent
 {
-    public EventAlertRecord record;
+    public EventAlertRecordSnapshot record;
 
     public EventAlertLoggedEvent(EventAlertRecord record)
+    {
+        this.record = record?.CreateSnapshot();
+    }
+
+    public EventAlertLoggedEvent(EventAlertRecordSnapshot record)
     {
         this.record = record;
     }
 
-    private static EventAlertLoggedEvent e;
-
     public static void Trigger(EventAlertRecord record)
     {
-        e.record = record;
+        EventAlertLoggedEvent e = new EventAlertLoggedEvent(record);
         EventObserver.TriggerEvent(e);
     }
 }

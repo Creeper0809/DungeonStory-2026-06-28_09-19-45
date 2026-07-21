@@ -4,9 +4,9 @@
 
 This document tracks the new full-game verification goal: prove, in PlayMode, that every implemented gameplay feature can be exercised and observed in game.
 
-As of 2026-07-13, the remaining manual QA rows have direct Unity PlayMode evidence or an explicit scene-scope caveat. Earlier compile, DI/refactor, and automated debug checks remain useful supporting evidence, but the completion claim below is based on PlayMode scene/UI/runtime probes.
+As of 2026-07-17, the implemented feature catalog has direct PlayMode evidence, public UI regression coverage, clean Development/Release builds, and standalone player smoke evidence. Earlier probe logs remain as historical supporting detail; the current completion claim uses the latest reports under `Temp/`.
 
-Important UI caveat: this document proves runtime PlayMode coverage, not full player-facing UI completion. Features that currently exist only as generated tab summary text, alerts, hidden commands, QA-prepared scene state, or direct runtime probe calls are tracked separately in [UI Feature Surface Gap Audit](ui-feature-surface-gap-audit.md).
+The public UI caveat is closed by [UI Feature Surface Gap Audit](ui-feature-surface-gap-audit.md): P0 and P1/P2 player-facing surfaces, room inspection, click priority, product shell, save UI, and unified UI all have direct pointer and visible-state evidence. Human pacing and fun remain outside automated proof.
 
 ## Completion Rule
 
@@ -34,7 +34,7 @@ The goal can be called complete only when every feature row below has one of the
 
 | Scene | Role | Current Evidence |
 |---|---|---|
-| `Assets/Scenes/SampleScene.unity` | Only enabled build scene | PlayMode started with `SampleScene` as the active scene while the dirty test scene roots were disabled. This verified build-scene composition, core UI/tabs, scene-query priority, intruder spawn/movement DI, owner selection/run end, combat report, rebellion command, and the feature-family runtime paths. A standalone player executable was not built in this pass. |
+| `Assets/Scenes/SampleScene.unity` | Only enabled build scene | PlayMode verifies composition, public UI, runtime paths, save/load, and run completion. Current Development and Release players build this scene and remain alive through separate 25-second standalone smokes with zero critical log matches. |
 | `Assets/Scenes/CharacterAiTestScene.unity` | AI/test verification scene | PlayMode startup/core UI baseline plus injected character-AI feature probe verified several AI/persona/visual subpaths. The 2026-07-13 Core/Grid/UI completion probe also verified the active scene composition root, grid reachability, camera clamp, touch guard, and building-info panel open/close with visual evidence. Many non-AI feature-family runtimes are absent by scene design. |
 
 ## Automatic Scenario Inventory
@@ -45,7 +45,7 @@ Current scan found 31 `*DebugScenarios.cs` files with 248 named scenarios, plus 
 
 | ID | Feature | Primary Sources | Existing Automatic Coverage | Current Manual Status | Required In-Game Evidence |
 |---|---|---|---|---|---|
-| CORE-01 | Build scene startup and composition root | `SampleScene.unity`, `DungeonRuntimeLifetimeScope` | None as a full build-scene pass | Verified in game PlayMode startup path | 2026-07-13 completion audit entered PlayMode with `SampleScene` already active and the dirty test scene roots disabled. Evidence: active scene `Assets/Scenes/SampleScene.unity`, `lifetimeScopes=1`, grid `32x3`, 97 buildings, UI active, captured errors 0, console 0. Caveat: this is Editor PlayMode build-scene startup evidence, not a standalone player build. |
+| CORE-01 | Build scene startup and composition root | `SampleScene.unity`, `DungeonRuntimeLifetimeScope` | None as a full build-scene pass | Verified in PlayMode and standalone players | The completion audit verified one active lifetime scope, the grid, generated facilities, and UI with captured errors 0. Current Development and Release executables additionally start this scene and survive 25-second standalone smoke runs with zero critical matches. |
 | CORE-02 | Test scene startup and active gameplay objects | `CharacterAiTestScene.unity` | Refactor follow-up smoke | Verified in game for scene startup; feature runtimes absent | Re-enter PlayMode, confirm scene role, root runtimes, console clean. |
 | CORE-03 | Camera movement, pointer input, UI touch guard | `CameraManager`, `PlayerInputServices`, `UIManager` | Refactor follow-up smoke partially | Verified in game runtime path | Strict public pointer placement verified Input System pointer coordinates through `UnityPlayerInputReader`: pointer resolved `(21, 0)`, `placed=True`. The 2026-07-13 Core/Grid/UI probe verified active `CameraManager.ClampToCurrentBounds()` on the injected scene camera (`clampChangedExtreme=True`) and `UIManager` touch guard block/release (`blocked=True`, `released=True`) with 0 captured errors. |
 | CORE-04 | Pause and game speed | `GameManager` | None found as direct scenario | Verified in game | Toggle pause/speed in PlayMode and verify `Time.timeScale` and visible runtime behavior. |
@@ -310,4 +310,4 @@ Current scan found 31 `*DebugScenarios.cs` files with 248 named scenarios, plus 
 
 ## Current Answer To "Are All Features Confirmed In Game?"
 
-Yes for the implemented feature catalog under Unity Editor PlayMode. The final completion audit closed the remaining owner/model/run-end, combat-report defense contribution, rebellion command-controller, and build-scene startup rows with 0 captured errors and a clean Unity console. Scope caveats: this was not a standalone player executable test, and a few flows still rely on VContainer-injected PlayMode QA actors or QA-prepared scene state where the base `SampleScene` has no pre-placed member/defense/candidate fixture.
+Yes for the implemented feature catalog and automated release criteria. The latest evidence covers public UI, state changes, camera/screen captures, save restoration, three natural victories, intentional defeat, soak/performance, supported resolutions, branded Development/Release builds, and standalone startup with clean critical logs. A few historical probes use injected actors to isolate subpaths, but outcome-level natural runs use the real runtime flow. The remaining gate is a human clean-profile first run for comprehension, pacing, reward cadence, and replay motivation.

@@ -24,6 +24,13 @@ public class GridPlacementValidator
             && positions.All((pos) => grid.GetGridCell(pos).CanOccupy(layer));
     }
 
+    public bool CanBuildInArea(Grid grid, BuildingSO buildingData, IReadOnlyList<Vector2Int> positions)
+    {
+        return AreInsideGrid(grid, positions)
+            && buildingData != null
+            && positions.All((pos) => grid.GetGridCell(pos).CanBuildInArea(buildingData));
+    }
+
     public bool HasSupportBelow(Grid grid, IReadOnlyList<Vector2Int> positions)
     {
         if (!AreInsideGrid(grid, positions)) return false;

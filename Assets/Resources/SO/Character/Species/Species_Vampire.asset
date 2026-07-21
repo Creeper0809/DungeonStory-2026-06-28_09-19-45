@@ -38,21 +38,32 @@ MonoBehaviour:
   - "\uC131\uC2A4\uB7EC\uC6B4 \uC7A5\uC2DD"
   - "\uD63C\uC7A1\uD55C \uC0C1\uC5C5 \uAD6C\uC5ED"
   stayDurationMultiplier: 1.45
+  crimeRiskMultiplier: 1.1
   incidentType: 3
   incidentName: "\uBC40\uD30C\uC774\uC5B4 \uACF5\uD3EC"
   incidentDescription: "\uBD88\uB9CC\uC774 \uC313\uC774\uBA74 \uC8FC\uBCC0 \uC190\uB2D8\uC758
     \uB9CC\uC871\uB3C4\uC640 \uCCB4\uB958 \uC758\uC9C0\uB97C \uB5A8\uC5B4\uB728\uB9B0\uB2E4."
   incidentMitigatingRoles: 36
   statBonus:
-    attack: 1
-    sales: 1
-    research: 3
-    moveSpeed: 0
-    strength: 0
-    toughness: 0
-    dexterity: 1
-    cleaning: -1
-    endurance: 1
+    entries:
+    - statId: stat:attack
+      value: 1
+    - statId: stat:sales
+      value: 1
+    - statId: stat:research
+      value: 3
+    - statId: stat:move-speed
+      value: 0
+    - statId: stat:strength
+      value: 0
+    - statId: stat:toughness
+      value: 0
+    - statId: stat:dexterity
+      value: 1
+    - statId: stat:cleaning
+      value: -1
+    - statId: stat:endurance
+      value: 1
   modifiers:
     consumptionMultiplier: 0.8
     spendingMultiplier: 1.25

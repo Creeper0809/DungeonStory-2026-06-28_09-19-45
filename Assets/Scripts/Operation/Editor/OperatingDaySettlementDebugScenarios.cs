@@ -1,9 +1,19 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
 public static class OperatingDaySettlementDebugScenarios
 {
+    private static readonly IBlueprintResearchWorkService BlueprintResearchWorkService =
+        new NoopBlueprintResearchWorkService();
+    private static readonly IWorldInfoClickSelector WorldInfoClickSelector =
+        new NoopWorldInfoClickSelector();
+    private static readonly IFacilityCandidateCache FacilityCandidateCache =
+        new FacilityCandidateCacheStore();
+    private static readonly IRoomFacilityPolicy RoomFacilityPolicy =
+        new RoomFacilityPolicyService(RoomRegistry.EditorCache);
+
     [MenuItem("DungeonStory/Debug/Operation/Run P1 Operating Day Scenarios")]
     public static void RunFromMenu()
     {
@@ -20,6 +30,9 @@ public static class OperatingDaySettlementDebugScenarios
 
         RunScenario("운영일 정산 수집", VerifySettlementCollectsRuntimeEvents, errors);
         RunScenario("정산 상세 텍스트", VerifyReportDetailText, errors);
+        RunScenario("operating report snapshot isolation", VerifyReportSnapshotIsolation, errors);
+        RunScenario("운영비 계산과 부분 납부", VerifyOperatingCostCalculator, errors);
+        RunScenario("긴급 융자와 연속 체불 결과", VerifyEmergencyFundingAndShortfallConsequences, errors);
 
         if (errors.Count > 0)
         {
@@ -52,9 +65,18 @@ public static class OperatingDaySettlementDebugScenarios
         OperatingDaySettlementRuntime runtime = runtimeObject.AddComponent<OperatingDaySettlementRuntime>();
 
         CharacterActor customer = CreateCharacter("Customer_Test", CharacterType.Customer, "slime", 64f, 80f, false);
-        CharacterActor staff = CreateCharacter("Staff_Test", CharacterType.NPC, "orc", 20f, 20f, true);
+        CharacterActor staff = CreateCharacter("Staff_Test", CharacterType.NPC, "orc", 0f, 20f, true);
         BuildableObject shop = CreateBuilding("Food Shop", false, 10);
         Facility warehouse = CreateWarehouse("Warehouse", 24);
+        runtime.Construct(
+            new FixedSceneComponentQuery(
+                customer.gameObject,
+                staff.gameObject,
+                shop.gameObject,
+                warehouse.gameObject),
+            new EmptyFacilityShopCatalog(),
+            new NeutralRunVariableReader());
+        float expectedSatisfaction = customer.Stats.Stats[CharacterCondition.MOOD];
 
         runtime.OnTriggerEvent(new OperatingDayStartedEvent(1));
         runtime.OnTriggerEvent(new FacilityVisitEvent(CharacterActor.From(customer), shop));
@@ -70,7 +92,7 @@ public static class OperatingDaySettlementDebugScenarios
             && report.day == 1
             && report.totalVisits == 1
             && report.totalRevenue == 120
-            && report.averageSatisfaction == 64f
+            && Mathf.Approximately(report.averageSatisfaction, expectedSatisfaction)
             && report.restockFailureCount == 1
             && report.facilityRevenues.Count == 1
             && report.facilityRevenues[0].revenue == 120
@@ -84,6 +106,19 @@ public static class OperatingDaySettlementDebugScenarios
             && report.staffSummary.staffCount >= 1
             && report.staffComplaintEvents.Count >= 1
             && report.refreshedDailyShopOffers.Count == 4;
+
+        if (!valid)
+        {
+            Debug.LogError(
+                "Operating day collection detail: "
+                + $"report={(report != null)}, day={report?.day}, visits={report?.totalVisits}, "
+                + $"revenue={report?.totalRevenue}, satisfaction={report?.averageSatisfaction}/{expectedSatisfaction}, "
+                + $"restockFailures={report?.restockFailureCount}, facilityRevenue={report?.facilityRevenues.Count}, "
+                + $"species={report?.speciesVisits.Count}, consumed={report?.stockConsumed.Count}, "
+                + $"incidents={report?.incidents.Count}, supplies={report?.stockSupplyResults.Count}, "
+                + $"warehouses={report?.warehouseStocks.Count}, staff={report?.staffSummary.staffCount}, "
+                + $"complaints={report?.staffComplaintEvents.Count}, dailyOffers={report?.refreshedDailyShopOffers.Count}");
+        }
 
         Object.DestroyImmediate(customer.data);
         Object.DestroyImmediate(staff.data);
@@ -99,20 +134,166 @@ public static class OperatingDaySettlementDebugScenarios
 
     private static bool VerifyReportDetailText()
     {
-        OperatingDayReport report = new OperatingDayReport
-        {
-            day = 2,
-            totalRevenue = 50,
-            totalVisits = 3,
-            averageSatisfaction = 70f,
-            eventLog = new List<string> { "설계도 획득" }
-        };
+        OperatingDayReport report = OperatingDayReport.Create(
+            day: 2,
+            totalRevenue: 50,
+            totalVisits: 3,
+            averageSatisfaction: 70f,
+            eventLog: new List<string> { "설계도 획득" });
 
         string detail = report.ToDetailText();
         return detail.Contains("Day 2")
             && detail.Contains("총 매출: 50")
             && detail.Contains("이벤트 로그")
             && detail.Contains("설계도 획득");
+    }
+
+    private static bool VerifyReportSnapshotIsolation()
+    {
+        List<string> sourceIncidents = new List<string> { "before" };
+        FacilityShopOfferSnapshot sourceOffer = new FacilityShopOfferSnapshot(
+            FacilityShopOfferTypeIds.Building,
+            "시설",
+            FacilityShopRarity.Common,
+            "before",
+            100,
+            1,
+            false);
+        List<FacilityShopOfferSnapshot> sourceOffers = new List<FacilityShopOfferSnapshot> { sourceOffer };
+        OperatingDayReport report = OperatingDayReport.Create(
+            day: 1,
+            incidents: sourceIncidents,
+            refreshedFacilityShopOffers: sourceOffers);
+        OperatingDayReportEvent reportEvent = new OperatingDayReportEvent(report);
+
+        sourceIncidents[0] = "after";
+        sourceOffers[0] = new FacilityShopOfferSnapshot(
+            FacilityShopOfferTypeIds.Blueprint,
+            "설계도",
+            FacilityShopRarity.Special,
+            "after",
+            200,
+            0,
+            false);
+
+        bool mutationRejected = false;
+        if (report.incidents is IList<string> incidentList)
+        {
+            try
+            {
+                incidentList[0] = "mutated";
+            }
+            catch (System.NotSupportedException)
+            {
+                mutationRejected = true;
+            }
+        }
+
+        return mutationRejected
+            && report.incidents[0] == "before"
+            && report.refreshedFacilityShopOffers[0].displayName == "before"
+            && object.ReferenceEquals(reportEvent.report, report);
+    }
+
+    private static bool VerifyOperatingCostCalculator()
+    {
+        DungeonEconomySettings settings = new DungeonEconomySettings
+        {
+            baseStaffWage = 35,
+            workingStaffBonus = 10
+        };
+        int payroll = DungeonEconomyCalculator.CalculatePayroll(3, 2, settings);
+        OperatingCostForecast payable = new OperatingCostForecast(
+            availableMoney: 500,
+            maintenanceCost: 80,
+            payrollCost: payroll,
+            outstandingDebt: 20);
+        OperatingCostSettlement paid = DungeonEconomyCalculator.Settle(payable, 2);
+        OperatingCostForecast shortForecast = new OperatingCostForecast(
+            availableMoney: 100,
+            maintenanceCost: 80,
+            payrollCost: payroll,
+            outstandingDebt: 20);
+        OperatingCostSettlement shortfall = DungeonEconomyCalculator.Settle(shortForecast, 2);
+
+        return payroll == 125
+            && payable.TotalDue == 225
+            && paid.PaidAmount == 225
+            && paid.ClosingBalance == 275
+            && paid.CarriedDebt == 0
+            && paid.ConsecutiveShortfallDays == 0
+            && shortfall.PaidAmount == 100
+            && shortfall.CarriedDebt == 125
+            && shortfall.ConsecutiveShortfallDays == 3;
+    }
+
+    private static bool VerifyEmergencyFundingAndShortfallConsequences()
+    {
+        GameObject runtimeObject = null;
+        CharacterActor staff = null;
+        BuildableObject facility = null;
+        GameData gameData = null;
+        try
+        {
+            runtimeObject = new GameObject("OperatingDayEconomyRuntime_Test");
+            OperatingDaySettlementRuntime runtime = runtimeObject.AddComponent<OperatingDaySettlementRuntime>();
+            staff = CreateCharacter("EconomyStaff_Test", CharacterType.NPC, "slime", 70f, 80f, true);
+            facility = CreateBuilding("Expensive Facility", false, 60);
+            gameData = CreateGameData(0);
+            runtime.Construct(
+                new FixedSceneComponentQuery(staff.gameObject, facility.gameObject),
+                new EmptyFacilityShopCatalog(),
+                new NeutralRunVariableReader(),
+                new FixedGameDataProvider(gameData));
+
+            bool firstFunding = runtime.TryTakeEmergencyFunding(out _);
+            bool secondFunding = runtime.TryTakeEmergencyFunding(out _);
+            int moneyAfterFunding = gameData.holdingMoney.Value;
+            int debtAfterFunding = runtime.OutstandingDebt;
+
+            runtime.OnTriggerEvent(new OperatingDayStartedEvent(1));
+            runtime.OnTriggerEvent(new OperatingDayEndedEvent(1));
+            OperatingDayReport firstReport = runtime.LatestReport;
+            int firstDebt = runtime.OutstandingDebt;
+
+            runtime.OnTriggerEvent(new OperatingDayStartedEvent(2));
+            runtime.OnTriggerEvent(new OperatingDayEndedEvent(2));
+            OperatingDayReport secondReport = runtime.LatestReport;
+            CharacterMoodSnapshot mood = staff.Mood;
+            int wageFactorCount = mood.Factors.Count(factor => factor.Id == "economy:unpaid-wages");
+            OperatingDaySettlementPersistenceState persisted = runtime.CapturePersistentState();
+
+            return firstFunding
+                && !secondFunding
+                && moneyAfterFunding == 1000
+                && debtAfterFunding == 1200
+                && firstReport != null
+                && firstReport.maintenanceCost == 60
+                && firstReport.payrollCost >= 35
+                && firstReport.previousDebt == 1200
+                && firstReport.paidOperatingCost == 1000
+                && firstDebt == firstReport.unpaidOperatingCost
+                && firstDebt > 0
+                && secondReport != null
+                && secondReport.previousDebt == firstDebt
+                && secondReport.paidOperatingCost == 0
+                && secondReport.unpaidOperatingCost == secondReport.totalOperatingCost
+                && secondReport.consecutiveShortfallDays == 2
+                && facility.IsDamaged
+                && wageFactorCount == 1
+                && persisted.OutstandingDebt == secondReport.unpaidOperatingCost
+                && persisted.ConsecutiveShortfallDays == 2
+                && persisted.EmergencyFundingUsed;
+        }
+        finally
+        {
+            if (staff != null && staff.data != null) Object.DestroyImmediate(staff.data);
+            if (facility != null && facility.BuildingData != null) Object.DestroyImmediate(facility.BuildingData);
+            if (gameData != null) Object.DestroyImmediate(gameData);
+            if (staff != null) Object.DestroyImmediate(staff.gameObject);
+            if (facility != null) Object.DestroyImmediate(facility.gameObject);
+            if (runtimeObject != null) Object.DestroyImmediate(runtimeObject);
+        }
     }
 
     private static CharacterActor CreateCharacter(
@@ -136,20 +317,14 @@ public static class OperatingDaySettlementDebugScenarios
         data.speciesTag = speciesTag;
         character.data = data;
         character.characterType = type;
-        character.stats ??= new Dictionary<CharacterCondition, float>();
-        EnsureStat(character, CharacterCondition.HUNGER, 100f);
-        EnsureStat(character, CharacterCondition.FUN, 50f);
-        character.stats[CharacterCondition.MOOD] = mood;
-        character.stats[CharacterCondition.SLEEP] = sleep;
+        Dictionary<CharacterCondition, float> initialStats = CharacterNeedCatalog.All
+            .ToDictionary((definition) => definition.Condition, (definition) => definition.DefaultValue);
+        initialStats[CharacterCondition.HUNGER] = 100f;
+        initialStats[CharacterCondition.FUN] = 50f;
+        initialStats[CharacterCondition.MOOD] = mood;
+        initialStats[CharacterCondition.SLEEP] = sleep;
+        character.stats = initialStats;
         return character;
-    }
-
-    private static void EnsureStat(CharacterActor character, CharacterCondition condition, float value)
-    {
-        if (!character.stats.ContainsKey(condition))
-        {
-            character.stats[condition] = value;
-        }
     }
 
     private static BuildableObject CreateBuilding(string objectName, bool damaged, int maintenance)
@@ -158,19 +333,40 @@ public static class OperatingDaySettlementDebugScenarios
         BuildableObject building = obj.AddComponent<BuildableObject>();
         BuildingSO data = ScriptableObject.CreateInstance<BuildingSO>();
         data.objectName = objectName;
-        data.maintenance = maintenance;
+        data.Maintenance = maintenance;
         data.width = 1;
         data.height = 1;
         data.category = BuildingCategory.Shop;
-        data.facility = new FacilityData
+        data.Facility = new FacilityData
         {
             roles = FacilityRole.Meal,
             capacity = 1,
             supportedWorkTypes = FacilityWorkType.Operate
         };
         building.Initialization(data, Vector2Int.zero);
+        building.ConstructBuildableObject(
+            BlueprintResearchWorkService,
+            WorldInfoClickSelector,
+            FacilityCandidateCache,
+            RoomFacilityPolicy);
         building.SetDamaged(damaged);
         return building;
+    }
+
+    private static GameData CreateGameData(int holdingMoney)
+    {
+        GameData data = ScriptableObject.CreateInstance<GameData>();
+        data.holdingMoney = new Data<int>();
+        data.holdingMoney.Initialize(Mathf.Max(0, holdingMoney));
+        data.day = new Data<int>();
+        data.day.Initialize(1);
+        data.hour = new Data<int>();
+        data.hour.Initialize(0);
+        data.gameSpeed = new Data<int>();
+        data.gameSpeed.Initialize(1);
+        data.curTime = new Data<float>();
+        data.timeOfDay = new Data<TimeOfDay>();
+        return data;
     }
 
     private static Facility CreateWarehouse(string objectName, int capacity)
@@ -182,14 +378,120 @@ public static class OperatingDaySettlementDebugScenarios
         data.width = 1;
         data.height = 1;
         data.category = BuildingCategory.Resource;
-        data.facility = new FacilityData
+        data.Facility = new FacilityData
         {
             roles = FacilityRole.Logistics,
             capacity = 1,
-            internalStockMax = capacity,
             supportedWorkTypes = FacilityWorkType.Restock
         };
+        data.AbilityModules.Add(new BuildingInternalStockAbility
+        {
+            capacity = capacity,
+            restockRequestThreshold = Mathf.Max(0, capacity / 4)
+        });
         warehouse.Initialization(data, Vector2Int.zero);
+        warehouse.ConstructBuildableObject(
+            BlueprintResearchWorkService,
+            WorldInfoClickSelector,
+            FacilityCandidateCache,
+            RoomFacilityPolicy);
         return warehouse;
+    }
+
+    private sealed class EmptyFacilityShopCatalog : IFacilityShopCatalog
+    {
+        public IReadOnlyCollection<BuildingSO> Buildings => System.Array.Empty<BuildingSO>();
+        public IReadOnlyCollection<FacilityBlueprintSO> Blueprints => System.Array.Empty<FacilityBlueprintSO>();
+        public BuildingSO FindBuildingById(int buildingId) => null;
+    }
+
+    private sealed class NeutralRunVariableReader : IRunVariableRuntimeReader
+    {
+        public int GetInitialShopSeed() => 0;
+        public IReadOnlyList<int> GetStartingBlueprintCandidateIds() => System.Array.Empty<int>();
+        public float GetGuestDemandMultiplier(string speciesTag) => 1f;
+        public float GetStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFacilityShopCostMultiplier(BuildingSO building) => 1f;
+        public float GetBlueprintCostMultiplier(FacilityBlueprintSO blueprint) => 1f;
+        public float GetThreatRiseMultiplier() => 1f;
+        public float GetWarningThresholdMultiplier() => 1f;
+        public InvasionIntruderSettings ApplyInvasionSettings(InvasionIntruderSettings source) => source;
+    }
+
+    private sealed class FixedSceneComponentQuery : IDungeonSceneComponentQuery
+    {
+        private readonly GameObject[] roots;
+
+        public FixedSceneComponentQuery(params GameObject[] roots)
+        {
+            this.roots = roots?.Where((root) => root != null).ToArray() ?? System.Array.Empty<GameObject>();
+        }
+
+        public T First<T>(bool includeInactive = false) where T : Component
+        {
+            return All<T>(includeInactive).FirstOrDefault();
+        }
+
+        public IReadOnlyList<T> All<T>(bool includeInactive = false) where T : Component
+        {
+            return roots
+                .SelectMany((root) => root.GetComponentsInChildren<T>(includeInactive))
+                .Where((component) => component != null)
+                .Distinct()
+                .ToArray();
+        }
+    }
+
+    private sealed class FixedGameDataProvider : IGameDataProvider
+    {
+        private readonly GameData gameData;
+
+        public FixedGameDataProvider(GameData gameData)
+        {
+            this.gameData = gameData;
+        }
+
+        public bool TryGetGameData(out GameData resolvedGameData)
+        {
+            resolvedGameData = gameData;
+            return resolvedGameData != null;
+        }
+    }
+
+    private sealed class NoopBlueprintResearchWorkService : IBlueprintResearchWorkService
+    {
+        public bool HasResearchWorkFor(BuildableObject facility) => false;
+
+        public BlueprintResearchWorkResult ApplyResearchWork(
+            CharacterActor researcher,
+            BuildableObject researchFacility,
+            float seconds)
+        {
+            return new BlueprintResearchWorkResult(false, null, 0f, 0f, 1f, false, "No research runtime in operation fixture.");
+        }
+    }
+
+    private sealed class NoopWorldInfoClickSelector : IWorldInfoClickSelector
+    {
+        public bool TryHandleWorldInfoClick() => false;
+        public bool TryTriggerCharacterUnderPointer() => false;
+
+        public bool TryGetPreferredCharacterUnderPointer(out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacterAtScreenPosition(Vector3 screenPosition, Camera camera, out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
+
+        public bool TryGetPreferredCharacter(Collider2D[] hits, out CharacterActor actor)
+        {
+            actor = null;
+            return false;
+        }
     }
 }

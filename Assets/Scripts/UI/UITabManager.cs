@@ -17,7 +17,7 @@ public class UITabManager : MonoBehaviour
     private const float BottomTabBarHeight = 60f;
     private const int HudCanvasSortingOrder = 300;
 
-    private readonly Dictionary<int, TMP_Text> generatedTabBodies = new Dictionary<int, TMP_Text>();
+    private readonly Dictionary<TabId, TMP_Text> generatedTabBodies = new Dictionary<TabId, TMP_Text>();
     private IUITabContentTextProvider contentTextProvider;
     private IUiPopupService popupService;
     private ITmpKoreanFontService tmpKoreanFontService;
@@ -28,44 +28,6 @@ public class UITabManager : MonoBehaviour
     private IDungeonGridBuildingControllerProvider buildingControllerProvider;
     private DungeonUiThemeRuntime themeRuntime;
     private bool isConfigured;
-
-    private static readonly KeyValuePair<int, string>[] TopTabs =
-    {
-        new KeyValuePair<int, string>(0, "건축"),
-        new KeyValuePair<int, string>(1, "건물"),
-        new KeyValuePair<int, string>(2, "직원"),
-        new KeyValuePair<int, string>(3, "상점"),
-        new KeyValuePair<int, string>(4, "창고"),
-        new KeyValuePair<int, string>(5, "운영"),
-        new KeyValuePair<int, string>(6, "방어"),
-        new KeyValuePair<int, string>(7, "원정"),
-        new KeyValuePair<int, string>(8, "연구"),
-        new KeyValuePair<int, string>(9, "도감")
-    };
-
-    private static readonly Dictionary<string, int> TopTabIds = new Dictionary<string, int>
-    {
-        { "건축", 0 },
-        { "건물", 1 },
-        { "건물관리", 1 },
-        { "직원", 2 },
-        { "직원관리", 2 },
-        { "상점", 3 },
-        { "창고", 4 },
-        { "운영", 5 },
-        { "침공/방어", 6 },
-        { "침공방어", 6 },
-        { "방어", 6 },
-        { "원정", 7 },
-        { "연구/제작", 8 },
-        { "연구제작", 8 },
-        { "연구", 8 },
-        { "제작", 8 },
-        { "도감/기록", 9 },
-        { "도감기록", 9 },
-        { "도감", 9 },
-        { "기록", 9 }
-    };
 
     private void Start()
     {
@@ -101,15 +63,28 @@ public class UITabManager : MonoBehaviour
             ?? throw new ArgumentNullException(nameof(buildingControllerProvider));
     }
 
-    public void ToggleSelectButton(int category)
+    // Compatibility endpoint for existing serialized UnityEvent calls.
+    public void ToggleSelectButton(int legacyId)
+    {
+        if (!UITabCatalog.TryFromLegacyId(legacyId, out TabId tabId))
+        {
+            Debug.LogWarning($"UITabManager.ToggleSelectButton() : unknown legacy tab id {legacyId}.");
+            return;
+        }
+
+        ToggleTopTab(tabId);
+    }
+
+    public void ToggleTopTab(TabId tabId)
     {
         CancelActiveGridPlacement();
         ConfigureTopTabs();
         EnsureTopButtons();
-        EnsureSpecializedTabContent(category);
-        RefreshGeneratedTab(category);
+        EnsureSpecializedTabContent(tabId);
+        RefreshGeneratedTab(tabId);
 
-        UITab target = GetTopLevelTabs().FirstOrDefault((tab) => tab.id == category);
+        UITab target = GetTopLevelTabs()
+            .FirstOrDefault((tab) => TryGetTabId(tab, out TabId candidateId) && candidateId == tabId);
         bool shouldOpen = target != null && !target.gameObject.activeSelf;
 
         CloseAllTabsImmediate();
@@ -117,14 +92,14 @@ public class UITabManager : MonoBehaviour
         if (shouldOpen)
         {
             OpenTabImmediate(target);
-            EnsureSpecializedTabContent(category);
+            EnsureSpecializedTabContent(tabId);
         }
 
-        ResolveThemeRuntime()?.SetActiveTab(shouldOpen ? category : null);
+        ResolveThemeRuntime()?.SetActiveTab(shouldOpen ? tabId : null);
 
         if (target == null)
         {
-            Debug.LogWarning($"UITabManager.ToggleSelectButton() : id {category}에 해당하는 탭 패널이 없습니다.");
+            Debug.LogWarning($"UITabManager.ToggleTopTab() : no panel is registered for {tabId}.");
         }
     }
 
@@ -136,14 +111,17 @@ public class UITabManager : MonoBehaviour
             controller.SetGridModeNone();
         }
     }
+
     public void ResgisterTab(UITab tab)
     {
-        if (tabList.Contains(tab)) return;
+        tabList ??= new List<UITab>();
+        if (tab == null || tabList.Contains(tab)) return;
         tabList.Add(tab);
     }
+
     public void UnRegisterTab(UITab tab)
     {
-        if (!tabList.Contains(tab)) return;
+        if (tabList == null || tab == null || !tabList.Contains(tab)) return;
         tabList.Remove(tab);
     }
 
@@ -156,13 +134,13 @@ public class UITabManager : MonoBehaviour
 
         tabList ??= new List<UITab>();
         RegisterExistingTabs();
+        EnsureLegacyTopTabIdentities();
+
         if (autoCreateMissingTabs)
         {
-            foreach (KeyValuePair<int, string> tab in TopTabs)
+            foreach (UITabDefinition definition in UITabCatalog.All.Where((candidate) => candidate.IsGenerated))
             {
-                if (tab.Key == 0) continue;
-
-                EnsureGeneratedTab(tab.Key, tab.Value);
+                EnsureGeneratedTab(definition);
             }
         }
 
@@ -174,9 +152,9 @@ public class UITabManager : MonoBehaviour
             BindTopButtons();
         }
 
-        foreach (KeyValuePair<int, TMP_Text> pair in generatedTabBodies)
+        foreach (TabId tabId in generatedTabBodies.Keys.ToArray())
         {
-            RefreshGeneratedTab(pair.Key);
+            RefreshGeneratedTab(tabId);
         }
 
         CloseAllTabsForInitialState();
@@ -213,6 +191,25 @@ public class UITabManager : MonoBehaviour
             .ToList();
     }
 
+    private void EnsureLegacyTopTabIdentities()
+    {
+        foreach (UITab tab in tabList.Where((candidate) => candidate != null && candidate.transform.parent == transform))
+        {
+            if (tab.TryGetComponent(out UITabIdentity _))
+            {
+                continue;
+            }
+
+            if (!UITabCatalog.TryFromLegacyId(tab.id, out TabId legacyId))
+            {
+                Debug.LogError($"Top-level UITab '{tab.name}' has no {nameof(UITabIdentity)} and legacy id {tab.id} is invalid.");
+                continue;
+            }
+
+            tab.gameObject.AddComponent<UITabIdentity>().Set(legacyId);
+        }
+    }
+
     private void EnsureSpecializedTabContent()
     {
         foreach (UITab tab in GetTopLevelTabs())
@@ -221,14 +218,16 @@ public class UITabManager : MonoBehaviour
         }
     }
 
-    private void EnsureSpecializedTabContent(int id)
+    private void EnsureSpecializedTabContent(TabId id)
     {
-        if (id != 2 && !IsFeatureSurfaceTab(id))
+        UITabDefinition definition = UITabCatalog.GetRequired(id);
+        if (definition.SurfaceKind == UITabSurfaceKind.Construction)
         {
             return;
         }
 
-        foreach (UITab tab in GetTopLevelTabs().Where((tab) => tab.id == id))
+        foreach (UITab tab in GetTopLevelTabs()
+                     .Where((candidate) => TryGetTabId(candidate, out TabId candidateId) && candidateId == id))
         {
             EnsureSpecializedTabContent(tab);
         }
@@ -236,28 +235,25 @@ public class UITabManager : MonoBehaviour
 
     private void EnsureSpecializedTabContent(UITab tab)
     {
-        if (tab == null)
+        if (tab == null || !TryGetTabId(tab, out TabId id))
         {
             return;
         }
 
-        if (tab.id == 2)
+        UITabDefinition definition = UITabCatalog.GetRequired(id);
+        switch (definition.SurfaceKind)
         {
-            StaffWorkPriorityPanel panel = RequireStaffWorkPriorityPanelFactory().Ensure(tab.gameObject);
-            if (panel != null)
+            case UITabSurfaceKind.Staff:
             {
-                panel.Refresh();
+                StaffWorkPriorityPanel panel = RequireStaffWorkPriorityPanelFactory().Ensure(tab.gameObject);
+                panel?.Refresh();
+                break;
             }
-
-            return;
-        }
-
-        if (IsFeatureSurfaceTab(tab.id))
-        {
-            P0FeatureSurfacePanel panel = RequireP0FeatureSurfacePanelFactory().Ensure(tab.gameObject, tab.id);
-            if (panel != null)
+            case UITabSurfaceKind.Feature:
             {
-                panel.Refresh();
+                P0FeatureSurfacePanel panel = RequireP0FeatureSurfacePanelFactory().Ensure(tab.gameObject, id);
+                panel?.Refresh();
+                break;
             }
         }
     }
@@ -274,6 +270,13 @@ public class UITabManager : MonoBehaviour
     private IEnumerable<UITab> GetTopLevelTabs()
     {
         return GetAllTabs().Where((tab) => tab.transform.parent == transform);
+    }
+
+    private static bool TryGetTabId(UITab tab, out TabId id)
+    {
+        UITabIdentity identity = tab != null ? tab.GetComponent<UITabIdentity>() : null;
+        id = identity != null ? identity.Id : default;
+        return identity != null && UITabCatalog.TryGet(id, out _);
     }
 
     private void CloseAllTabsImmediate()
@@ -299,19 +302,6 @@ public class UITabManager : MonoBehaviour
         ResolveThemeRuntime()?.SetActiveTab(null);
     }
 
-    private static string GetPanelTitle(int id, string defaultTitle)
-    {
-        return id switch
-        {
-            1 => "건물 관리",
-            2 => "직원 관리",
-            6 => "침공/방어",
-            8 => "연구/제작",
-            9 => "도감/기록",
-            _ => defaultTitle
-        };
-    }
-
     private void OpenTabImmediate(UITab tab)
     {
         if (tab == null) return;
@@ -329,11 +319,12 @@ public class UITabManager : MonoBehaviour
             return;
         }
 
-        foreach (Button button in root.GetComponentsInChildren<Button>(true))
+        foreach (Button button in GetDirectButtons(root))
         {
-            string label = GetButtonLabel(button);
-            if (!TryGetTopTabId(label, out int tabId))
+            UITabButtonBinding binding = button.GetComponent<UITabButtonBinding>();
+            if (binding == null)
             {
+                Debug.LogError($"Top tab button '{button.name}' has no {nameof(UITabButtonBinding)}.");
                 continue;
             }
 
@@ -342,7 +333,8 @@ public class UITabManager : MonoBehaviour
                 continue;
             }
 
-            button.onClick.AddListener(() => ToggleSelectButton(tabId));
+            TabId capturedId = binding.Id;
+            button.onClick.AddListener(() => ToggleTopTab(capturedId));
         }
     }
 
@@ -365,25 +357,6 @@ public class UITabManager : MonoBehaviour
         return null;
     }
 
-    private static string GetButtonLabel(Button button)
-    {
-        TMP_Text label = button != null ? button.GetComponentInChildren<TMP_Text>(true) : null;
-        return label != null ? label.text : string.Empty;
-    }
-
-    private static bool TryGetTopTabId(string label, out int tabId)
-    {
-        string normalized = NormalizeTopTabLabel(label);
-        return TopTabIds.TryGetValue(normalized, out tabId);
-    }
-
-    private static string NormalizeTopTabLabel(string label)
-    {
-        return string.IsNullOrWhiteSpace(label)
-            ? string.Empty
-            : new string(label.Where((character) => !char.IsWhiteSpace(character)).ToArray());
-    }
-
     private void EnsureTopButtons()
     {
         Transform root = ResolveButtonPanel();
@@ -392,36 +365,61 @@ public class UITabManager : MonoBehaviour
             return;
         }
 
-        Button template = root.GetComponentsInChildren<Button>(true)
-            .FirstOrDefault((button) => TryGetTopTabId(GetButtonLabel(button), out _));
+        EnsureLegacyButtonBindings(root);
+        Button template = GetDirectButtons(root)
+            .FirstOrDefault((button) => button.GetComponent<UITabButtonBinding>() != null);
 
-        foreach (KeyValuePair<int, string> tab in TopTabs)
+        foreach (UITabDefinition definition in UITabCatalog.All)
         {
-            Button existing = FindTopButtonForId(root, tab.Key);
+            Button existing = FindTopButtonForId(root, definition.Id);
             if (existing != null)
             {
                 existing.gameObject.SetActive(true);
-                SetButtonLabel(existing, tab.Value);
+                SetButtonLabel(existing, definition.ButtonLabel);
                 continue;
             }
 
             if (template == null)
             {
-                Debug.LogError("UITabManager requires at least one top tab button template.");
+                Debug.LogError("UITabManager requires at least one top tab button template with a stable binding.");
                 return;
             }
 
-            RequireTopButtonFactory().CreateButton(template, root, tab.Key, tab.Value);
+            RequireTopButtonFactory().CreateButton(template, root, definition.Id, definition.ButtonLabel);
         }
 
         NormalizeTopButtons(root);
         ArrangeTopButtonsInSingleRow(root);
 
-        foreach (Button button in root.GetComponentsInChildren<Button>(true))
+        foreach (Button button in GetDirectButtons(root).Where((candidate) => candidate.gameObject.activeSelf))
         {
-            if (!button.gameObject.activeSelf) continue;
-
             PolishTopButton(button);
+        }
+    }
+
+    private static void EnsureLegacyButtonBindings(Transform root)
+    {
+        HashSet<TabId> used = GetDirectButtons(root)
+            .Select((button) => button.GetComponent<UITabButtonBinding>())
+            .Where((binding) => binding != null)
+            .Select((binding) => binding.Id)
+            .ToHashSet();
+        Queue<TabId> available = new Queue<TabId>(UITabCatalog.All
+            .OrderBy((definition) => definition.Order)
+            .Select((definition) => definition.Id)
+            .Where((id) => !used.Contains(id)));
+
+        foreach (Button button in GetDirectButtons(root)
+                     .Where((candidate) => candidate.GetComponent<UITabButtonBinding>() == null)
+                     .OrderBy((candidate) => candidate.transform.GetSiblingIndex()))
+        {
+            if (available.Count == 0)
+            {
+                Debug.LogError($"Cannot migrate top tab button '{button.name}': no unused tab id remains.");
+                continue;
+            }
+
+            button.gameObject.AddComponent<UITabButtonBinding>().Set(available.Dequeue());
         }
     }
 
@@ -437,64 +435,57 @@ public class UITabManager : MonoBehaviour
 
     private static void OrderTopButtons(Transform root)
     {
-        Button[] buttons = root.GetComponentsInChildren<Button>(true)
-            .Where((button) => button.transform.parent == root && button.gameObject.activeSelf)
-            .ToArray();
-
-        foreach (Button button in buttons)
+        foreach (Button button in GetDirectButtons(root))
         {
-            if (!TryGetTopTabId(GetButtonLabel(button), out int tabId))
+            UITabButtonBinding binding = button.GetComponent<UITabButtonBinding>();
+            if (binding == null || !UITabCatalog.TryGet(binding.Id, out UITabDefinition definition))
             {
                 continue;
             }
 
-            button.transform.SetSiblingIndex(tabId);
+            button.transform.SetSiblingIndex(definition.Order);
         }
     }
 
-    private static Button FindTopButtonForId(Transform root, int id)
+    private static Button FindTopButtonForId(Transform root, TabId id)
     {
-        foreach (Button button in root.GetComponentsInChildren<Button>(true))
+        return GetDirectButtons(root).FirstOrDefault((button) =>
         {
-            if (TryGetTopTabId(GetButtonLabel(button), out int tabId) && tabId == id)
-            {
-                return button;
-            }
-        }
-
-        return null;
+            UITabButtonBinding binding = button.GetComponent<UITabButtonBinding>();
+            return binding != null && binding.Id == id;
+        });
     }
 
     private void NormalizeTopButtons(Transform root)
     {
-        Button[] buttons = root.GetComponentsInChildren<Button>(true)
-            .Where((button) => button.transform.parent == root)
-            .ToArray();
-
-        foreach (KeyValuePair<int, string> tab in TopTabs)
+        Button[] buttons = GetDirectButtons(root).ToArray();
+        foreach (UITabDefinition definition in UITabCatalog.All)
         {
             Button[] matches = buttons
-                .Where((button) => TryGetTopTabId(GetButtonLabel(button), out int tabId) && tabId == tab.Key)
+                .Where((button) => button.TryGetComponent(out UITabButtonBinding binding)
+                    && binding.Id == definition.Id)
                 .ToArray();
-
             if (matches.Length == 0)
             {
                 continue;
             }
 
-            Button keep = matches.FirstOrDefault((button) => NormalizeTopTabLabel(GetButtonLabel(button)) == NormalizeTopTabLabel(tab.Value))
-                ?? matches[0];
+            Button keep = matches[0];
             keep.gameObject.SetActive(true);
-            SetButtonLabel(keep, tab.Value);
-            keep.transform.SetSiblingIndex(tab.Key);
+            SetButtonLabel(keep, definition.ButtonLabel);
+            keep.transform.SetSiblingIndex(definition.Order);
 
-            foreach (Button duplicate in matches)
+            foreach (Button duplicate in matches.Skip(1))
             {
-                if (duplicate == keep) continue;
-
                 duplicate.gameObject.SetActive(false);
             }
         }
+    }
+
+    private static IEnumerable<Button> GetDirectButtons(Transform root)
+    {
+        return root.GetComponentsInChildren<Button>(true)
+            .Where((button) => button.transform.parent == root);
     }
 
     private void SetButtonLabel(Button button, string title)
@@ -519,23 +510,23 @@ public class UITabManager : MonoBehaviour
         label.textWrappingMode = TextWrappingModes.NoWrap;
     }
 
-    private void EnsureGeneratedTab(int id, string title)
+    private void EnsureGeneratedTab(UITabDefinition definition)
     {
-        if (GetTopLevelTabs().Any((tab) => tab.id == id))
+        if (GetTopLevelTabs().Any((tab) =>
+                TryGetTabId(tab, out TabId candidateId) && candidateId == definition.Id))
         {
             return;
         }
 
-        string panelTitle = GetPanelTitle(id, title);
         GeneratedUITabPanel generatedPanel = RequireGeneratedPanelFactory()
-            .Create(transform, id, panelTitle);
+            .Create(transform, definition.Id, definition.PanelTitle);
         tabList.Add(generatedPanel.Tab);
-        generatedTabBodies[id] = generatedPanel.BodyText;
+        generatedTabBodies[definition.Id] = generatedPanel.BodyText;
     }
 
-    private void RefreshGeneratedTab(int id)
+    private void RefreshGeneratedTab(TabId id)
     {
-        if (id == 2)
+        if (UITabCatalog.GetRequired(id).SurfaceKind == UITabSurfaceKind.Staff)
         {
             EnsureSpecializedTabContent(id);
             return;
@@ -549,7 +540,7 @@ public class UITabManager : MonoBehaviour
         body.text = BuildTabContent(id);
     }
 
-    private string BuildTabContent(int id)
+    private string BuildTabContent(TabId id)
     {
         if (contentTextProvider == null)
         {
@@ -560,27 +551,11 @@ public class UITabManager : MonoBehaviour
         return contentTextProvider.Build(id);
     }
 
-    private static bool IsFeatureSurfaceTab(int id)
-    {
-        return id == 1
-            || id == 3
-            || id == 4
-            || id == 5
-            || id == 6
-            || id == 7
-            || id == 8
-            || id == 9;
-    }
-
     private IUiPopupService ResolvePopupService()
     {
-        if (popupService == null)
-        {
-            throw new InvalidOperationException(
+        return popupService
+            ?? throw new InvalidOperationException(
                 $"{nameof(UITabManager)} requires VContainer injection of {nameof(IUiPopupService)}.");
-        }
-
-        return popupService;
     }
 
     private ITmpKoreanFontService RequireTmpKoreanFontService()

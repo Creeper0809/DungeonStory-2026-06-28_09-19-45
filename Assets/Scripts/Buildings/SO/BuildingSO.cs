@@ -44,49 +44,165 @@ public enum FacilityWorkType
     Research = 1 << 4,
     Guard = 1 << 5,
     Rescue = 1 << 6,
-    Rest = 1 << 7
+    Rest = 1 << 7,
+    Craft = 1 << 8,
+    Haul = 1 << 9
 }
 
-public enum FacilityAnchorKind
+public static class FacilityAnchorPurposeIds
 {
-    Use,
-    Work,
-    Checkout,
-    Exit
+    public const string Use = "facility.use";
+    public const string Work = "facility.work";
+    public const string Checkout = "facility.checkout";
+    public const string Exit = "facility.exit";
+}
+
+public delegate bool FacilityAnchorFallbackResolver(
+    BuildableObject building,
+    Vector3 fromWorld,
+    out Vector3 worldPosition);
+
+public sealed class FacilityAnchorPurposeDefinition
+{
+    public FacilityAnchorPurposeDefinition(string purposeId, FacilityAnchorFallbackResolver fallbackResolver)
+    {
+        PurposeId = string.IsNullOrWhiteSpace(purposeId)
+            ? throw new ArgumentException("Anchor purpose ID is required.", nameof(purposeId))
+            : purposeId;
+        FallbackResolver = fallbackResolver
+            ?? throw new ArgumentNullException(nameof(fallbackResolver));
+    }
+
+    public string PurposeId { get; }
+    public FacilityAnchorFallbackResolver FallbackResolver { get; }
+}
+
+public static class FacilityAnchorPurposeCatalog
+{
+    private static readonly Dictionary<string, FacilityAnchorPurposeDefinition> Definitions =
+        new Dictionary<string, FacilityAnchorPurposeDefinition>(StringComparer.Ordinal);
+
+    static FacilityAnchorPurposeCatalog()
+    {
+        ResetBuiltIns();
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetForSubsystemRegistration()
+    {
+        ResetBuiltIns();
+    }
+
+    public static bool Register(FacilityAnchorPurposeDefinition definition, bool replace = false)
+    {
+        if (definition == null)
+        {
+            throw new ArgumentNullException(nameof(definition));
+        }
+
+        if (!replace && Definitions.ContainsKey(definition.PurposeId))
+        {
+            return false;
+        }
+
+        Definitions[definition.PurposeId] = definition;
+        return true;
+    }
+
+    public static bool Unregister(string purposeId)
+    {
+        return !string.IsNullOrWhiteSpace(purposeId) && Definitions.Remove(purposeId);
+    }
+
+    public static bool TryGet(string purposeId, out FacilityAnchorPurposeDefinition definition)
+    {
+        definition = null;
+        return !string.IsNullOrWhiteSpace(purposeId)
+            && Definitions.TryGetValue(purposeId, out definition);
+    }
+
+    private static void ResetBuiltIns()
+    {
+        Definitions.Clear();
+        Register(new FacilityAnchorPurposeDefinition(FacilityAnchorPurposeIds.Use, ResolveOccupiedAnchor));
+        Register(new FacilityAnchorPurposeDefinition(FacilityAnchorPurposeIds.Work, ResolveWorkAnchor));
+        Register(new FacilityAnchorPurposeDefinition(FacilityAnchorPurposeIds.Checkout, ResolveCheckoutAnchor));
+        Register(new FacilityAnchorPurposeDefinition(FacilityAnchorPurposeIds.Exit, ResolveOccupiedAnchor));
+    }
+
+    private static bool ResolveOccupiedAnchor(BuildableObject building, Vector3 fromWorld, out Vector3 worldPosition)
+    {
+        return building.TryGetFacilityOccupiedWorldPosition(fromWorld, out worldPosition)
+            || building.TryGetHorizontalFootprintAnchorWorldPosition(0.5f, out worldPosition);
+    }
+
+    private static bool ResolveWorkAnchor(BuildableObject building, Vector3 fromWorld, out Vector3 worldPosition)
+    {
+        return building.TryGetHorizontalFootprintAnchorWorldPosition(0.85f, out worldPosition);
+    }
+
+    private static bool ResolveCheckoutAnchor(BuildableObject building, Vector3 fromWorld, out Vector3 worldPosition)
+    {
+        return building.TryGetHorizontalFootprintAnchorWorldPosition(0.75f, out worldPosition);
+    }
+}
+
+[Serializable]
+public sealed class FacilityAnchorSlot
+{
+    [Tooltip("이 슬롯을 사용하는 시스템의 안정적인 목적 ID")]
+    public string purposeId = FacilityAnchorPurposeIds.Use;
+    [Tooltip("시설 중심 칸에서 더할 그리드 좌표 오프셋")]
+    public Vector2 offset;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(purposeId);
 }
 
 [Serializable]
 public sealed class FacilityAnchorData
 {
-    public bool overrideUseOffset;
-    public Vector2 useOffset;
-    public bool overrideWorkOffset;
-    public Vector2 workOffset;
-    public bool overrideCheckoutOffset;
-    public Vector2 checkoutOffset;
-    public bool overrideExitOffset;
-    public Vector2 exitOffset;
+    [SerializeField] private List<FacilityAnchorSlot> slots = new List<FacilityAnchorSlot>();
+    [NonSerialized] private IReadOnlyList<FacilityAnchorSlot> slotsView;
 
-    public bool TryGetOffset(FacilityAnchorKind kind, out Vector2 offset)
+    public IReadOnlyList<FacilityAnchorSlot> Slots
     {
-        switch (kind)
+        get
         {
-            case FacilityAnchorKind.Use when overrideUseOffset:
-                offset = useOffset;
-                return true;
-            case FacilityAnchorKind.Work when overrideWorkOffset:
-                offset = workOffset;
-                return true;
-            case FacilityAnchorKind.Checkout when overrideCheckoutOffset:
-                offset = checkoutOffset;
-                return true;
-            case FacilityAnchorKind.Exit when overrideExitOffset:
-                offset = exitOffset;
-                return true;
-            default:
-                offset = Vector2.zero;
-                return false;
+            slots ??= new List<FacilityAnchorSlot>();
+            return slotsView ??= ReadOnlyView.List(slots);
         }
+    }
+
+    public void Add(string purposeId, Vector2 offset)
+    {
+        if (string.IsNullOrWhiteSpace(purposeId))
+        {
+            return;
+        }
+
+        slots ??= new List<FacilityAnchorSlot>();
+        slots.Add(new FacilityAnchorSlot { purposeId = purposeId, offset = offset });
+    }
+
+    public IEnumerable<FacilityAnchorSlot> Enumerate(string purposeId)
+    {
+        if (slots == null || string.IsNullOrWhiteSpace(purposeId))
+        {
+            yield break;
+        }
+
+        foreach (FacilityAnchorSlot slot in slots)
+        {
+            if (slot != null && slot.IsValid && string.Equals(slot.purposeId, purposeId, StringComparison.Ordinal))
+            {
+                yield return slot;
+            }
+        }
+    }
+
+    public int RemoveInvalidSlots()
+    {
+        return slots?.RemoveAll(slot => slot == null || !slot.IsValid) ?? 0;
     }
 }
 
@@ -96,25 +212,9 @@ public class FacilityData
     public FacilityRole roles;
     [Min(0)] public int capacity = 1;
     [Min(0f)] public float useDuration = 1f;
-    [Min(0)] public int internalStockMax;
-    [Min(0)] public int restockRequestThreshold;
     [Min(0)] public int requiredWorkers;
     public FacilityWorkType supportedWorkTypes;
-    public string[] preferredSpeciesTags = Array.Empty<string>();
-    public string[] dislikedSpeciesTags = Array.Empty<string>();
     public bool disabledWhenDamaged = true;
-    public bool requiresStock;
-    public bool requiresRoomRole;
-    public bool requiresStaffedService;
-    public bool selfContainedRoom;
-    [Range(0f, 1f)] public float baseCrimePressure = 0.01f;
-    [Range(0f, 1f)] public float unstaffedSupervisionRisk = 0.07f;
-    [Range(0f, 1f)] public float staffedSupervisionReduction = 0.03f;
-    [Range(0f, 1f)] public float lowMoodCrimeRiskWeight = 0.08f;
-    [Range(0f, 1f)] public float unmetNeedCrimeRiskWeight = 0.05f;
-    [Range(0f, 1f)] public float crowdCrimeRiskWeight = 0.04f;
-    [Range(0f, 1f)] public float highValueCrimeRiskWeight = 0.05f;
-    [Range(0f, 1f)] public float damagedFacilityCrimeRiskWeight = 0.05f;
 
     public bool IsVisitorFacility => roles != FacilityRole.None && capacity > 0;
 
@@ -180,10 +280,16 @@ public readonly struct GridBuildingPlacement
 [CreateAssetMenu(menuName = "Grid/Building/SO", order = 0)]
 public class BuildingSO : DataScriptableObject
 {
+    public const string AbilityModulesFieldName = "abilityModules";
+
     [Header("Presentation")]
     public string objectName;
     public Sprite sprite;
     public Sprite icon;
+
+    [Header("Facility Abilities")]
+    [InspectorName("능력 목록")]
+    [SerializeField] private BuildingAbilityCollection abilityModules = new BuildingAbilityCollection();
 
     [Header("Grid Placement")]
     public int width;
@@ -201,11 +307,6 @@ public class BuildingSO : DataScriptableObject
     public FacilityAnchorData facilityAnchors = new FacilityAnchorData();
 
     [Header("Game Data")]
-    public int maintenance;
-    public FacilityData facility = new FacilityData();
-    public DefenseFacilityData defense = new DefenseFacilityData();
-    public FacilityEvolutionContributionData evolution = new FacilityEvolutionContributionData();
-    public FacilityOperationalData operational = new FacilityOperationalData();
     [SerializeField] private List<IBuildingCondition> OnBuildCondition;
     public bool unlocked;
 
@@ -227,14 +328,78 @@ public class BuildingSO : DataScriptableObject
         || layer == GridLayer.CeilingFixture
         || layer == GridLayer.FloorOverlay;
     public FacilityAnchorData FacilityAnchors => facilityAnchors ??= new FacilityAnchorData();
-    public FacilityData Facility => facility ??= new FacilityData();
-    public DefenseFacilityData Defense => defense ??= new DefenseFacilityData();
-    public FacilityEvolutionContributionData Evolution => evolution ??= new FacilityEvolutionContributionData();
-    public FacilityOperationalData Operational => operational ??= new FacilityOperationalData();
+    public BuildingAbilityCollection AbilityModules =>
+        abilityModules ??= new BuildingAbilityCollection();
+    public int Maintenance
+    {
+        get => GetAbility<BuildingEconomyAbility>()?.maintenance ?? 0;
+        set
+        {
+            BuildingEconomyAbility economy = GetAbility<BuildingEconomyAbility>();
+            if (economy == null)
+            {
+                if (value <= 0)
+                {
+                    return;
+                }
+
+                economy = new BuildingEconomyAbility();
+                (abilityModules ??= new BuildingAbilityCollection()).Add(economy);
+            }
+
+            economy.maintenance = Mathf.Max(0, value);
+        }
+    }
+
+    public FacilityData Facility
+    {
+        get => GetAbility<BuildingFacilityAbility>()?.settings;
+        set => SetDomainAbility(
+            value != null ? new BuildingFacilityAbility { settings = value } : null);
+    }
+
+    public DefenseFacilityData Defense
+    {
+        get => GetAbility<BuildingDefenseAbility>()?.settings;
+        set => SetDomainAbility(
+            value != null ? new BuildingDefenseAbility { settings = value } : null);
+    }
+
+    public FacilityEvolutionContributionData Evolution
+    {
+        get => GetAbility<BuildingEvolutionAbility>()?.settings;
+        set => SetDomainAbility(
+            value != null ? new BuildingEvolutionAbility { settings = value } : null);
+    }
+
+    public IReadOnlyList<BuildingAbility> Abilities => (abilityModules ??= new BuildingAbilityCollection()).Items;
+
+    public void ReplaceAbilities(BuildingAbilityCollection abilities)
+    {
+        abilityModules = abilities ?? new BuildingAbilityCollection();
+    }
 
     public IReadOnlyList<IBuildingCondition> BuildConditions => OnBuildCondition != null
-        ? (IReadOnlyList<IBuildingCondition>)OnBuildCondition
+        ? ReadOnlyView.List(OnBuildCondition)
         : Array.Empty<IBuildingCondition>();
+
+    public bool TryGetAbility<TAbility>(out TAbility ability)
+        where TAbility : BuildingAbility
+    {
+        return (abilityModules ??= new BuildingAbilityCollection()).TryGet(out ability);
+    }
+
+    public TAbility GetAbility<TAbility>()
+        where TAbility : BuildingAbility
+    {
+        return TryGetAbility(out TAbility ability) ? ability : null;
+    }
+
+    public void ValidateAbilitiesOrThrow()
+    {
+        (abilityModules ??= new BuildingAbilityCollection())
+            .ValidateOrThrow($"BuildingSO '{name}' (id={id})");
+    }
 
     public List<Vector2Int> GetGridPosList(Vector2Int center)
     {
@@ -244,5 +409,16 @@ public class BuildingSO : DataScriptableObject
     public bool GetDraggable()
     {
         return Placement.IsDraggable;
+    }
+
+    private void SetDomainAbility<TAbility>(TAbility ability)
+        where TAbility : BuildingAbility
+    {
+        abilityModules ??= new BuildingAbilityCollection();
+        abilityModules.Remove<TAbility>();
+        if (ability != null)
+        {
+            abilityModules.Add(ability);
+        }
     }
 }

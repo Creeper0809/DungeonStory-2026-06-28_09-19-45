@@ -29,7 +29,7 @@ MonoBehaviour:
   m_StripUnusedVariants: 1
   m_StripScreenCoordOverrideVariants: 1
   supportRuntimeDebugDisplay: 0
-  m_EnableRenderGraph: 0
+  m_EnableRenderGraph: 1
   m_Settings:
     m_SettingsList:
       m_List:
@@ -66,7 +66,19 @@ MonoBehaviour:
       - rid: 427238966574186526
       - rid: 427238966574186527
     m_RuntimeSettings:
-      m_List: []
+      m_List:
+      - rid: 427238966574186497
+      - rid: 427238966574186498
+      - rid: 427238966574186503
+      - rid: 427238966574186505
+      - rid: 427238966574186507
+      - rid: 427238966574186508
+      - rid: 427238966574186510
+      - rid: 427238966574186516
+      - rid: 427238966574186517
+      - rid: 427238966574186518
+      - rid: 427238966574186519
+      - rid: 427238966574186523
   m_AssetVersion: 9
   m_ObsoleteDefaultVolumeProfile: {fileID: 0}
   m_RenderingLayerNames:
@@ -119,7 +131,7 @@ MonoBehaviour:
       type: {class: RenderGraphSettings, ns: UnityEngine.Rendering.Universal, asm: Unity.RenderPipelines.Universal.Runtime}
       data:
         m_Version: 0
-        m_EnableRenderCompatibilityMode: 1
+        m_EnableRenderCompatibilityMode: 0
     - rid: 427238966574186499
       type: {class: UniversalRenderPipelineEditorShaders, ns: UnityEngine.Rendering.Universal, asm: Unity.RenderPipelines.Universal.Runtime}
       data:

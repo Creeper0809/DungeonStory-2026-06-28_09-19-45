@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -6,6 +7,7 @@ public class GridCell
     private static readonly GridLayer[] SelectionPriority =
     {
         GridLayer.Character,
+        GridLayer.Item,
         GridLayer.Building,
         GridLayer.WallFixture,
         GridLayer.CeilingFixture,
@@ -15,16 +17,23 @@ public class GridCell
 
     private readonly Dictionary<GridLayer, IGridOccupant> occupants;
     private List<GridTraversalLink> traversalLinks;
+    private readonly IReadOnlyList<GridTraversalLink> traversalLinksView;
     private bool isBuildable;
 
     public Vector2Int Position { get; }
-    public IReadOnlyList<GridTraversalLink> TraversalLinks => traversalLinks;
+    public GridCellAreaType AreaType { get; private set; }
+    public IReadOnlyList<GridTraversalLink> TraversalLinks => traversalLinksView;
+    public bool IsWalkableArea => GridCellAreaRules.IsWalkableArea(AreaType);
+    public bool IsBuildableArea => GridCellAreaRules.IsBuildableArea(AreaType);
+    public bool AllowsItemDrop => GridCellAreaRules.AllowsItemDrop(AreaType);
 
     public GridCell(Vector2Int pos)
     {
         occupants = new Dictionary<GridLayer, IGridOccupant>();
         traversalLinks = new List<GridTraversalLink>();
+        traversalLinksView = ReadOnlyView.List(traversalLinks);
         isBuildable = true;
+        AreaType = GridCellAreaType.DungeonInterior;
         Position = pos;
     }
     public IGridOccupant GetOccupant(GridLayer layer = GridLayer.Building)
@@ -121,7 +130,30 @@ public class GridCell
     }
     public bool CanOccupy(GridLayer layer = GridLayer.Building)
     {
-        return !HasOccupantInLayer(layer) && isBuildable;
+        return GridCellAreaRules.AllowsLayer(AreaType, layer)
+            && !HasOccupantInLayer(layer)
+            && isBuildable;
+    }
+
+    public bool CanBuildInArea(BuildingSO buildingData)
+    {
+        return GridCellAreaRules.CanBuildInArea(AreaType, buildingData);
+    }
+
+    public bool SetAreaType(GridCellAreaType areaType)
+    {
+        if (!Enum.IsDefined(typeof(GridCellAreaType), areaType))
+        {
+            areaType = GridCellAreaType.DungeonInterior;
+        }
+
+        if (AreaType == areaType)
+        {
+            return false;
+        }
+
+        AreaType = areaType;
+        return true;
     }
     public bool HasOccupantInLayer(GridLayer layer = GridLayer.Building)
     {

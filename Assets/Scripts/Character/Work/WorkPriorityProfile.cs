@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public enum WorkPriorityLevel
 {
@@ -48,32 +50,17 @@ public static class WorkPriorityLevelExtensions
 
 public static class WorkTaskCatalog
 {
-    public static readonly FacilityWorkType[] TaskTypes =
-    {
-        FacilityWorkType.Operate,
-        FacilityWorkType.Restock,
-        FacilityWorkType.Repair,
-        FacilityWorkType.Clean,
-        FacilityWorkType.Research,
-        FacilityWorkType.Guard,
-        FacilityWorkType.Rescue,
-        FacilityWorkType.Rest
-    };
+    public static FacilityWorkType[] TaskTypes => WorkTypeCatalog.All
+        .Select((definition) => definition.Type)
+        .ToArray();
+
+    public static IReadOnlyList<WorkTypeDefinition> Definitions => WorkTypeCatalog.All;
 
     public static string GetDisplayName(FacilityWorkType workType)
     {
-        return workType switch
-        {
-            FacilityWorkType.Operate => "운영",
-            FacilityWorkType.Restock => "보충",
-            FacilityWorkType.Repair => "수리",
-            FacilityWorkType.Clean => "청소",
-            FacilityWorkType.Research => "연구",
-            FacilityWorkType.Guard => "경비",
-            FacilityWorkType.Rescue => "구조/응급",
-            FacilityWorkType.Rest => "휴식",
-            _ => "작업"
-        };
+        return WorkTypeCatalog.TryGet(workType, out WorkTypeDefinition definition)
+            ? definition.DisplayName
+            : workType.ToString();
     }
 
     public static IEnumerable<FacilityWorkType> GetSingleTypes(FacilityWorkType workTypes)
@@ -248,93 +235,116 @@ public static class WorkCommandResolver
             return false;
         }
 
-        if (target.Facility.requiresStock && !stocked.HasAvailableStock)
+        if (target.BuildingData.RequiresStockForUse() && !stocked.HasAvailableStock)
         {
             return true;
         }
 
-        return target.Facility.internalStockMax > 0
-            && stocked.CurrentStock <= target.Facility.restockRequestThreshold;
+        return target.GetInternalStockCapacity() > 0
+            && stocked.CurrentStock <= target.GetRestockRequestThreshold();
     }
 }
 
 [Serializable]
-public class WorkPriorityProfile
+public sealed class WorkPriorityEntry
 {
-    public WorkPriorityLevel operate = WorkPriorityLevel.Priority1;
-    public WorkPriorityLevel restock = WorkPriorityLevel.Priority2;
-    public WorkPriorityLevel repair = WorkPriorityLevel.Priority2;
-    public WorkPriorityLevel clean = WorkPriorityLevel.Priority3;
-    public WorkPriorityLevel research = WorkPriorityLevel.Priority3;
-    public WorkPriorityLevel guard = WorkPriorityLevel.Priority3;
-    public WorkPriorityLevel rescue = WorkPriorityLevel.Priority2;
-    public WorkPriorityLevel rest = WorkPriorityLevel.Priority3;
+    [SerializeField] private string workTypeId;
+    [SerializeField] private WorkPriorityLevel priority;
+
+    public WorkPriorityEntry(string workTypeId, WorkPriorityLevel priority)
+    {
+        this.workTypeId = workTypeId;
+        this.priority = priority;
+    }
+
+    public string WorkTypeId => workTypeId;
+    public WorkPriorityLevel Priority => priority;
+
+    internal void SetPriority(WorkPriorityLevel value)
+    {
+        priority = value;
+    }
+}
+
+[Serializable]
+public class WorkPriorityProfile : ISerializationCallbackReceiver
+{
+    private const int CurrentSchemaVersion = 1;
+
+    [SerializeField] private int schemaVersion;
+    [SerializeField] private List<WorkPriorityEntry> priorities = new List<WorkPriorityEntry>();
+    [NonSerialized] private IReadOnlyList<WorkPriorityEntry> prioritiesView;
+
+    [SerializeField, HideInInspector, FormerlySerializedAs("operate")]
+    private WorkPriorityLevel legacyOperate = WorkPriorityLevel.Priority1;
+    [SerializeField, HideInInspector, FormerlySerializedAs("restock")]
+    private WorkPriorityLevel legacyRestock = WorkPriorityLevel.Priority2;
+    [SerializeField, HideInInspector, FormerlySerializedAs("repair")]
+    private WorkPriorityLevel legacyRepair = WorkPriorityLevel.Priority2;
+    [SerializeField, HideInInspector, FormerlySerializedAs("clean")]
+    private WorkPriorityLevel legacyClean = WorkPriorityLevel.Priority3;
+    [SerializeField, HideInInspector, FormerlySerializedAs("research")]
+    private WorkPriorityLevel legacyResearch = WorkPriorityLevel.Priority2;
+    [SerializeField, HideInInspector, FormerlySerializedAs("guard")]
+    private WorkPriorityLevel legacyGuard = WorkPriorityLevel.Priority3;
+    [SerializeField, HideInInspector, FormerlySerializedAs("rescue")]
+    private WorkPriorityLevel legacyRescue = WorkPriorityLevel.Priority2;
+    [SerializeField, HideInInspector, FormerlySerializedAs("rest")]
+    private WorkPriorityLevel legacyRest = WorkPriorityLevel.Priority3;
+
+    public IReadOnlyList<WorkPriorityEntry> Entries
+    {
+        get
+        {
+            EnsureMigrated();
+            return prioritiesView ??= ReadOnlyView.List(priorities);
+        }
+    }
 
     public static WorkPriorityProfile CreateDefault()
     {
-        return new WorkPriorityProfile();
+        WorkPriorityProfile profile = new WorkPriorityProfile();
+        profile.EnsureMigrated();
+        return profile;
     }
 
     public WorkPriorityProfile Clone()
     {
+        EnsureMigrated();
         return new WorkPriorityProfile
         {
-            operate = operate,
-            restock = restock,
-            repair = repair,
-            clean = clean,
-            research = research,
-            guard = guard,
-            rescue = rescue,
-            rest = rest
+            schemaVersion = CurrentSchemaVersion,
+            priorities = priorities
+                .Where((entry) => entry != null)
+                .Select((entry) => new WorkPriorityEntry(entry.WorkTypeId, entry.Priority))
+                .ToList()
         };
     }
 
     public WorkPriorityLevel GetPriority(FacilityWorkType workType)
     {
-        return workType switch
+        EnsureMigrated();
+        if (WorkTypeCatalog.TryGet(workType, out WorkTypeDefinition definition))
         {
-            FacilityWorkType.Operate => operate,
-            FacilityWorkType.Restock => restock,
-            FacilityWorkType.Repair => repair,
-            FacilityWorkType.Clean => clean,
-            FacilityWorkType.Research => research,
-            FacilityWorkType.Guard => guard,
-            FacilityWorkType.Rescue => rescue,
-            FacilityWorkType.Rest => rest,
-            _ => GetBestPriority(workType)
-        };
+            WorkPriorityEntry entry = FindEntry(definition.Id);
+            return entry != null ? entry.Priority : definition.DefaultPriority;
+        }
+
+        return GetBestPriority(workType);
     }
 
     public void SetPriority(FacilityWorkType workType, WorkPriorityLevel priority)
     {
-        switch (workType)
+        EnsureMigrated();
+        WorkTypeDefinition definition = WorkTypeCatalog.GetRequired(workType);
+        WorkPriorityEntry entry = FindEntry(definition.Id);
+        if (entry != null)
         {
-            case FacilityWorkType.Operate:
-                operate = priority;
-                break;
-            case FacilityWorkType.Restock:
-                restock = priority;
-                break;
-            case FacilityWorkType.Repair:
-                repair = priority;
-                break;
-            case FacilityWorkType.Clean:
-                clean = priority;
-                break;
-            case FacilityWorkType.Research:
-                research = priority;
-                break;
-            case FacilityWorkType.Guard:
-                guard = priority;
-                break;
-            case FacilityWorkType.Rescue:
-                rescue = priority;
-                break;
-            case FacilityWorkType.Rest:
-                rest = priority;
-                break;
+            entry.SetPriority(priority);
+            return;
         }
+
+        priorities.Add(new WorkPriorityEntry(definition.Id, priority));
     }
 
     public bool IsEnabled(FacilityWorkType workType)
@@ -354,13 +364,27 @@ public class WorkPriorityProfile
         }
     }
 
+    public void OnBeforeSerialize()
+    {
+        EnsureMigrated();
+    }
+
+    public void OnAfterDeserialize()
+    {
+        priorities ??= new List<WorkPriorityEntry>();
+        prioritiesView = null;
+    }
+
     private WorkPriorityLevel GetBestPriority(FacilityWorkType workTypes)
     {
         WorkPriorityLevel best = WorkPriorityLevel.Off;
         foreach (FacilityWorkType type in WorkTaskCatalog.GetSingleTypes(workTypes))
         {
             WorkPriorityLevel current = GetPriority(type);
-            if (current == WorkPriorityLevel.Off) continue;
+            if (current == WorkPriorityLevel.Off)
+            {
+                continue;
+            }
 
             if (best == WorkPriorityLevel.Off || current < best)
             {
@@ -369,5 +393,50 @@ public class WorkPriorityProfile
         }
 
         return best;
+    }
+
+    private void EnsureMigrated()
+    {
+        priorities ??= new List<WorkPriorityEntry>();
+        if (schemaVersion >= CurrentSchemaVersion)
+        {
+            return;
+        }
+
+        if (priorities.Count == 0)
+        {
+            foreach (WorkTypeDefinition definition in WorkTypeCatalog.All)
+            {
+                priorities.Add(new WorkPriorityEntry(
+                    definition.Id,
+                    GetLegacyPriority(definition.Type, definition.DefaultPriority)));
+            }
+        }
+
+        schemaVersion = CurrentSchemaVersion;
+    }
+
+    private WorkPriorityEntry FindEntry(string workTypeId)
+    {
+        return priorities.FirstOrDefault((entry) => entry != null
+            && string.Equals(entry.WorkTypeId, workTypeId, StringComparison.Ordinal));
+    }
+
+    private WorkPriorityLevel GetLegacyPriority(
+        FacilityWorkType workType,
+        WorkPriorityLevel fallback)
+    {
+        return workType switch
+        {
+            FacilityWorkType.Operate => legacyOperate,
+            FacilityWorkType.Restock => legacyRestock,
+            FacilityWorkType.Repair => legacyRepair,
+            FacilityWorkType.Clean => legacyClean,
+            FacilityWorkType.Research => legacyResearch,
+            FacilityWorkType.Guard => legacyGuard,
+            FacilityWorkType.Rescue => legacyRescue,
+            FacilityWorkType.Rest => legacyRest,
+            _ => fallback
+        };
     }
 }

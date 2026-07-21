@@ -62,6 +62,8 @@
   - 런 시작 변수, 운영 중 이벤트, 침입/보상 변수, 이벤트 표시와 빈도
 - [진행 순서와 초기 범위](game-design/progression-and-scope.md)
   - 잠금 해제 순서, MVP 범위, 미정 질문
+- [완전한 게임 완료 기준](game-design/game-completion-readiness.md)
+  - 현재 완성도, 필수 제품 게이트, 세 빌드 전략, 출시 검증 순서
 
 ## 현재 설계 상태
 

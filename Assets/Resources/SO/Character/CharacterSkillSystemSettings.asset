@@ -1,0 +1,709 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a56fc9b31d7527c4880a50dfe17cd8b1, type: 3}
+  m_Name: CharacterSkillSystemSettings
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterSkillSystemSettingsSO
+  maxLevel: 50
+  initialStatTotal: 45
+  initialStatMin: 1
+  initialStatMax: 10
+  levelGrowthStatCap: 30
+  identityGrowthWeight: 0.6
+  secondPassiveMinimumLevel: 25
+  secondPassiveMinimumRecords: 8
+  secondPassiveMinimumDomains: 3
+  activeUnlockLevels: 01000000050000001e000000
+  potentialPopulationWeights:
+  - 45
+  - 30
+  - 15
+  - 8
+  - 2
+  potentialRarityProfiles:
+  - potential: 0
+    rarityWeights:
+    - rarity: 0
+      weight: 60
+    - rarity: 1
+      weight: 27
+    - rarity: 2
+      weight: 10
+    - rarity: 3
+      weight: 2.7
+    - rarity: 4
+      weight: 0.3
+  - potential: 1
+    rarityWeights:
+    - rarity: 0
+      weight: 48
+    - rarity: 1
+      weight: 31
+    - rarity: 2
+      weight: 15
+    - rarity: 3
+      weight: 5
+    - rarity: 4
+      weight: 1
+  - potential: 2
+    rarityWeights:
+    - rarity: 0
+      weight: 35
+    - rarity: 1
+      weight: 32
+    - rarity: 2
+      weight: 22
+    - rarity: 3
+      weight: 9
+    - rarity: 4
+      weight: 2
+  - potential: 3
+    rarityWeights:
+    - rarity: 0
+      weight: 25
+    - rarity: 1
+      weight: 30
+    - rarity: 2
+      weight: 27
+    - rarity: 3
+      weight: 14
+    - rarity: 4
+      weight: 4
+  - potential: 4
+    rarityWeights:
+    - rarity: 0
+      weight: 15
+    - rarity: 1
+      weight: 25
+    - rarity: 2
+      weight: 30
+    - rarity: 3
+      weight: 21
+    - rarity: 4
+      weight: 9
+  missedUpperRarityMultiplier: 1.5
+  initialRetrySeconds: 1
+  maximumRetrySeconds: 30
+  guestReadyTarget: 8
+  guestReadyLowWatermark: 4
+  maximumAliveNonStaffGuests: 24
+  rarityBudgets:
+  - rarity: 0
+    budget: 3
+  - rarity: 1
+    budget: 5
+  - rarity: 2
+    budget: 8
+  - rarity: 3
+    budget: 12
+  - rarity: 4
+    budget: 18
+  traitConflicts:
+  - firstTraitId: 101
+    secondTraitId: 102
+  - firstTraitId: 105
+    secondTraitId: 106
+  - firstTraitId: 102
+    secondTraitId: 103
+  modules:
+  - rid: 7302563063765925919
+  - rid: 7302563063765925920
+  - rid: 7302563063765925921
+  - rid: 7302563063765925922
+  - rid: 7302563063765925923
+  - rid: 7302563063765925924
+  - rid: 7302563063765925925
+  - rid: 7302563063765925926
+  - rid: 7302563063765925927
+  - rid: 7302563063765925928
+  - rid: 7302563063765925929
+  - rid: 7302563063765925930
+  - rid: 7302563063765925931
+  - rid: 7302563063765925932
+  - rid: 7302563063765925933
+  - rid: 7302563063765925934
+  - rid: 7302563063765925935
+  - rid: 7302563063765925936
+  - rid: 7302563063765925937
+  - rid: 7302563063765925938
+  - rid: 7302563063765925939
+  - rid: 7302563063765925940
+  - rid: 7302563063765925941
+  - rid: 7302563063765925942
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302563063765925919
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: damage
+        displayName: "\uD53C\uD574"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: light
+          displayName: light
+          primaryValue: 0.75
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: standard
+          displayName: standard
+          primaryValue: 1.1
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 3
+        - id: heavy
+          displayName: heavy
+          primaryValue: 1.6
+          secondaryValue: 2
+          duration: 0
+          count: 1
+          cost: 6
+    - rid: 7302563063765925920
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: heal
+        displayName: "\uD68C\uBCF5"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: minor
+          displayName: minor
+          primaryValue: 8
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: standard
+          displayName: standard
+          primaryValue: 18
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 4
+        - id: drain
+          displayName: drain
+          primaryValue: 4
+          secondaryValue: 0.35
+          duration: 0
+          count: 1
+          cost: 6
+    - rid: 7302563063765925921
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: guard
+        displayName: "\uBC29\uC5B4"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: brief
+          displayName: brief
+          primaryValue: 0.25
+          secondaryValue: 0
+          duration: 1
+          count: 1
+          cost: 2
+        - id: strong
+          displayName: strong
+          primaryValue: 0.45
+          secondaryValue: 0
+          duration: 2
+          count: 1
+          cost: 5
+    - rid: 7302563063765925922
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: dot
+        displayName: "\uC9C0\uC18D \uD53C\uD574"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: bleed
+          displayName: bleed
+          primaryValue: 4
+          secondaryValue: 0
+          duration: 2
+          count: 1
+          cost: 3
+        - id: severe
+          displayName: severe
+          primaryValue: 7
+          secondaryValue: 0
+          duration: 3
+          count: 1
+          cost: 6
+    - rid: 7302563063765925923
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: vulnerability
+        displayName: "\uCDE8\uC57D"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: brief
+          displayName: brief
+          primaryValue: 0.2
+          secondaryValue: 0
+          duration: 1
+          count: 1
+          cost: 3
+        - id: deep
+          displayName: deep
+          primaryValue: 0.4
+          secondaryValue: 0
+          duration: 2
+          count: 1
+          cost: 6
+    - rid: 7302563063765925924
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: delay
+        displayName: "\uC9C0\uC5F0"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: short
+          displayName: short
+          primaryValue: 2
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: long
+          displayName: long
+          primaryValue: 5
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 5
+    - rid: 7302563063765925925
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: buff
+        displayName: "\uAC15\uD654"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: attack
+          displayName: attack
+          primaryValue: 0.2
+          secondaryValue: 0
+          duration: 2
+          count: 1
+          cost: 4
+        - id: speed
+          displayName: speed
+          primaryValue: 0.25
+          secondaryValue: 1
+          duration: 2
+          count: 1
+          cost: 4
+    - rid: 7302563063765925926
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: debuff
+        displayName: "\uC57D\uD654"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: attack
+          displayName: attack
+          primaryValue: 0.2
+          secondaryValue: 0
+          duration: 2
+          count: 1
+          cost: 4
+        - id: slow
+          displayName: slow
+          primaryValue: 0.25
+          secondaryValue: 1
+          duration: 2
+          count: 1
+          cost: 4
+    - rid: 7302563063765925927
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: cleanse
+        displayName: "\uC815\uD654"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: one
+          displayName: one
+          primaryValue: 1
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 3
+        - id: all
+          displayName: all
+          primaryValue: 1
+          secondaryValue: 0
+          duration: 0
+          count: 8
+          cost: 7
+    - rid: 7302563063765925928
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: protect
+        displayName: "\uBCF4\uD638"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: brief
+          displayName: brief
+          primaryValue: 0.3
+          secondaryValue: 0
+          duration: 1
+          count: 1
+          cost: 4
+        - id: long
+          displayName: long
+          primaryValue: 0.35
+          secondaryValue: 0
+          duration: 3
+          count: 1
+          cost: 7
+    - rid: 7302563063765925929
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: reposition
+        displayName: "\uC704\uCE58 \uC774\uB3D9"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: one
+          displayName: one
+          primaryValue: 1
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 3
+        - id: two
+          displayName: two
+          primaryValue: 2
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 6
+    - rid: 7302563063765925930
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: multi_target
+        displayName: "\uB2E4\uC911 \uB300\uC0C1"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: two
+          displayName: two
+          primaryValue: 2
+          secondaryValue: 0
+          duration: 0
+          count: 2
+          cost: 3
+        - id: all
+          displayName: all
+          primaryValue: 1
+          secondaryValue: 0
+          duration: 0
+          count: 8
+          cost: 7
+    - rid: 7302563063765925931
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: conditional_amplify
+        displayName: "\uC870\uAC74\uBD80 \uC99D\uD3ED"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: wounded
+          displayName: wounded
+          primaryValue: 0.35
+          secondaryValue: 0.5
+          duration: 0
+          count: 1
+          cost: 4
+        - id: critical
+          displayName: critical
+          primaryValue: 0.7
+          secondaryValue: 0.25
+          duration: 0
+          count: 1
+          cost: 7
+    - rid: 7302563063765925932
+      type: {class: CharacterCombatSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: cooldown_adjust
+        displayName: "\uC7AC\uC0AC\uC6A9 \uC870\uC791"
+        allowedKinds: 010000000200000003000000
+        allowedTriggers: 000000000100000002000000030000000400000005000000
+        allowedTargets: 0000000001000000020000000300000004000000
+        variants:
+        - id: one
+          displayName: one
+          primaryValue: -1
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 4
+        - id: reset
+          displayName: reset
+          primaryValue: -99
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 9
+    - rid: 7302563063765925933
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: work_speed
+        displayName: "\uC791\uC5C5 \uC18D\uB3C4"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 0.1
+          secondaryValue: 0
+          duration: 1
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 0.25
+          secondaryValue: 0
+          duration: 1
+          count: 1
+          cost: 5
+    - rid: 7302563063765925934
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: output
+        displayName: "\uC0DD\uC0B0\uB7C9"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 0.1
+          secondaryValue: 0
+          duration: 1
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 0.3
+          secondaryValue: 0
+          duration: 1
+          count: 1
+          cost: 6
+    - rid: 7302563063765925935
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: cleaning
+        displayName: "\uCCAD\uACB0"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 5
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 15
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 5
+    - rid: 7302563063765925936
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: repair
+        displayName: "\uC218\uB9AC"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 8
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 25
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 6
+    - rid: 7302563063765925937
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: stock
+        displayName: "\uC7AC\uACE0"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 1
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 3
+        - id: large
+          displayName: large
+          primaryValue: 3
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 7
+    - rid: 7302563063765925938
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: research
+        displayName: "\uC5F0\uAD6C"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 5
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 18
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 6
+    - rid: 7302563063765925939
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: needs
+        displayName: "\uC695\uAD6C"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 5
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 15
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 5
+    - rid: 7302563063765925940
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: mood
+        displayName: "\uAE30\uBD84"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 3
+          secondaryValue: 0
+          duration: 180
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 8
+          secondaryValue: 0
+          duration: 180
+          count: 1
+          cost: 6
+    - rid: 7302563063765925941
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: relationship
+        displayName: "\uAD00\uACC4"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 2
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 2
+        - id: large
+          displayName: large
+          primaryValue: 7
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 5
+    - rid: 7302563063765925942
+      type: {class: CharacterManagementSkillModuleRule, ns: , asm: Assembly-CSharp}
+      data:
+        id: revenue
+        displayName: "\uC218\uC775"
+        allowedKinds: 0200000003000000
+        allowedTriggers: 060000000700000008000000090000000a000000
+        allowedTargets: 00000000010000000500000006000000
+        variants:
+        - id: small
+          displayName: small
+          primaryValue: 0.05
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 3
+        - id: large
+          displayName: large
+          primaryValue: 0.2
+          secondaryValue: 0
+          duration: 0
+          count: 1
+          cost: 7

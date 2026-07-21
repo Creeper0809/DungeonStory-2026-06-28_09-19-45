@@ -9,8 +9,8 @@ public sealed class GridBuildingObjectFactory : IGridBuildingObjectFactory
 {
     private const float CellWorldHeight = 3f;
     private const string HallwaySortingLayer = "DungeonHallway";
-    private const string MountedFixtureSortingLayer = "Wall";
-    private const int MountedFixtureSortingOrder = 102;
+    private const string MountedFixtureSortingLayer = "DungeonBackObject";
+    private const int MountedFixtureSortingOrder = 80;
 
     public BuildableObject Create(Grid grid, BuildingSO buildingData, Vector2Int selectPos)
     {
@@ -94,11 +94,25 @@ public sealed class GridBuildingObjectFactory : IGridBuildingObjectFactory
         };
         visualObject.transform.localScale = scale;
 
-        Vector3 desiredCenter = new Vector3(0f, visualSize.y * 0.5f, 0f);
+        Vector3 desiredCenter = new Vector3(
+            0f,
+            GetIndependentVisualCenterY(buildingData.layer, visualSize.y),
+            0f);
         Vector3 scaledBoundsCenter = new Vector3(
             sprite.bounds.center.x * scale.x,
             sprite.bounds.center.y * scale.y,
             0f);
         visualObject.transform.localPosition = desiredCenter - scaledBoundsCenter;
+    }
+
+    private static float GetIndependentVisualCenterY(GridLayer layer, float visualHeight)
+    {
+        float halfHeight = Mathf.Max(0.05f, visualHeight * 0.5f);
+        return layer switch
+        {
+            GridLayer.WallFixture => CellWorldHeight - halfHeight,
+            GridLayer.CeilingFixture => CellWorldHeight - halfHeight,
+            _ => halfHeight
+        };
     }
 }

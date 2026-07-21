@@ -18,18 +18,16 @@ public static class CodexTextFormatter
 
     public static string FormatFacilityRoles(FacilityRole roles)
     {
-        return string.Join(", ", Enum.GetValues(typeof(FacilityRole))
-            .Cast<FacilityRole>()
-            .Where((role) => role != FacilityRole.None && (roles & role) != 0)
-            .Select(FormatFacilityRole));
+        return string.Join(", ", FacilityRoleCatalog
+            .Enumerate(roles)
+            .Select((definition) => definition.RoomLabel));
     }
 
     public static string FormatWorkTypes(FacilityWorkType workTypes)
     {
-        return string.Join(", ", Enum.GetValues(typeof(FacilityWorkType))
-            .Cast<FacilityWorkType>()
-            .Where((workType) => workType != FacilityWorkType.None && (workTypes & workType) != 0)
-            .Select(FormatWorkType));
+        return string.Join(", ", WorkTypeCatalog
+            .Enumerate(workTypes)
+            .Select((definition) => definition.DisplayName));
     }
 
     public static string FormatDefenseConcept(DefenseAttackConcept concept)
@@ -80,79 +78,9 @@ public static class CodexTextFormatter
 
     public static IEnumerable<string> FormatDefenseEffects(DefenseFacilityData defense)
     {
-        IEnumerable<DefenseEffectData> effectData = defense.effects ?? Array.Empty<DefenseEffectData>();
-        if (defense.effectAssets != null && defense.effectAssets.Length > 0)
-        {
-            return defense.effectAssets
-                .Where((effect) => effect != null)
-                .Select((effect) => FormatEffect(effect.Kind, effect.Amount, effect.Duration, effect.Stacks));
-        }
-
-        return effectData.Select((effect) => FormatEffect(effect.kind, effect.amount, effect.duration, effect.stacks));
+        return (defense?.effectAssets ?? Array.Empty<DefenseEffectSO>())
+            .Where((effect) => effect != null)
+            .Select((effect) => effect.FormatSummary());
     }
 
-    private static string FormatFacilityRole(FacilityRole role)
-    {
-        return role switch
-        {
-            FacilityRole.Meal => "식사",
-            FacilityRole.Purchase => "구매",
-            FacilityRole.Rest => "휴식",
-            FacilityRole.Training => "훈련",
-            FacilityRole.Research => "연구",
-            FacilityRole.Mana => "마력",
-            FacilityRole.Logistics => "물류",
-            FacilityRole.Toilet => "Toilet",
-            FacilityRole.Hygiene => "Hygiene",
-            _ => role.ToString()
-        };
-    }
-
-    private static string FormatWorkType(FacilityWorkType workType)
-    {
-        return workType switch
-        {
-            FacilityWorkType.Operate => "근무",
-            FacilityWorkType.Restock => "보충",
-            FacilityWorkType.Repair => "수리",
-            FacilityWorkType.Clean => "청소",
-            FacilityWorkType.Research => "연구",
-            FacilityWorkType.Guard => "경비",
-            FacilityWorkType.Rescue => "구조",
-            FacilityWorkType.Rest => "휴식",
-            _ => workType.ToString()
-        };
-    }
-
-    private static string FormatEffect(DefenseEffectKind kind, float amount, float duration, int stacks)
-    {
-        string name = kind switch
-        {
-            DefenseEffectKind.Damage => "피해",
-            DefenseEffectKind.Corrosion => "방어력 감소",
-            DefenseEffectKind.Burn => "지속 피해",
-            DefenseEffectKind.Charge => "축전",
-            DefenseEffectKind.Slow => "감속",
-            DefenseEffectKind.GuardAttack => "근접 교전",
-            _ => kind.ToString()
-        };
-
-        List<string> parts = new List<string> { name };
-        if (amount > 0f)
-        {
-            parts.Add($"{amount:0.#}");
-        }
-
-        if (duration > 0f)
-        {
-            parts.Add($"{duration:0.#}초");
-        }
-
-        if (stacks > 1)
-        {
-            parts.Add($"{stacks}중첩");
-        }
-
-        return string.Join(" ", parts);
-    }
 }

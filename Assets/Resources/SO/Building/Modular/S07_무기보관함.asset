@@ -37,9 +37,16 @@ MonoBehaviour:
       Entry: 6
       Data: 
   id: 1018
-  objectName: "\uBB34\uAE30 \uBCF4\uAD00\uD568"
+  objectName: "\uBB34\uAE30\uBCF4\uAD00\uD568"
   sprite: {fileID: 21300000, guid: bb82a95e74703b34ea342e709a786c15, type: 3}
   icon: {fileID: 21300000, guid: bb82a95e74703b34ea342e709a786c15, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562995605602398
+    - rid: 7302562995605602399
+    - rid: 7302562995605602400
+    - rid: 7302562995605602401
+    - rid: 7302562995605602402
   width: 1
   height: 1
   layer: 1
@@ -48,72 +55,49 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 1
-  facility:
-    roles: 0
-    capacity: 0
-    useDuration: 0
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 0
-    supportedWorkTypes: 0
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 0
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Storage
-    - Security
-    scores:
-    - key: Storage
-      value: 2.5
-    - key: Security
-      value: 2.5
-    metrics: []
-  operational:
-    code: S07
-    functions: 67108897
-    recovery:
-      sleep: 0
-      mood: 0
-      fun: 0
-      hunger: 0
-      excretion: 0
-      hygiene: 0
-    storageCategory: 2
-    storageCapacity: 16
-    seatCapacity: 0
-    tableCapacity: 0
-    serviceCapacity: 0
-    workOutputAmount: 0
-    constructionCost: 60
-    unlockPhase: 1
-    demolitionRefundRate: 0.5
-    lightIntensity: 0
-    lightRadius: 0
+  facilityAnchors:
+    slots: []
   unlocked: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562995605602398
+      type: {class: BuildingFacilityPartAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityPartAbility
+        code: S07
+    - rid: 7302562995605602399
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 60
+        maintenance: 1
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302562995605602400
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Storage
+          - Security
+          scores:
+          - key: Storage
+            value: 2.5
+          - key: Security
+            value: 2.5
+          metrics: []
+    - rid: 7302562995605602401
+      type: {class: BuildingStorageAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingStorageAbility
+        category: 2
+        capacity: 16
+        allCategories: 0
+    - rid: 7302562995605602402
+      type: {class: BuildingRetailAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRetailAbility
+        category: 2

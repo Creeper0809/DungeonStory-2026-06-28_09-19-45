@@ -162,7 +162,7 @@ public static class FacilityDebugScenarios
 
         return warehouseBuilding is IWarehouseFacility warehouse
             && warehouse.HasWarehouseInventory
-            && warehouse.Inventory.TotalStock == warehouseBuilding.Facility.internalStockMax
+            && warehouse.Inventory.TotalStock == warehouseBuilding.GetInternalStockCapacity()
             && warehouse.Inventory.GetStock(StockCategory.Food) > 0
             && warehouse.Inventory.GetStock(StockCategory.Weapon) > 0
             && warehouse.Inventory.GetStock(StockCategory.Mana) > 0;
@@ -348,7 +348,7 @@ public static class FacilityDebugScenarios
                 buildingData.Placement.Layer,
                 buildingData.GetGridPosList(position),
                 buildingData.Placement.IsMovement);
-            if (building.Facility != null && building.Facility.requiresRoomRole)
+            if (building.BuildingData.RequiresRoomRole())
             {
                 PlaceRoomDoorsFor(building);
             }
@@ -391,9 +391,9 @@ public static class FacilityDebugScenarios
             buildingData.height = 1;
             buildingData.layer = GridLayer.Building;
             buildingData.category = BuildingCategory.None;
-            buildingData.type = typeof(BuildableObject);
+            buildingData.type = typeof(Door);
             buildingData.unlocked = true;
-            buildingData.facility = new FacilityData();
+            buildingData.Facility = new FacilityData();
 
             GameObject obj = new GameObject("Room Boundary Door");
             objects.Add(obj);
@@ -421,7 +421,8 @@ public static class FacilityDebugScenarios
                     gameDataProvider,
                     ShopStockCatalogService,
                     FloatingNumberFeedbackService,
-                    WorkforceReplanService);
+                    WorkforceReplanService,
+                    FacilityCrimeEditorTestDependencies.Evaluator);
             }
         }
 
@@ -567,6 +568,10 @@ public static class FacilityDebugScenarios
     private sealed class NoopWorkforceReplanService : IWorkforceReplanService
     {
         public void RequestIdleWorkersToReplan(bool clearFailures = true)
+        {
+        }
+
+        public void RequestOneWorkerToReplanFor(FacilityWorkType workType, bool clearFailures = true)
         {
         }
     }

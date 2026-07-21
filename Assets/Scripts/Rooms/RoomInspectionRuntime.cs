@@ -558,7 +558,7 @@ internal sealed class RoomInspectionView : IDisposable
         SetTopRect(contributorHeader.rectTransform, 16f, 350f, 16f, 22f);
         contributorsText = CreateText(panelRect, "RoomContributors", fontService, 14f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
         contributorsText.textWrappingMode = TextWrappingModes.Normal;
-        contributorsText.overflowMode = TextOverflowModes.Ellipsis;
+        contributorsText.overflowMode = TextOverflowModes.Truncate;
         SetTopRect(contributorsText.rectTransform, 16f, 374f, 16f, 52f);
         PanelObject.SetActive(false);
     }

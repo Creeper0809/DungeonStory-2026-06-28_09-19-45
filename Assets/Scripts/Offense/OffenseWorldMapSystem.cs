@@ -14,13 +14,13 @@ public class OffenseWorldMapRuntime : MonoBehaviour
     private List<OffenseTargetDefinition> targets;
     private IOffensePanelService panelService;
 
-    public OffenseWorldMapState State => state;
-    public IReadOnlyList<OffenseTargetDefinition> Targets
+    public IOffenseWorldMapStateView State => state;
+    public IReadOnlyList<OffenseTargetDefinition> TargetDefinitions
     {
         get
         {
             EnsureInitialized();
-            return targets;
+            return Array.AsReadOnly(targets.ToArray());
         }
     }
 
@@ -34,6 +34,14 @@ public class OffenseWorldMapRuntime : MonoBehaviour
     }
 
     public float CurrentScanRange => OffenseWorldMapService.GetScanRange(state.ReconLevel);
+    public int CampaignTargetCount
+    {
+        get
+        {
+            EnsureInitialized();
+            return targets.Count;
+        }
+    }
 
     [Inject]
     public void Construct(IOffensePanelService panelService)
@@ -52,6 +60,49 @@ public class OffenseWorldMapRuntime : MonoBehaviour
         state.Reset(reconLevel);
         targets = OffenseWorldMapService.NormalizeTargets(configuredTargets).ToList();
         OffenseWorldMapService.RevealTargetsInRange(state, targets);
+        RaiseChanged();
+    }
+
+    public void RestorePersistentState(
+        int reconLevel,
+        string selectedTargetId,
+        IEnumerable<string> knownTargetIds)
+    {
+        RestorePersistentState(
+            reconLevel,
+            selectedTargetId,
+            knownTargetIds,
+            Array.Empty<string>(),
+            string.Empty);
+    }
+
+    public void RestorePersistentState(
+        int reconLevel,
+        string selectedTargetId,
+        IEnumerable<string> knownTargetIds,
+        IEnumerable<string> completedTargetIds,
+        string revealedTruthTargetId)
+    {
+        EnsureInitialized();
+        Dictionary<string, OffenseTargetDefinition> validTargets = targets
+            .Where(target => target != null)
+            .GroupBy(target => target.id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        HashSet<string> validTargetIds = new HashSet<string>(
+            validTargets.Keys,
+            StringComparer.Ordinal);
+        string validTruthTargetId = validTargets.TryGetValue(
+                revealedTruthTargetId ?? string.Empty,
+                out OffenseTargetDefinition truthTarget)
+            && truthTarget.revealsTruth
+                ? truthTarget.id
+                : string.Empty;
+        state.Restore(
+            reconLevel,
+            selectedTargetId,
+            (knownTargetIds ?? Array.Empty<string>()).Where(validTargetIds.Contains),
+            (completedTargetIds ?? Array.Empty<string>()).Where(validTargetIds.Contains),
+            validTruthTargetId);
         RaiseChanged();
     }
 
@@ -83,8 +134,14 @@ public class OffenseWorldMapRuntime : MonoBehaviour
             return false;
         }
 
+        if (!OffenseWorldMapService.CanAttemptTarget(state, target, out message))
+        {
+            snapshot = target.ToSnapshot(preciseIntel, state);
+            return false;
+        }
+
         state.SetSelectedTarget(target.id);
-        snapshot = target.ToSnapshot(preciseIntel);
+        snapshot = target.ToSnapshot(preciseIntel, state);
         message = $"{snapshot.title} 선택";
         OffenseTargetSelectedEvent.Trigger(snapshot);
         RaiseChanged();
@@ -101,7 +158,66 @@ public class OffenseWorldMapRuntime : MonoBehaviour
             return false;
         }
 
-        snapshot = target.ToSnapshot(preciseIntel);
+        snapshot = target.ToSnapshot(preciseIntel, state);
+        return true;
+    }
+
+    public bool TryRecordSuccessfulExpedition(
+        string targetId,
+        out OffenseTargetSnapshot completedTarget,
+        out string message)
+    {
+        EnsureInitialized();
+        OffenseTargetDefinition target = targets.FirstOrDefault(candidate =>
+            candidate != null
+            && string.Equals(candidate.id, targetId, StringComparison.Ordinal));
+        if (target == null || !state.KnowTarget(targetId))
+        {
+            completedTarget = null;
+            message = "알 수 없는 오펜스 목표입니다.";
+            return false;
+        }
+
+        if (!OffenseWorldMapService.CanAttemptTarget(state, target, out message)
+            || !state.MarkTargetCompleted(target.id))
+        {
+            completedTarget = target.ToSnapshot(preciseIntel, state);
+            return false;
+        }
+
+        if (target.revealsTruth)
+        {
+            state.RevealTruth(target.id);
+        }
+
+        completedTarget = target.ToSnapshot(preciseIntel, state);
+        message = target.revealsTruth
+            ? "최종 오펜스를 마치고 던전의 진실을 밝혔습니다."
+            : $"오펜스 목표 완료 {state.CompletedTargetCount}/{targets.Count}";
+        RaiseChanged();
+        OffenseCampaignProgressedEvent.Trigger(
+            completedTarget,
+            state.CompletedTargetCount,
+            targets.Count);
+
+        if (target.revealsTruth)
+        {
+            EventAlertService.Raise(
+                OffenseWorldMapService.TruthTitle,
+                target.truthText,
+                EventAlertImportance.High,
+                "오펜스");
+            OffenseTruthRevealedEvent.Trigger(target.id, OffenseWorldMapService.TruthTitle, target.truthText);
+        }
+        else
+        {
+            EventAlertService.Raise(
+                "오펜스 진척",
+                message,
+                EventAlertImportance.Medium,
+                "오펜스");
+        }
+
         return true;
     }
 
@@ -212,6 +328,13 @@ public class OffenseWorldMapPanel : MonoBehaviour
                 Render();
             });
         spawnedButtons.Add(upgradeButton);
+
+        GameObject closeButton = RequireButtonFactory().CreateButton(
+            targetButtonRoot,
+            "닫기",
+            17f,
+            Hide);
+        spawnedButtons.Add(closeButton);
 
         if (runtime.VisibleTargets.Count == 0)
         {

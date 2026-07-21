@@ -15,14 +15,18 @@ public static class FacilityEvolutionDebugScenarios
     public static bool RunAll(bool log = false)
     {
         List<string> errors = new List<string>();
-        RunScenario("P1 evolution assets are generated and loadable", VerifyP1EvolutionAssets, errors);
+        RunScenario("Modular strategy evolution assets are generated and loadable", VerifyP1EvolutionAssets, errors);
         RunScenario("Room profile separates crowded and fine dining", VerifyDiningProfilesSeparateCrowdedAndFineDining, errors);
+        RunScenario("Record metrics cannot override room-owned metrics", VerifyRecordMetricsCannotOverrideRoomOwnedMetrics, errors);
+        RunScenario("Profile and record views reject external mutation", VerifyProfileAndRecordViewsRejectExternalMutation, errors);
         RunScenario("Identity pressure scores room lineage direction", VerifyIdentityPressureScoresRoomLineageDirection, errors);
         RunScenario("Record token consume policy preserves configured history tokens", VerifyRecordTokenConsumePolicyPreservesHistoryTokens, errors);
+        RunScenario("Warehouse resources aggregate and consume atomically", VerifyWarehouseResourcesAggregateAndConsumeAtomically, errors);
         RunScenario("Mutation resolver gates suggestions by evidence", VerifyMutationResolverGatesSuggestionsByEvidence, errors);
         RunScenario("Context gates evolution candidates", VerifyContextGatesEvolutionCandidates, errors);
         RunScenario("Validation checks expose candidate condition state", VerifyValidationChecksExposeCandidateConditionState, errors);
         RunScenario("LLM proposal filters ids and orders valid candidates", VerifyLlmProposalFiltersIdsAndOrdersCandidates, errors);
+        RunScenario("Evolution overview stays rule based and does not enqueue LLM work", VerifyOverviewDoesNotRequestLlm, errors);
         RunScenario("Runtime events build evolution records", VerifyRuntimeEventsBuildEvolutionRecords, errors);
         RunScenario("Evolution replaces facility and preserves lineage records", VerifyEvolutionReplacesFacilityAndPreservesLineageRecords, errors);
         RunScenario("Failed evolution keeps original facility", VerifyFailedEvolutionKeepsOriginalFacility, errors);
@@ -61,34 +65,56 @@ public static class FacilityEvolutionDebugScenarios
     private static bool VerifyP1EvolutionAssets()
     {
         P1FacilityEvolutionAssetBuilder.EnsureP1EvolutionAssets();
-        FacilityEvolutionRecipeSO[] recipes = Resources.LoadAll<FacilityEvolutionRecipeSO>("SO/FacilityEvolution");
-        FacilityEvolutionRecipeSO battleDining = recipes.FirstOrDefault((recipe) =>
-            recipe != null && recipe.EffectiveId == "evolve_meat_restaurant_to_battle_dining");
-        BuildingSO meatRestaurant = Resources.LoadAll<BuildingSO>("SO/Building/P1")
-            .FirstOrDefault((building) => building != null && building.name == "P1_MeatRestaurant");
-        BuildingSO trainingRoom = Resources.LoadAll<BuildingSO>("SO/Building/P1")
-            .FirstOrDefault((building) => building != null && building.name == "P1_TrainingRoom");
+        FacilityEvolutionRecipeSO[] recipes = AssetDatabase
+            .FindAssets(
+                "t:FacilityEvolutionRecipeSO",
+                new[] { "Assets/Resources/SO/FacilityEvolution/P1" })
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Select(AssetDatabase.LoadAssetAtPath<FacilityEvolutionRecipeSO>)
+            .Where(recipe => recipe != null)
+            .ToArray();
+        FacilityEvolutionRecipeSO alchemy = recipes.FirstOrDefault(recipe =>
+            recipe.EffectiveId == "evolve_research_desk_to_alchemy_bench");
         FacilityEvolutionRecordTokenDefinitionSO mercenaryToken =
             Resources.LoadAll<FacilityEvolutionRecordTokenDefinitionSO>("SO/FacilityEvolution")
                 .FirstOrDefault((definition) =>
                     definition != null
                     && definition.EffectiveId == FacilityEvolutionTerms.MercenaryHangout);
 
-        return recipes.Length >= 4
-            && battleDining != null
-            && battleDining.HasValidData
-            && battleDining.resultBuilding != null
-            && battleDining.requiredRoomScores.Any((requirement) => requirement.key == FacilityEvolutionTerms.Dining)
-            && battleDining.requiredRecordTokens.Any((requirement) => requirement.key == FacilityEvolutionTerms.MercenaryHangout)
-            && battleDining.identityPressureWeights.Any((weight) => weight.key == FacilityEvolutionTerms.Combat)
-            && battleDining.minimumIdentityScore > 0f
+        return recipes.Length == 6
+            && recipes.All(recipe => recipe.HasValidData
+                && recipe.requireUsableRoom
+                && recipe.requiredUniqueFixtures.Length > 0
+                && IsModularBuilding(recipe.resultBuilding)
+                && recipe.fromFacilities.All(IsModularBuilding))
+            && recipes.Count(recipe => recipe.EffectiveId.Contains("commercial", StringComparison.Ordinal)
+                || recipe.EffectiveId.Contains("shop", StringComparison.Ordinal)) == 2
+            && recipes.Count(recipe => recipe.EffectiveId.Contains("guard", StringComparison.Ordinal)
+                || recipe.EffectiveId.Contains("training", StringComparison.Ordinal)) == 2
+            && recipes.Count(recipe => recipe.EffectiveId.Contains("research", StringComparison.Ordinal)
+                || recipe.EffectiveId.Contains("mana", StringComparison.Ordinal)) == 2
+            && alchemy != null
+            && alchemy.requiredRoomScores.Any(requirement => requirement.key == FacilityEvolutionTerms.Research)
+            && alchemy.identityPressureWeights.Any(weight => weight.key == FacilityEvolutionTerms.Ritual)
+            && alchemy.minimumIdentityScore > 0f
             && mercenaryToken != null
             && mercenaryToken.consumePolicy == FacilityEvolutionRecordTokenConsumePolicy.Preserve
             && mercenaryToken.recipeTags.Contains(FacilityEvolutionTerms.Combat)
-            && meatRestaurant != null
-            && meatRestaurant.Evolution.HasExplicitData
-            && trainingRoom != null
-            && trainingRoom.Evolution.HasExplicitData;
+            && LoadModularBuilding("G04_전술지도탁자").Facility.SupportsRole(FacilityRole.Security);
+    }
+
+    private static bool IsModularBuilding(BuildingSO building)
+    {
+        return building != null
+            && AssetDatabase.GetAssetPath(building).StartsWith(
+                "Assets/Resources/SO/Building/Modular/",
+                StringComparison.Ordinal);
+    }
+
+    private static BuildingSO LoadModularBuilding(string assetName)
+    {
+        return AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            $"Assets/Resources/SO/Building/Modular/{assetName}.asset");
     }
 
     private static bool VerifyDiningProfilesSeparateCrowdedAndFineDining()
@@ -109,6 +135,76 @@ public static class FacilityEvolutionDebugScenarios
             && fineProfile.GetMetric(FacilityEvolutionTerms.AverageSeatSpacing) > crowdedProfile.GetMetric(FacilityEvolutionTerms.AverageSeatSpacing)
             && crowdedProfile.GetIdentityPressure(FacilityEvolutionTerms.Crowd) > fineProfile.GetIdentityPressure(FacilityEvolutionTerms.Crowd)
             && fineProfile.GetIdentityPressure(FacilityEvolutionTerms.Luxury) > crowdedProfile.GetIdentityPressure(FacilityEvolutionTerms.Luxury);
+    }
+
+    private static bool VerifyRecordMetricsCannotOverrideRoomOwnedMetrics()
+    {
+        using EvolutionScenarioWorld fine = EvolutionScenarioWorld.CreateFineDining();
+        FacilityEvolutionRecordComponent record = fine.SourceFacility.GetComponent<FacilityEvolutionRecordComponent>()
+            ?? fine.SourceFacility.gameObject.AddComponent<FacilityEvolutionRecordComponent>();
+        record.SetMetric(FacilityEvolutionTerms.SeatCount, 0f);
+        record.SetMetric(FacilityEvolutionTerms.LuxuryPerSeat, 999f);
+        record.SetMetric(FacilityEvolutionTerms.AverageSatisfaction, 87f);
+
+        IFacilityEvolutionRecordProvider records =
+            new FacilityEvolutionRecordComponentService(new FacilityEvolutionRecordComponentFactory());
+        RoomProfile profile = new RoomProfileBuilder(records, new RoomLayoutCache()).Build(fine.SourceFacility);
+
+        return profile.GetMetric(FacilityEvolutionTerms.SeatCount) > 0f
+            && profile.GetMetric(FacilityEvolutionTerms.LuxuryPerSeat) < 999f
+            && Mathf.Approximately(profile.GetMetric(FacilityEvolutionTerms.AverageSatisfaction), 87f);
+    }
+
+    private static bool VerifyProfileAndRecordViewsRejectExternalMutation()
+    {
+        RoomProfile profile = new RoomProfile(null, null);
+        profile.AddMetric("metric:test", 3f);
+        profile.AddTag("tag:test");
+        profile.AddRecentEvent("before");
+
+        FacilityEvolutionRecord record = new FacilityEvolutionRecord();
+        record.AddMetric("metric:test", 4f);
+        record.AddToken("token:test", 2);
+        record.AddEvent("before");
+
+        bool profileMetricBlocked = MutationThrows(
+            () => ((IDictionary<string, float>)profile.Metrics)["metric:test"] = 99f);
+        bool profileTagBlocked = MutationThrows(
+            () => ((IList<string>)profile.Tags)[0] = "after");
+        bool profileEventBlocked = MutationThrows(
+            () => ((IList<string>)profile.RecentEvents)[0] = "after");
+        bool recordMetricBlocked = MutationThrows(
+            () => ((IDictionary<string, float>)record.Metrics)["metric:test"] = 99f);
+        bool recordTokenBlocked = MutationThrows(
+            () => ((IDictionary<string, int>)record.Tokens)["token:test"] = 99);
+        bool recordEventBlocked = MutationThrows(
+            () => ((IList<string>)record.RecentEvents)[0] = "after");
+
+        return profileMetricBlocked
+            && profileTagBlocked
+            && profileEventBlocked
+            && recordMetricBlocked
+            && recordTokenBlocked
+            && recordEventBlocked
+            && Mathf.Approximately(profile.GetMetric("metric:test"), 3f)
+            && profile.HasTag("tag:test")
+            && profile.RecentEvents[0] == "before"
+            && Mathf.Approximately(record.GetMetric("metric:test"), 4f)
+            && record.GetToken("token:test") == 2
+            && record.RecentEvents[0] == "before";
+    }
+
+    private static bool MutationThrows(Action mutation)
+    {
+        try
+        {
+            mutation();
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            return true;
+        }
     }
 
     private static bool VerifyIdentityPressureScoresRoomLineageDirection()
@@ -174,6 +270,33 @@ public static class FacilityEvolutionDebugScenarios
         return success
             && copiedRecord != null
             && copiedRecord.GetToken(FacilityEvolutionTerms.MercenaryHangout) == 2;
+    }
+
+    private static bool VerifyWarehouseResourcesAggregateAndConsumeAtomically()
+    {
+        WarehouseInventory first = new WarehouseInventory(10);
+        WarehouseInventory second = new WarehouseInventory(10);
+        first.AddStock(StockCategory.General, 2);
+        second.AddStock(StockCategory.General, 3);
+        WarehouseFacilityEvolutionResourceProvider provider =
+            new WarehouseFacilityEvolutionResourceProvider(
+                new StaticWarehouseInventoryQuery(first, second));
+        string materialId = StockCategoryPersistenceId.ToId(StockCategory.General);
+
+        bool hadCombinedStock = provider.HasMaterial(materialId, 5);
+        bool consumed = provider.ConsumeMaterial(materialId, 4);
+        int afterConsume = first.GetStock(StockCategory.General)
+            + second.GetStock(StockCategory.General);
+        bool rejectedWithoutPartialWithdrawal = !provider.ConsumeMaterial(materialId, 2);
+        int afterRejectedConsume = first.GetStock(StockCategory.General)
+            + second.GetStock(StockCategory.General);
+
+        return hadCombinedStock
+            && consumed
+            && afterConsume == 1
+            && rejectedWithoutPartialWithdrawal
+            && afterRejectedConsume == 1
+            && !provider.HasMaterial("unknown-material", 1);
     }
 
     private static bool VerifyMutationResolverGatesSuggestionsByEvidence()
@@ -302,6 +425,34 @@ public static class FacilityEvolutionDebugScenarios
             && first.ProposalStatusMessage.Contains("mutations=1")
             && first.Reason.Contains("용병 기록")
             && first.FlavorText.Contains("무용담");
+    }
+
+    private static bool VerifyOverviewDoesNotRequestLlm()
+    {
+        using EvolutionScenarioWorld world = EvolutionScenarioWorld.CreateCombatDining();
+        FacilityEvolutionRecipeSO recipe = CreateCombatRecipe(
+            world.SourceData,
+            world.CombatResultData,
+            consumeRecordToken: false);
+        FakeLlmRuntime fakeLlm = new FakeLlmRuntime("{}");
+        CachedLocalLlmFacilityEvolutionProposalProvider proposalProvider =
+            new CachedLocalLlmFacilityEvolutionProposalProvider(
+                new RuleBasedFacilityEvolutionProposalProvider(),
+                () => fakeLlm,
+                allowRequestsOutsidePlayMode: true);
+        FacilityEvolutionEngine engine = world.CreateEngine(
+            new StaticFacilityEvolutionRecipeProvider(recipe),
+            new MemoryFacilityEvolutionResourceProvider(),
+            proposalProvider);
+
+        IReadOnlyList<FacilityEvolutionCandidate> candidates = engine.GetCandidates(
+            world.SourceFacility,
+            includeRejected: true,
+            requestLlmProposal: false);
+
+        return fakeLlm.FacilityEvolutionRequestCount == 0
+            && candidates.Count == 1
+            && candidates[0].ProposalSource == FacilityEvolutionProposalSources.RuleBased;
     }
 
     private static bool VerifyRuntimeEventsBuildEvolutionRecords()
@@ -686,8 +837,8 @@ public static class FacilityEvolutionDebugScenarios
         data.characterType = type;
         data.role = CharacterRole.Regular;
         data.baseStats = CharacterStatBlock.CreateDefault();
-        data.baseStats.attack = attack;
-        data.baseStats.sales = sales;
+        data.baseStats.Set(CharacterStatType.Attack, attack);
+        data.baseStats.Set(CharacterStatType.Sales, sales);
 
         GameObject obj = new GameObject(name);
         world.TrackObject(obj);
@@ -695,6 +846,7 @@ public static class FacilityEvolutionDebugScenarios
         actor.EnsureRuntimeState();
         actor.data = data;
         actor.characterType = type;
+        actor.Identity.SetPersistentId($"facility-evolution-test:{data.id}");
         actor.stats = new Dictionary<CharacterCondition, float>
         {
             { CharacterCondition.SLEEP, 90f },
@@ -742,6 +894,22 @@ public static class FacilityEvolutionDebugScenarios
             return definitions.FirstOrDefault((definition) =>
                 definition != null
                 && string.Equals(definition.EffectiveId, tokenId, StringComparison.Ordinal));
+        }
+    }
+
+    private sealed class StaticWarehouseInventoryQuery :
+        IFacilityEvolutionWarehouseInventoryQuery
+    {
+        private readonly IReadOnlyList<WarehouseInventory> inventories;
+
+        public StaticWarehouseInventoryQuery(params WarehouseInventory[] inventories)
+        {
+            this.inventories = inventories ?? Array.Empty<WarehouseInventory>();
+        }
+
+        public IReadOnlyList<WarehouseInventory> GetInventories()
+        {
+            return inventories;
         }
     }
 
@@ -998,6 +1166,7 @@ public static class FacilityEvolutionDebugScenarios
         {
             BuildingSO data = CreateBuildingData("문", FacilityRole.None);
             data.category = BuildingCategory.None;
+            data.type = typeof(Door);
             Place(data, position);
         }
 
@@ -1067,7 +1236,7 @@ public static class FacilityEvolutionDebugScenarios
             FacilityEvolutionValue[] metrics)
         {
             BuildingSO data = CreateBuildingData(name, FacilityRole.None);
-            data.evolution = new FacilityEvolutionContributionData
+            data.Evolution = new FacilityEvolutionContributionData
             {
                 contributesToRoomProfile = true,
                 tags = tags,
@@ -1090,14 +1259,18 @@ public static class FacilityEvolutionDebugScenarios
             data.category = roles == FacilityRole.None ? BuildingCategory.None : BuildingCategory.Special;
             data.type = roles == FacilityRole.None ? typeof(BuildableObject) : typeof(Facility);
             data.unlocked = true;
-            data.facility = new FacilityData
+            data.Facility = new FacilityData
             {
                 roles = roles,
                 capacity = roles == FacilityRole.None ? 0 : 4,
                 useDuration = roles == FacilityRole.None ? 0f : 1f,
-                disabledWhenDamaged = true,
-                requiresRoomRole = roles != FacilityRole.None
+                disabledWhenDamaged = true
             };
+            if (roles != FacilityRole.None)
+            {
+                data.AbilityModules.Add(new BuildingRoomRequirementAbility());
+            }
+
             return data;
         }
 
@@ -1279,6 +1452,12 @@ public static class FacilityEvolutionDebugScenarios
 
         public int FacilityEvolutionRequestCount { get; private set; }
         public string LastPrompt { get; private set; }
+
+        public bool GenerateCharacterSkillAsync(string prompt, Action<LocalLlmResult> callback)
+        {
+            callback?.Invoke(Failed("CharacterSkill not supported by fake LLM."));
+            return false;
+        }
 
         public bool GeneratePersonaAsync(string prompt, Action<LocalLlmResult> callback)
         {

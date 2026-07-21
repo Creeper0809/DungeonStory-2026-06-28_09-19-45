@@ -40,6 +40,13 @@ MonoBehaviour:
   objectName: "\uD6C8\uB828\uC7A5"
   sprite: {fileID: 21300000, guid: 75f5092174f592e289308154c616436c, type: 3}
   icon: {fileID: 21300000, guid: 75f5092174f592e289308154c616436c, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562978982527558
+    - rid: 7302562985835495548
+    - rid: 7302562985835495549
+    - rid: 7302562987322638433
+    - rid: 7302562987322638825
   width: 4
   height: 1
   layer: 1
@@ -48,53 +55,51 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 0
-  facility:
-    roles: 8
-    capacity: 2
-    useDuration: 2
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 1
-    supportedWorkTypes: 37
-    preferredSpeciesTags:
-    - Orc
-    dislikedSpeciesTags:
-    - Slime
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 1
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Training
-    - Combat
-    scores:
-    - key: Training
-      value: 30
-    - key: Combat
-      value: 16
-    metrics: []
+  facilityAnchors:
+    slots: []
   unlocked: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562978982527558
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 8
+          capacity: 2
+          useDuration: 2
+          requiredWorkers: 1
+          supportedWorkTypes: 37
+          disabledWhenDamaged: 1
+    - rid: 7302562985835495548
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562985835495549
+      type: {class: BuildingSelfContainedRoomAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSelfContainedRoomAbility
+    - rid: 7302562987322638433
+      type: {class: BuildingSpeciesAffinityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSpeciesAffinityAbility
+        preferredTags:
+        - Orc
+        dislikedTags:
+        - Slime
+    - rid: 7302562987322638825
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Training
+          - Combat
+          scores:
+          - key: Training
+            value: 30
+          - key: Combat
+            value: 16
+          metrics: []

@@ -11,11 +11,17 @@ public class CharacterLog : SerializedMonoBehaviour
     [SerializeField]
     [ReadOnly]
     private List<string> log;
+    [SerializeField]
+    [ReadOnly]
+    private List<CharacterActivityEvent> activities;
 
     private Dictionary<string, int> logTagCounts;
     [NonSerialized] private List<int> logEntryIds;
     [NonSerialized] private HashSet<int> pendingDisplayEntryIds;
+    [NonSerialized] private HashSet<int> hiddenEntryIds;
     [NonSerialized] private List<string> visibleEntries;
+    [NonSerialized] private IReadOnlyList<string> visibleEntriesView;
+    [NonSerialized] private IReadOnlyList<CharacterActivityEvent> activityEntriesView;
     [NonSerialized] private bool visibleEntriesDirty = true;
     [NonSerialized] private int nextEntryId;
     private string lastLogTag;
@@ -27,7 +33,15 @@ public class CharacterLog : SerializedMonoBehaviour
         {
             EnsureLog();
             RebuildVisibleEntriesIfNeeded();
-            return visibleEntries;
+            return visibleEntriesView;
+        }
+    }
+    public IReadOnlyList<CharacterActivityEvent> ActivityEntries
+    {
+        get
+        {
+            EnsureLog();
+            return activityEntriesView;
         }
     }
     public event Action<CharacterLogEntry> OnLogAdded;
@@ -52,28 +66,79 @@ public class CharacterLog : SerializedMonoBehaviour
 
     public void AddLog(string message)
     {
-        if (string.IsNullOrWhiteSpace(message)) return;
+        AddActivity(CharacterActivityEvent.FreeText(message));
+    }
+
+    public void RestoreVisibleEntries(IEnumerable<string> entries)
+    {
+        EnsureLog();
+        log.Clear();
+        activities.Clear();
+        logTagCounts.Clear();
+        logEntryIds.Clear();
+        pendingDisplayEntryIds.Clear();
+        hiddenEntryIds.Clear();
+        visibleEntries.Clear();
+        lastLogTag = string.Empty;
+        nextEntryId = 0;
+
+        List<string> restored = entries?
+            .Where(entry => !string.IsNullOrWhiteSpace(entry))
+            .Select(entry => entry.Trim())
+            .TakeLast(80)
+            .ToList() ?? new List<string>();
+        foreach (string entry in restored)
+        {
+            log.Add(entry);
+            activities.Add(CharacterActivityEvent.FreeText(entry, narrativeEligible: false));
+            logEntryIds.Add(++nextEntryId);
+        }
+
+        visibleEntriesDirty = true;
+        OnLogDisplayChanged?.Invoke();
+    }
+
+    public void AddActivity(CharacterActivityEvent activity)
+    {
+        if (activity == null)
+        {
+            return;
+        }
 
         EnsureLog();
-        string tag = CharacterLogUtility.ToCauseTag(message);
-        int count = lastLogTag == tag && logTagCounts.TryGetValue(tag, out int currentCount)
+        activity = activity.WithActor(GetComponent<CharacterActor>());
+        string semanticKey = activity.AggregationKey;
+        string displayText = CharacterActivityFormatter.Format(activity);
+        int count = lastLogTag == semanticKey
+            && logTagCounts.TryGetValue(semanticKey, out int currentCount)
             ? currentCount + 1
             : 1;
-        logTagCounts[tag] = count;
+        logTagCounts[semanticKey] = count;
 
-        string line = count > 1 ? $"{tag} x{count}" : tag;
+        string line = count > 1 ? $"{displayText} x{count}" : displayText;
         int entryId;
-        if (lastLogTag == tag && log.Count > 0)
+        if (lastLogTag == semanticKey && log.Count > 0)
         {
             log[log.Count - 1] = line;
+            activities[activities.Count - 1] = activity;
             entryId = logEntryIds[logEntryIds.Count - 1];
         }
         else
         {
             log.Add(line);
+            activities.Add(activity);
             entryId = ++nextEntryId;
             logEntryIds.Add(entryId);
-            lastLogTag = tag;
+            lastLogTag = semanticKey;
+        }
+
+        if (activity.VisibleToPlayer)
+        {
+            hiddenEntryIds.Remove(entryId);
+        }
+        else
+        {
+            hiddenEntryIds.Add(entryId);
         }
 
         visibleEntriesDirty = true;
@@ -83,10 +148,17 @@ public class CharacterLog : SerializedMonoBehaviour
         {
             int removeCount = log.Count - maxLogCount;
             log.RemoveRange(0, removeCount);
+            activities.RemoveRange(0, removeCount);
             logEntryIds.RemoveRange(0, removeCount);
         }
 
-        CharacterLogEntry entry = new CharacterLogEntry(entryId, tag, line, count, message);
+        CharacterLogEntry entry = new CharacterLogEntry(
+            entryId,
+            activity.KindId,
+            line,
+            count,
+            displayText,
+            activity);
         bool wasPending = pendingDisplayEntryIds.Contains(entryId);
         bool deferDisplay = narrativeService != null
             && narrativeService.ShouldDeferDisplay(entry);
@@ -159,10 +231,24 @@ public class CharacterLog : SerializedMonoBehaviour
     private void EnsureLog()
     {
         log ??= new List<string>();
+        activities ??= new List<CharacterActivityEvent>();
         logTagCounts ??= new Dictionary<string, int>();
         logEntryIds ??= new List<int>();
         pendingDisplayEntryIds ??= new HashSet<int>();
+        hiddenEntryIds ??= new HashSet<int>();
         visibleEntries ??= new List<string>();
+        visibleEntriesView ??= visibleEntries.AsReadOnly();
+        activityEntriesView ??= activities.AsReadOnly();
+
+        if (activities.Count > log.Count)
+        {
+            activities.RemoveRange(log.Count, activities.Count - log.Count);
+        }
+
+        while (activities.Count < log.Count)
+        {
+            activities.Add(CharacterActivityEvent.FreeText(log[activities.Count]));
+        }
 
         if (logEntryIds.Count > log.Count)
         {
@@ -180,6 +266,7 @@ public class CharacterLog : SerializedMonoBehaviour
         }
 
         pendingDisplayEntryIds.RemoveWhere(entryId => !logEntryIds.Contains(entryId));
+        hiddenEntryIds.RemoveWhere(entryId => !logEntryIds.Contains(entryId));
     }
 
     private void SetDisplayPending(int entryId, bool pending)
@@ -203,7 +290,8 @@ public class CharacterLog : SerializedMonoBehaviour
         visibleEntries.Clear();
         for (int i = 0; i < log.Count; i++)
         {
-            if (!pendingDisplayEntryIds.Contains(logEntryIds[i]))
+            if (!pendingDisplayEntryIds.Contains(logEntryIds[i])
+                && !hiddenEntryIds.Contains(logEntryIds[i]))
             {
                 visibleEntries.Add(log[i]);
             }
@@ -220,100 +308,43 @@ public readonly struct CharacterLogEntry
     public string DisplayLine { get; }
     public int Count { get; }
     public string OriginalMessage { get; }
+    public CharacterActivityEvent Activity { get; }
 
     public CharacterLogEntry(string tag, string displayLine, int count, string originalMessage)
-        : this(-1, tag, displayLine, count, originalMessage)
+        : this(
+            -1,
+            tag,
+            displayLine,
+            count,
+            originalMessage,
+            CharacterActivityEvent.FreeText(originalMessage, narrativeEligible: true))
     {
     }
 
     public CharacterLogEntry(int entryId, string tag, string displayLine, int count, string originalMessage)
+        : this(
+            entryId,
+            tag,
+            displayLine,
+            count,
+            originalMessage,
+            CharacterActivityEvent.FreeText(originalMessage, narrativeEligible: true))
+    {
+    }
+
+    public CharacterLogEntry(
+        int entryId,
+        string tag,
+        string displayLine,
+        int count,
+        string originalMessage,
+        CharacterActivityEvent activity)
     {
         EntryId = entryId;
         Tag = tag;
         DisplayLine = displayLine;
         Count = count;
         OriginalMessage = originalMessage;
-    }
-}
-
-public static class CharacterLogUtility
-{
-    public static string ToCauseTag(string message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return "기록 없음";
-        }
-
-        string normalized = message.Trim();
-        if (ContainsAny(normalized, "작업 시작", "작업 중", "작업 진행", "작업 종료"))
-        {
-            return normalized;
-        }
-
-        if (ContainsAny(normalized, "재고 없음", "재고 부족", "창고 재고 부족", "보충 실패"))
-        {
-            return "재고 부족";
-        }
-
-        if (ContainsAny(normalized, "길 막힘", "목적지 없음", "도달 실패", "이동 정보 없음", "경로"))
-        {
-            return "길 막힘";
-        }
-
-        if (ContainsAny(normalized, "수용 인원", "혼잡"))
-        {
-            return "혼잡함";
-        }
-
-        if (ContainsAny(normalized, "돈 부족", "자금 부족", "가격"))
-        {
-            return "돈 부족";
-        }
-
-        if (ContainsAny(normalized, "시설 파손", "파손"))
-        {
-            return "시설 파손";
-        }
-
-        if (ContainsAny(normalized, "피로", "비번", "휴식"))
-        {
-            return "피로";
-        }
-
-        if (ContainsAny(normalized, "분노", "사고", "사망"))
-        {
-            return "위험";
-        }
-
-        if (ContainsAny(normalized, "완료", "회복", "근무 복귀"))
-        {
-            return "만족";
-        }
-
-        string extracted = ExtractReasonAfterSeparator(normalized);
-        return string.IsNullOrWhiteSpace(extracted) ? normalized : extracted;
-    }
-
-    private static bool ContainsAny(string value, params string[] patterns)
-    {
-        return patterns.Any((pattern) => value.Contains(pattern, StringComparison.Ordinal));
-    }
-
-    private static string ExtractReasonAfterSeparator(string value)
-    {
-        int colonIndex = value.LastIndexOf(':');
-        if (colonIndex >= 0 && colonIndex + 1 < value.Length)
-        {
-            return value[(colonIndex + 1)..].Trim();
-        }
-
-        int dashIndex = value.LastIndexOf(" - ", StringComparison.Ordinal);
-        if (dashIndex >= 0 && dashIndex + 3 < value.Length)
-        {
-            return value[(dashIndex + 3)..].Trim();
-        }
-
-        return value;
+        Activity = activity;
     }
 }

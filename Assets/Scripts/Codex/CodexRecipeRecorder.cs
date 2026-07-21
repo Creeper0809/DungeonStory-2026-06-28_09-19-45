@@ -20,22 +20,21 @@ public static class CodexRecipeRecorder
             throw new ArgumentNullException(nameof(facilityShopCatalog));
         }
 
-        FacilityBlueprintSO blueprint = unlockResult.Blueprint;
-        if (blueprint != null)
+        foreach (BlueprintUnlockRecord unlock in unlockResult.Unlocks ?? Array.Empty<BlueprintUnlockRecord>())
         {
-            foreach (int buildingId in blueprint.unlockBuildingIds ?? Array.Empty<int>())
+            if (unlock.Facility == null)
             {
-                CodexObservationRecorder.ObserveFacility(
-                    state,
-                    FacilityShopService.FindBuildingById(facilityShopCatalog, buildingId),
-                    CodexInfoSource.Research);
+                continue;
             }
 
-            foreach (int buildingId in blueprint.unlockBasicPurchaseBuildingIds ?? Array.Empty<int>())
+            CodexObservationRecorder.ObserveFacility(state, unlock.Facility, CodexInfoSource.Research);
+            if (!string.IsNullOrWhiteSpace(unlock.CodexDetail))
             {
-                BuildingSO building = FacilityShopService.FindBuildingById(facilityShopCatalog, buildingId);
-                CodexObservationRecorder.ObserveFacility(state, building, CodexInfoSource.Research);
-                CodexFacilityInfoWriter.Add(state, building, "기본 구매: 연구 완료 후 구매 가능", CodexInfoSource.Research);
+                CodexFacilityInfoWriter.Add(
+                    state,
+                    unlock.Facility,
+                    unlock.CodexDetail,
+                    CodexInfoSource.Research);
             }
         }
 

@@ -1,4 +1,3 @@
-using BehaviorDesigner.Runtime;
 using Sirenix.OdinInspector;
 using System;
 using System.Collections;
@@ -35,7 +34,7 @@ public class CharacterSO : ScriptableObject
     [SerializeField] private CharacterSpeedType speedType;
     [SerializeField] private CharacterRespawnSpeedType respawnSpeedType;
 
-    public string SpeciesTag => !string.IsNullOrWhiteSpace(species?.speciesTag)
+    public string SpeciesTag => species != null && !string.IsNullOrWhiteSpace(species.speciesTag)
         ? species.speciesTag
         : speciesTag;
     public bool IsOwnerCandidate => role == CharacterRole.Owner;
@@ -95,7 +94,6 @@ public class CharacterSO : ScriptableObject
         }
     }
 
-    public ExternalBehavior basicBehaviorPatterns;
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //                                                                                                                              //
     //                                                                    GetSet                                                    //

@@ -19,25 +19,53 @@ MonoBehaviour:
   speciesTag: Adventurer
   species: {fileID: 0}
   baseStats:
-    attack: 6
-    sales: 1
-    research: 1
-    moveSpeed: 5
-    strength: 5
-    toughness: 5
-    dexterity: 5
-    cleaning: 1
-    endurance: 5
+    entries:
+    - statId: stat:attack
+      value: 6
+    - statId: stat:sales
+      value: 1
+    - statId: stat:research
+      value: 1
+    - statId: stat:move-speed
+      value: 5
+    - statId: stat:strength
+      value: 5
+    - statId: stat:toughness
+      value: 5
+    - statId: stat:dexterity
+      value: 5
+    - statId: stat:cleaning
+      value: 1
+    - statId: stat:endurance
+      value: 5
   traits: []
   defaultWorkPriorities:
-    operate: 1
-    restock: 2
-    repair: 2
-    clean: 3
-    research: 3
-    guard: 3
-    rescue: 2
-    rest: 3
+    schemaVersion: 1
+    priorities:
+    - workTypeId: work:operate
+      priority: 1
+    - workTypeId: work:restock
+      priority: 2
+    - workTypeId: work:repair
+      priority: 2
+    - workTypeId: work:clean
+      priority: 3
+    - workTypeId: work:research
+      priority: 3
+    - workTypeId: work:guard
+      priority: 3
+    - workTypeId: work:rescue
+      priority: 2
+    - workTypeId: work:rest
+      priority: 3
+    legacyOperate: 1
+    legacyRestock: 2
+    legacyRepair: 2
+    legacyClean: 3
+    legacyResearch: 3
+    legacyGuard: 3
+    legacyRescue: 2
+    legacyRest: 3
   aiPersonality:
     diligence: 1
     curiosity: 1

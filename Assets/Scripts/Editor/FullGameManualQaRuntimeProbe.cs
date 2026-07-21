@@ -210,7 +210,10 @@ public static class FullGameManualQaRuntimeProbe
 
             RunEventAlertProbe(alerts, lines);
             RunShopProbe(shop, gameData, lines, out purchaseResult);
-            blueprint = purchaseResult.blueprint != null ? purchaseResult.blueprint : FindBlueprintCandidate(research);
+            if (!purchaseResult.TryGetBlueprint(out blueprint))
+            {
+                blueprint = FindBlueprintCandidate(research);
+            }
             RunResearchProbe(research, blueprint, buildings, lines);
             RunSynthesisProbe(synthesis, buildings, lines);
             RunEvolutionProbe(evolution, buildings, lines);
@@ -813,7 +816,7 @@ public static class FullGameManualQaRuntimeProbe
                 panelButtons = selectionPanel.GetComponentsInChildren<Button>(true).Length;
             }
 
-            if (manager != null && manager.OwnerCandidates != null && manager.OwnerCandidates.Length > 0)
+            if (manager != null && manager.OwnerCandidates != null && manager.OwnerCandidates.Count > 0)
             {
                 manager.SelectOwnerByIndex(0);
                 selectedByIndex = manager.selectedOwnerData != null && manager.selectedOwnerData.Value != null;
@@ -858,7 +861,7 @@ public static class FullGameManualQaRuntimeProbe
 
         lines.Add(
             $"OWNER-MODEL-RUN panel={(selectionPanel != null)}; panelBuilt={panelBuilt}; panelButtons={panelButtons}; " +
-            $"manager={(manager != null)}; candidates={(manager != null && manager.OwnerCandidates != null ? manager.OwnerCandidates.Length : -1)}; " +
+            $"manager={(manager != null)}; candidates={(manager != null && manager.OwnerCandidates != null ? manager.OwnerCandidates.Count : -1)}; " +
             $"selectedByIndex={selectedByIndex}; ownerSpawned={ownerSpawned}; profileConnected={profileConnected}; " +
             $"species={CompactText(speciesTag)}; speciesPresent={speciesPresent}; traitCount={traitCount}; traitsPresent={traitsPresent}; " +
             $"statsFromProfile={statsFromProfile}; ownerDeathApplied={ownerDeathApplied}; health={healthBefore:0.###}->{healthAfter:0.###}; " +
@@ -901,7 +904,7 @@ public static class FullGameManualQaRuntimeProbe
         DefenseFacility defense = null;
         List<DefenseActivationReport> reports = new List<DefenseActivationReport>();
         BuildableObject damagedFacility = null;
-        InvasionCombatReport report = null;
+        InvasionCombatReportSnapshot report = null;
         string detail = string.Empty;
         string message = string.Empty;
 
@@ -973,7 +976,7 @@ public static class FullGameManualQaRuntimeProbe
             }
         }
 
-        DefenseContribution topDamage = report != null ? report.TopDamageContribution : null;
+        DefenseContributionSnapshot topDamage = report != null ? report.TopDamageContribution : null;
         lines.Add(
             $"COMBAT-REPORT runtime={(combatReport != null)}; defenseStatus={defenseStatus != null}; " +
             $"defenseAsset={defenseData != null}; foundPosition={foundPosition}; placed={placed}; position={position}; " +
@@ -1624,7 +1627,9 @@ public static class FullGameManualQaRuntimeProbe
         }
 
         int afterMoney = gameData != null && gameData.holdingMoney != null ? gameData.holdingMoney.Value : -1;
-        lines.Add($"SHOP runtime=True; dailyOffers={dailyOffers}; basicOffers={basicOffers}; purchased={purchased}; type={result.offerType}; blueprint={(result.blueprint != null ? result.blueprint.name : "<none>")}; building={(result.building != null ? result.building.name : "<none>")}; money={beforeMoney}->{afterMoney}; message={CompactText(result.message)}");
+        result.TryGetBlueprint(out FacilityBlueprintSO purchasedBlueprint);
+        result.TryGetBuilding(out BuildingSO purchasedBuilding);
+        lines.Add($"SHOP runtime=True; dailyOffers={dailyOffers}; basicOffers={basicOffers}; purchased={purchased}; type={result.offerTypeId}; blueprint={(purchasedBlueprint != null ? purchasedBlueprint.name : "<none>")}; building={(purchasedBuilding != null ? purchasedBuilding.name : "<none>")}; money={beforeMoney}->{afterMoney}; message={CompactText(result.message)}");
     }
 
     private static void RunResearchProbe(
@@ -1911,7 +1916,7 @@ public static class FullGameManualQaRuntimeProbe
         doorData.height = 1;
         doorData.layer = GridLayer.Building;
         doorData.category = BuildingCategory.None;
-        doorData.type = typeof(BuildableObject);
+        doorData.type = typeof(Door);
         doorData.unlocked = true;
 
         GameObject doorObject = new GameObject("QA Evolution Fixture");
@@ -2093,7 +2098,7 @@ public static class FullGameManualQaRuntimeProbe
         fixtureData.category = BuildingCategory.None;
         fixtureData.type = typeof(BuildableObject);
         fixtureData.unlocked = true;
-        fixtureData.evolution = new FacilityEvolutionContributionData
+        fixtureData.Evolution = new FacilityEvolutionContributionData
         {
             contributesToRoomProfile = true,
             tags = BuildQaEvolutionTags(recipe),
@@ -2324,12 +2329,20 @@ public static class FullGameManualQaRuntimeProbe
             party,
             out run,
             out startMessage);
-        bool completed = started && expedition.CompleteExpeditionForDebug(
-            run.ExpeditionId,
-            true,
-            out OffenseExpeditionResult result);
+        IOffenseBattleRuntime battle = ResolveFromLifetimeScope<IOffenseBattleRuntime>();
+        bool commandIssued = false;
+        if (started && battle?.Session?.CurrentActor?.Team == OffenseBattleTeam.Allies)
+        {
+            OffenseBattleCombatant enemy = battle.Session.Combatants
+                .FirstOrDefault(combatant => combatant.Team == OffenseBattleTeam.Enemies && !combatant.IsDead);
+            commandIssued = enemy != null && battle.TryIssuePlayerCommand(
+                OffenseBattleActionType.BasicAttack,
+                enemy.PersistentId,
+                string.Empty,
+                out _);
+        }
 
-        lines.Add($"OFFENSE worldMap=True; expedition=True; rewards={rewards != null}; visibleTargets={visibleTargets.Count}; selected={selected}; selectedTarget={(selected ? selectedTarget.title : "<none>")}; mapPanel={mapPanel != null}; expeditionPanel={expeditionPanel != null}; availableMembers={members.Count}; started={started}; completed={completed}; rewardMoney={(rewards != null ? rewards.State.MoneyEarned : -1)}; message={CompactText(started ? startMessage : selectMessage)}");
+        lines.Add($"OFFENSE worldMap=True; expedition=True; rewards={rewards != null}; visibleTargets={visibleTargets.Count}; selected={selected}; selectedTarget={(selected ? selectedTarget.title : "<none>")}; mapPanel={mapPanel != null}; expeditionPanel={expeditionPanel != null}; availableMembers={members.Count}; started={started}; battleActive={battle?.HasActiveBattle}; commandIssued={commandIssued}; rewardMoney={(rewards != null ? rewards.State.MoneyEarned : -1)}; message={CompactText(started ? startMessage : selectMessage)}");
     }
 
     private static void RunMetaProbe(MetaProgressionRuntime meta, IReadOnlyList<CharacterActor> actors, List<string> lines)
@@ -2549,7 +2562,7 @@ public static class FullGameManualQaRuntimeProbe
         InvasionFinalCombatStartedEvent.Trigger(intruder, owner);
         InvasionResolvedEvent.Trigger(true, 1f);
 
-        InvasionCombatReport report = combatReport != null ? combatReport.CurrentReport : null;
+        InvasionCombatReportSnapshot report = combatReport != null ? combatReport.CurrentReport : null;
         int alertAfter = alerts != null ? alerts.EventLog.Count : -1;
         int intruderAfter = director != null && director.ActiveIntruders != null ? director.ActiveIntruders.Count : -1;
         lines.Add($"INVASION-DEFENSE threat={threat != null}; threatTicked={threatTicked}; stage={(threat != null ? threat.CurrentStage.ToString() : "<none>")}; director={director != null}; intruders={intruderBefore}->{intruderAfter}; defenseStatusService={defenseStatus != null}; defense={(defense != null ? defense.name : "<none>")}; timing={timing}; defenseTriggered={defenseReport != null}; defenseDamage={(defenseReport != null ? defenseReport.TotalDamage : 0f):0.###}; combatReport={report != null}; defenseContributions={(report != null ? report.DefenseContributions.Count : -1)}; damagedFacilities={(report != null ? report.DamagedFacilities.Count : -1)}; alerts={alertBefore}->{alertAfter}");
@@ -2585,7 +2598,7 @@ public static class FullGameManualQaRuntimeProbe
             regularCustomer.OnTriggerEvent(new FacilityVisitEvent(customer, facility));
         }
 
-        int customerId = RegularCustomerService.GetCustomerId(customer);
+        string customerId = RegularCustomerService.GetCustomerId(customer);
         bool hasRecord = regularCustomer.State.TryGetRecord(customerId, out RegularCustomerRecord record);
         bool recruited = regularCustomer.TryRecruit(customerId, out RegularCustomerRecruitResult recruitResult);
         lines.Add($"RECRUITMENT runtime=True; facility={facility.name}; visits={visits}; hasRecord={hasRecord}; status={(record != null ? record.Status.ToString() : "<none>")}; candidate={(record != null && record.IsRecruitCandidate)}; recruited={recruited}; recruitedCount={regularCustomer.State.RecruitedCharacters.Count}; message={CompactText(recruitResult.Message)}");
@@ -2669,11 +2682,40 @@ public static class FullGameManualQaRuntimeProbe
 
         int rewardBefore = rewards != null ? rewards.State.MoneyEarned : -1;
         bool started = expedition.TryStartExpedition(target.id, members, out OffenseExpeditionRun run, out string startMessage);
-        OffenseExpeditionResult result = null;
-        bool completed = started && expedition.CompleteExpeditionForDebug(run.ExpeditionId, true, out result);
+        IOffenseBattleRuntime battle = ResolveFromLifetimeScope<IOffenseBattleRuntime>();
+        bool completed = started && DriveBattleToCompletion(battle, 100);
+        OffenseExpeditionResult result = expedition.ResultHistory
+            .FirstOrDefault(candidate => candidate.expeditionId == run?.ExpeditionId);
         int rewardAfter = rewards != null ? rewards.State.MoneyEarned : -1;
 
-        lines.Add($"OFFENSE-COMPLETE target={target.title}; requiredMembers={target.requiredMembers}; tempMembers={members.Count}; started={started}; completed={completed}; success={(completed && result != null && result.success)}; rewardMoney={rewardBefore}->{rewardAfter}; rewardSummaries={(completed && result != null && result.rewardSummaries != null ? result.rewardSummaries.Length : -1)}; message={CompactText(started ? startMessage : selectMessage)}");
+        lines.Add($"OFFENSE-COMPLETE target={target.title}; requiredMembers={target.requiredMembers}; tempMembers={members.Count}; started={started}; completed={completed}; success={(completed && result != null && result.success)}; rewardMoney={rewardBefore}->{rewardAfter}; rewardSummaries={(completed && result != null ? result.rewardSummaries.Count : -1)}; message={CompactText(started ? startMessage : selectMessage)}");
+    }
+
+    private static bool DriveBattleToCompletion(IOffenseBattleRuntime battle, int maximumCommands)
+    {
+        int commands = 0;
+        while (battle != null && battle.HasActiveBattle && commands++ < maximumCommands)
+        {
+            OffenseBattleSession session = battle.Session;
+            if (session?.CurrentActor?.Team != OffenseBattleTeam.Allies)
+            {
+                battle.AdvanceToPlayerDecision();
+                continue;
+            }
+
+            OffenseBattleCombatant enemy = session.Combatants
+                .FirstOrDefault(combatant => combatant.Team == OffenseBattleTeam.Enemies && !combatant.IsDead);
+            if (enemy == null || !battle.TryIssuePlayerCommand(
+                    OffenseBattleActionType.BasicAttack,
+                    enemy.PersistentId,
+                    string.Empty,
+                    out _))
+            {
+                break;
+            }
+        }
+
+        return battle?.Session?.IsComplete == true;
     }
 
     private static void RunEvolutionSupplementProbe(
@@ -3368,7 +3410,7 @@ public static class FullGameManualQaRuntimeProbe
             yield return null;
         }
 
-        lines.Add($"LOCAL-LLM-ENDPOINT queue=True; configured={queue.HasConfiguredEndpoint}; accepted={accepted}; completed={completed}; status={(completed ? callbackResult.Status.ToString() : "<pending>")}; success={(completed && callbackResult.IsSuccess)}; content={CompactText(completed ? callbackResult.Content : string.Empty, 120)}; error={CompactText(completed ? callbackResult.Error : string.Empty, 120)}; queued={queue.QueuedCount}; running={queue.RunningCount}; timeouts={queue.TimeoutCount}; dropped={queue.DroppedBubbleCount}");
+        lines.Add($"LOCAL-LLM-ENDPOINT queue=True; configured={queue.HasConfiguredEndpoint}; accepted={accepted}; completed={completed}; status={(completed ? callbackResult.Status.ToString() : "<pending>")}; success={(completed && callbackResult.IsSuccess)}; content={CompactText(completed ? callbackResult.Content : string.Empty, 120)}; error={CompactText(completed ? callbackResult.Error : string.Empty, 120)}; queued={queue.QueuedCount}; running={queue.RunningCount}; timeouts={queue.TimeoutCount}; dropped={queue.DroppedEphemeralRequestCount}");
         queue.SetWarningLogsSuppressedForDebug(false);
     }
 

@@ -37,9 +37,17 @@ MonoBehaviour:
       Entry: 6
       Data: 
   id: 1044
-  objectName: "\uACBD\uBE44 \uCD08\uC18C \uCC45\uC0C1"
+  objectName: "\uACBD\uBE44\uCD08\uC18C\uCC45\uC0C1"
   sprite: {fileID: 21300000, guid: a08eef823274ef74689992b7735b3ea4, type: 3}
   icon: {fileID: 21300000, guid: a08eef823274ef74689992b7735b3ea4, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562991791408113
+    - rid: 7302562991791408114
+    - rid: 7302562991791408115
+    - rid: 7302562991791408116
+    - rid: 7302562991791408117
+    - rid: 7302562991791408118
   width: 2
   height: 1
   layer: 1
@@ -48,75 +56,61 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 3
-  facility:
-    roles: 1024
-    capacity: 1
-    useDuration: 1.5
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 1
-    supportedWorkTypes: 37
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Guard
-    - Defense
-    - Security
-    scores:
-    - key: Guard
-      value: 2
-    - key: Defense
-      value: 2
-    - key: Security
-      value: 2.5
-    metrics: []
-  operational:
-    code: G01
-    functions: 65536
-    recovery:
-      sleep: 0
-      mood: 0
-      fun: 0
-      hunger: 0
-      excretion: 0
-      hygiene: 0
-    storageCategory: 1
-    storageCapacity: 0
-    seatCapacity: 0
-    tableCapacity: 0
-    serviceCapacity: 0
-    workOutputAmount: 0
-    constructionCost: 110
-    unlockPhase: 1
-    demolitionRefundRate: 0.5
-    lightIntensity: 0
-    lightRadius: 0
+  facilityAnchors:
+    slots: []
   unlocked: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562991791408113
+      type: {class: BuildingFacilityPartAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityPartAbility
+        code: G01
+    - rid: 7302562991791408114
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 110
+        maintenance: 3
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302562991791408115
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 1024
+          capacity: 1
+          useDuration: 1.5
+          requiredWorkers: 1
+          supportedWorkTypes: 37
+          disabledWhenDamaged: 1
+    - rid: 7302562991791408116
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562991791408117
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Guard
+          - Defense
+          - Security
+          scores:
+          - key: Guard
+            value: 2
+          - key: Defense
+            value: 2
+          - key: Security
+            value: 2.5
+          metrics: []
+    - rid: 7302562991791408118
+      type: {class: BuildingSecurityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSecurityAbility
+        maxAlarmCharges: 3
+        chargesPerGuardWork: 1

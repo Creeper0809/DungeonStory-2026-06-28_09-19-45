@@ -34,6 +34,7 @@ public sealed class OwnerSelectionOptionButtonFactory : IOwnerSelectionOptionBut
 
         Button button = UnityEngine.Object.Instantiate(prefab, parent);
         button.name = objectName;
+        button.gameObject.SetActive(true);
         button.onClick.RemoveAllListeners();
         if (onClick != null)
         {
@@ -47,6 +48,12 @@ public sealed class OwnerSelectionOptionButtonFactory : IOwnerSelectionOptionBut
         {
             tmpKoreanFontService.Apply(labelText);
             labelText.text = label;
+            labelText.fontSize = 20f;
+            labelText.enableAutoSizing = true;
+            labelText.fontSizeMin = 13f;
+            labelText.fontSizeMax = 20f;
+            labelText.textWrappingMode = TextWrappingModes.Normal;
+            labelText.overflowMode = TextOverflowModes.Truncate;
         }
 
         return button;

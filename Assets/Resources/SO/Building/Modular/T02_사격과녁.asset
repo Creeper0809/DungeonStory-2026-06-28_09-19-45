@@ -37,9 +37,18 @@ MonoBehaviour:
       Entry: 6
       Data: 
   id: 1041
-  objectName: "\uC0AC\uACA9 \uACFC\uB141"
+  objectName: "\uC0AC\uACA9\uACFC\uB141"
   sprite: {fileID: 21300000, guid: 32456faaa86eb5846a20025260c71c3e, type: 3}
   icon: {fileID: 21300000, guid: 32456faaa86eb5846a20025260c71c3e, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562991791408085
+    - rid: 7302562991791408086
+    - rid: 7302562991791408087
+    - rid: 7302562991791408088
+    - rid: 7302562991791408089
+    - rid: 7302562991791408090
+    - rid: 7302562991791408091
   width: 1
   height: 1
   layer: 1
@@ -48,72 +57,70 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 3
-  facility:
-    roles: 8
-    capacity: 1
-    useDuration: 1.5
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 1
-    supportedWorkTypes: 5
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Training
-    - Combat
-    scores:
-    - key: Training
-      value: 2
-    - key: Combat
-      value: 2
-    metrics: []
-  operational:
-    code: T02
-    functions: 16384
-    recovery:
-      sleep: 0
-      mood: 3
-      fun: 16
-      hunger: 0
-      excretion: 0
-      hygiene: 0
-    storageCategory: 1
-    storageCapacity: 0
-    seatCapacity: 0
-    tableCapacity: 0
-    serviceCapacity: 0
-    workOutputAmount: 0
-    constructionCost: 95
-    unlockPhase: 1
-    demolitionRefundRate: 0.5
-    lightIntensity: 0
-    lightRadius: 0
+  facilityAnchors:
+    slots: []
   unlocked: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562991791408085
+      type: {class: BuildingFacilityPartAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityPartAbility
+        code: T02
+    - rid: 7302562991791408086
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 95
+        maintenance: 3
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302562991791408087
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 8
+          capacity: 1
+          useDuration: 1.5
+          requiredWorkers: 1
+          supportedWorkTypes: 5
+          disabledWhenDamaged: 1
+    - rid: 7302562991791408088
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562991791408089
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Training
+          - Combat
+          scores:
+          - key: Training
+            value: 2
+          - key: Combat
+            value: 2
+          metrics: []
+    - rid: 7302562991791408090
+      type: {class: BuildingNeedRecoveryAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingNeedRecoveryAbility
+        recovery:
+          sleep: 0
+          mood: 3
+          fun: 16
+          hunger: 0
+          excretion: 0
+          hygiene: 0
+    - rid: 7302562991791408091
+      type: {class: BuildingTrainingAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingTrainingAbility
+        moodLabel: "\uACFC\uB141\uC5D0 \uC9D1\uC911\uD574 \uB9C8\uC74C\uC774 \uB9D1\uC544\uC9D0"
+        moodAmount: 3
+        durationSeconds: 180

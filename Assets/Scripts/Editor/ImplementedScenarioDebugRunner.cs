@@ -105,7 +105,7 @@ public static class ImplementedScenarioDebugRunner
         Run("P2 Run variables", RunVariableDebugScenarios.RunAll, results);
         Run("P2 Meta progression", MetaProgressionDebugScenarios.RunAll, results);
         Run("P3 Offense world map", OffenseWorldMapDebugScenarios.RunAll, results);
-        Run("P3 Offense expedition", OffenseExpeditionDebugScenarios.RunAll, results);
+        Run("P3 Offense turn battle", OffenseBattleDebugScenarios.RunAll, results);
         Run("P3 Offense rewards", OffenseRewardDebugScenarios.RunAll, results);
 
         bool success = results.All((result) => result.Success);

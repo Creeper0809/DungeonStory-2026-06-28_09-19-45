@@ -27,7 +27,7 @@ public static class CharacterVisitPolicy
     public static bool IsStaffPurchaseShop(CharacterActor actor, BuildableObject building)
     {
         return CharacterWorkRoleUtility.TryGetWork(actor, out _)
-            && building is Shop
+            && building is IRetailFacility
             && building.SupportsFacilityRole(FacilityRole.Purchase);
     }
 

@@ -167,6 +167,10 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
     [SerializeField, ReadOnly] private List<string> recentDecisionTrace =
         new List<string>();
     [NonSerialized] private Dictionary<CharacterAiBranch, CharacterAiJobCandidate> cachedJobGiverCandidates;
+    [NonSerialized] private IReadOnlyDictionary<string, int> recentFailureCountsView;
+    [NonSerialized] private IReadOnlyDictionary<CharacterAiBranch, float> jobGiverUtilityScoresView;
+    [NonSerialized] private IReadOnlyDictionary<CharacterAiBranch, float> routineGroupPriorityScoresView;
+    [NonSerialized] private IReadOnlyList<string> recentDecisionTraceView;
     [SerializeField, ReadOnly] private string lastCommitBreakReason;
     [SerializeField, ReadOnly] private string lastFailureReason;
     [SerializeField, Min(0.1f)] private float failureCooldownSeconds = DefaultFailureCooldownSeconds;
@@ -184,13 +188,13 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
     public CharacterMoodImpulse ActiveMoodImpulse => activeMoodImpulse;
     public string LastCommitBreakReason => lastCommitBreakReason;
     public string LastFailureReason => lastFailureReason;
-    public IReadOnlyDictionary<string, int> RecentFailureCounts => recentFailureCounts;
-    public IReadOnlyDictionary<CharacterAiBranch, float> JobGiverUtilityScores => jobGiverUtilityScores;
-    public IReadOnlyDictionary<CharacterAiBranch, float> RoutineGroupPriorityScores => routineGroupPriorityScores;
+    public IReadOnlyDictionary<string, int> RecentFailureCounts => recentFailureCountsView;
+    public IReadOnlyDictionary<CharacterAiBranch, float> JobGiverUtilityScores => jobGiverUtilityScoresView;
+    public IReadOnlyDictionary<CharacterAiBranch, float> RoutineGroupPriorityScores => routineGroupPriorityScoresView;
     public string LastJobGiverUtilitySummary => lastJobGiverUtilitySummary;
     public string SelectedJobGiverUtilitySummary => selectedJobGiverUtilitySummary;
     public string LastRoutineGroupPrioritySummary => lastRoutineGroupPrioritySummary;
-    public IReadOnlyList<string> RecentDecisionTrace => recentDecisionTrace;
+    public IReadOnlyList<string> RecentDecisionTrace => recentDecisionTraceView;
     public string LastDecisionTrace => recentDecisionTrace != null && recentDecisionTrace.Count > 0
         ? string.Join(" | ", recentDecisionTrace)
         : string.Empty;
@@ -213,6 +217,10 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         routineGroupPriorityScores ??= new Dictionary<CharacterAiBranch, float>();
         recentDecisionTrace ??= new List<string>();
         cachedJobGiverCandidates ??= new Dictionary<CharacterAiBranch, CharacterAiJobCandidate>();
+        recentFailureCountsView ??= ReadOnlyView.Dictionary(recentFailureCounts);
+        jobGiverUtilityScoresView ??= ReadOnlyView.Dictionary(jobGiverUtilityScores);
+        routineGroupPriorityScoresView ??= ReadOnlyView.Dictionary(routineGroupPriorityScores);
+        recentDecisionTraceView ??= ReadOnlyView.List(recentDecisionTrace);
         PruneFacilityCooldowns();
     }
 

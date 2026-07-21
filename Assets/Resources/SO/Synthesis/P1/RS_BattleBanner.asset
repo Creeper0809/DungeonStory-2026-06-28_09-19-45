@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7396c363cc02169abe906ff8e0f7952, type: 3}
+  m_Name: RS_BattleBanner
+  m_EditorClassIdentifier: Assembly-CSharp::FacilitySynthesisRecipeSO
+  serializationData:
+    SerializedFormat: 2
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  id: 7013
+  recipeId: recipe_fortress_banner_2
+  displayName: "\uC804\uD22C\uAE43\uBC1C \uC81C\uC791"
+  description: "\uC644\uC131\uB41C \uC21C\uCC30 \uCCB4\uACC4\uC5D0 \uC138\uB825 \uD45C\uC2DD\uC744
+    \uB354\uD574 \uC804\uD22C \uC9D1\uC911\uB3C4\uB97C \uB192\uC774\uB294 \uAE43\uBC1C\uC744
+    \uB9CC\uB4E0\uB2E4."
+  resultBuilding: {fileID: 11400000, guid: 5a67ae238abb90f4689a6d39083b79f8, type: 2}
+  materialBuildings:
+  - {fileID: 11400000, guid: 0b11a649893e47d4b8105d31d7c360db, type: 2}
+  - {fileID: 11400000, guid: 03c1b1ef366ae5c4d9b50a3df3ed10dc, type: 2}
+  publicByDefault: 0
+  requiredResearchRecipeId: recipe_fortress_banner_2
+  levelInheritanceRatio: 0.8

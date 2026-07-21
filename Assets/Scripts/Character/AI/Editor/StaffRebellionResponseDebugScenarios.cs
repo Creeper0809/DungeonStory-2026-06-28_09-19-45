@@ -172,6 +172,7 @@ public static class StaffRebellionResponseDebugScenarios
             GameObject runtimeObject = new GameObject("Rebellion Response Runtime");
             objects.Add(runtimeObject);
             Runtime = runtimeObject.AddComponent<StaffDiscontentRuntime>();
+            CharacterAiEditorTestDependencies.Inject(Runtime, objects);
 
             for (int x = 0; x < Grid.width; x++)
             {
@@ -193,6 +194,7 @@ public static class StaffRebellionResponseDebugScenarios
             AIBrain brain = obj.AddComponent<AIBrain>();
             brain.availableActions = AiDebugScenarioActionFactory.CreateStaffActions();
             CharacterActor character = obj.AddComponent<CharacterActor>();
+            CharacterAiEditorTestDependencies.Inject(obj, Runtime);
             CharacterAwakeMethod?.Invoke(character, null);
 
             CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
@@ -207,11 +209,14 @@ public static class StaffRebellionResponseDebugScenarios
             obj.transform.position = Grid.GetWorldPos(position);
             character.RefreshAbilityCache();
             character.Initialization(data);
+            character.Identity.SetPersistentId($"staff-rebellion-test:{id}");
             character.SetLifecycleState(CharacterLifecycleState.Active);
+            character.stats[CharacterCondition.SLEEP] = 50f;
+            character.stats[CharacterCondition.HUNGER] = 50f;
+            character.stats[CharacterCondition.FUN] = 50f;
+            character.stats[CharacterCondition.EXCRETION] = 50f;
+            character.stats[CharacterCondition.HYGIENE] = 50f;
             character.stats[CharacterCondition.MOOD] = mood;
-            character.stats[CharacterCondition.SLEEP] = 80f;
-            character.stats[CharacterCondition.HUNGER] = 80f;
-            character.stats[CharacterCondition.FUN] = 80f;
             return character;
         }
 

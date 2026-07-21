@@ -56,10 +56,9 @@ public struct FacilitySynthesisCompletedEvent
         this.result = result;
     }
 
-    private static FacilitySynthesisCompletedEvent e;
-
     public static void Trigger(FacilitySynthesisResult result)
     {
+        FacilitySynthesisCompletedEvent e = new FacilitySynthesisCompletedEvent();
         e.result = result;
         EventObserver.TriggerEvent(e);
     }
@@ -71,15 +70,12 @@ public struct FacilitySynthesisSelectionChangedEvent
 
     public FacilitySynthesisSelectionChangedEvent(IReadOnlyList<BuildableObject> selectedMaterials)
     {
-        this.selectedMaterials = selectedMaterials ?? Array.Empty<BuildableObject>();
+        this.selectedMaterials = EventPayloadSnapshot.Copy(selectedMaterials);
     }
-
-    private static FacilitySynthesisSelectionChangedEvent e;
 
     public static void Trigger(IReadOnlyList<BuildableObject> selectedMaterials)
     {
-        e.selectedMaterials = selectedMaterials ?? Array.Empty<BuildableObject>();
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new FacilitySynthesisSelectionChangedEvent(selectedMaterials));
     }
 }
 
@@ -172,6 +168,7 @@ public static class FacilitySynthesisService
 public class FacilitySynthesisRuntime : MonoBehaviour
 {
     private readonly List<BuildableObject> selectedMaterials = new List<BuildableObject>();
+    private IReadOnlyList<BuildableObject> selectedMaterialsView;
     private GridBuildingFactory buildingFactory;
     private IBlueprintResearchStateService blueprintResearchStateService;
     private IGridTextureProvider gridTextureProvider;
@@ -179,7 +176,8 @@ public class FacilitySynthesisRuntime : MonoBehaviour
     private IFacilitySynthesisRecipeQuery recipeQuery;
     private IGridBuildingObjectFactory gridBuildingObjectFactory;
 
-    public IReadOnlyList<BuildableObject> SelectedMaterials => selectedMaterials;
+    public IReadOnlyList<BuildableObject> SelectedMaterials =>
+        selectedMaterialsView ??= ReadOnlyView.List(selectedMaterials);
 
     [Inject]
     public void ConstructFacilitySynthesisRuntime(
@@ -274,7 +272,7 @@ public class FacilitySynthesisRuntime : MonoBehaviour
             return false;
         }
 
-        BuildableObject primary = materials[0];
+        BuildableObject primary = ResolveDeclaredAnchor(recipe, materials);
         Grid grid = primary.Grid;
         Vector2Int resultPosition = primary.centerPos;
         int inheritedLevel = FacilitySynthesisService.CalculateInheritedLevel(recipe, materials);
@@ -368,14 +366,15 @@ public class FacilitySynthesisRuntime : MonoBehaviour
             return false;
         }
 
-        Grid grid = materials[0].Grid;
+        BuildableObject anchor = ResolveDeclaredAnchor(recipe, materials);
+        Grid grid = anchor.Grid;
         if (grid == null || materials.Any((building) => building.Grid != grid))
         {
             errorMessage = "같은 그리드의 시설만 합성할 수 있습니다";
             return false;
         }
 
-        if (!CanPlaceResultOverMaterials(grid, recipe, materials))
+        if (!CanPlaceResultOverMaterials(grid, recipe, materials, anchor.centerPos))
         {
             errorMessage = "결과 시설을 배치할 공간이 부족합니다";
             return false;
@@ -388,10 +387,11 @@ public class FacilitySynthesisRuntime : MonoBehaviour
     private static bool CanPlaceResultOverMaterials(
         Grid grid,
         FacilitySynthesisRecipeSO recipe,
-        IReadOnlyList<BuildableObject> materials)
+        IReadOnlyList<BuildableObject> materials,
+        Vector2Int resultPosition)
     {
         HashSet<IGridOccupant> materialSet = materials.Cast<IGridOccupant>().ToHashSet();
-        foreach (Vector2Int pos in recipe.resultBuilding.GetGridPosList(materials[0].centerPos))
+        foreach (Vector2Int pos in recipe.resultBuilding.GetGridPosList(resultPosition))
         {
             if (!grid.IsValidGridPos(pos))
             {
@@ -409,6 +409,17 @@ public class FacilitySynthesisRuntime : MonoBehaviour
         return true;
     }
 
+    private static BuildableObject ResolveDeclaredAnchor(
+        FacilitySynthesisRecipeSO recipe,
+        IReadOnlyList<BuildableObject> materials)
+    {
+        int declaredAnchorId = recipe?.materialBuildings?
+            .FirstOrDefault(building => building != null)?.id
+            ?? 0;
+        return materials?.FirstOrDefault(material => material != null && material.id == declaredAnchorId)
+            ?? materials?[0];
+    }
+
     private void RemoveMaterialFromGrid(BuildableObject material)
     {
         if (material == null || material.BuildingData == null || material.Grid == null)
@@ -417,6 +428,7 @@ public class FacilitySynthesisRuntime : MonoBehaviour
         }
 
         material.Grid.RemoveOccupant(
+            material,
             material.BuildingData.Placement.Layer,
             material.buildPoses,
             material.BuildingData.Placement.IsMovement);

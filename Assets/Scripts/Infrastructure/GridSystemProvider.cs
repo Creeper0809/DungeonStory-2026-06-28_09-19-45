@@ -46,7 +46,11 @@ public sealed class GridSystemProvider : IGridSystemProvider
 
     public bool TryGetManager(out GridSystemManager resolvedManager)
     {
-        manager ??= sceneQuery.First<GridSystemManager>(includeInactive: true);
+        if (manager == null)
+        {
+            manager = sceneQuery.First<GridSystemManager>(includeInactive: true);
+        }
+
         if (manager == null)
         {
             resolvedManager = null;

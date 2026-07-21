@@ -58,18 +58,46 @@ public class StaffDiscontentRules
 
 public sealed class StaffDiscontentSnapshot
 {
-    public int staffId;
-    public string displayName;
-    public StaffDiscontentStage stage;
-    public StaffDiscontentOutcome outcome;
-    public float mood;
-    public int lowMoodDays;
-    public bool permanentLoss;
-    public bool departed;
-    public bool localRebellion;
-    public bool ownerThreat;
-    public bool isolated;
-    public bool suppressed;
+    public StaffDiscontentSnapshot(
+        string staffId,
+        string displayName,
+        StaffDiscontentStage stage,
+        StaffDiscontentOutcome outcome,
+        float mood,
+        int lowMoodDays,
+        bool permanentLoss,
+        bool departed,
+        bool localRebellion,
+        bool ownerThreat,
+        bool isolated,
+        bool suppressed)
+    {
+        this.staffId = staffId?.Trim() ?? string.Empty;
+        this.displayName = displayName ?? string.Empty;
+        this.stage = stage;
+        this.outcome = outcome;
+        this.mood = Mathf.Clamp(mood, 0f, 100f);
+        this.lowMoodDays = Mathf.Max(0, lowMoodDays);
+        this.permanentLoss = permanentLoss;
+        this.departed = departed;
+        this.localRebellion = localRebellion;
+        this.ownerThreat = ownerThreat;
+        this.isolated = isolated;
+        this.suppressed = suppressed;
+    }
+
+    public string staffId { get; }
+    public string displayName { get; }
+    public StaffDiscontentStage stage { get; }
+    public StaffDiscontentOutcome outcome { get; }
+    public float mood { get; }
+    public int lowMoodDays { get; }
+    public bool permanentLoss { get; }
+    public bool departed { get; }
+    public bool localRebellion { get; }
+    public bool ownerThreat { get; }
+    public bool isolated { get; }
+    public bool suppressed { get; }
 
     public string ToSummaryText()
     {
@@ -79,13 +107,38 @@ public sealed class StaffDiscontentSnapshot
 
 public sealed class StaffDiscontentRecord
 {
-    public StaffDiscontentRecord(int staffId, CharacterActor staff)
+    public StaffDiscontentRecord(string staffId, CharacterActor staff)
     {
         StaffId = staffId;
         DisplayName = StaffDiscontentService.GetStaffDisplayName(staff, staffId);
     }
 
-    public int StaffId { get; }
+    public static StaffDiscontentRecord FromSnapshot(StaffDiscontentSnapshot snapshot)
+    {
+        if (snapshot == null || string.IsNullOrWhiteSpace(snapshot.staffId))
+        {
+            return null;
+        }
+
+        StaffDiscontentRecord record = new StaffDiscontentRecord(snapshot.staffId, null)
+        {
+            DisplayName = string.IsNullOrWhiteSpace(snapshot.displayName)
+                ? StaffDiscontentService.GetStaffDisplayName(null, snapshot.staffId)
+                : snapshot.displayName,
+            Stage = snapshot.stage,
+            LastMood = Mathf.Clamp(snapshot.mood, 0f, 100f),
+            LowMoodDays = Mathf.Max(0, snapshot.lowMoodDays),
+            IsPermanentLoss = snapshot.permanentLoss,
+            IsDeparted = snapshot.departed,
+            IsInLocalRebellion = snapshot.localRebellion,
+            IsOwnerThreat = snapshot.ownerThreat,
+            IsIsolated = snapshot.isolated,
+            IsSuppressed = snapshot.suppressed
+        };
+        return record;
+    }
+
+    public string StaffId { get; }
     public string DisplayName { get; private set; }
     public StaffDiscontentStage Stage { get; private set; } = StaffDiscontentStage.Stable;
     public float LastMood { get; private set; } = 100f;
@@ -226,21 +279,19 @@ public sealed class StaffDiscontentRecord
 
     public StaffDiscontentSnapshot ToSnapshot(StaffDiscontentOutcome outcome = StaffDiscontentOutcome.None)
     {
-        return new StaffDiscontentSnapshot
-        {
-            staffId = StaffId,
-            displayName = DisplayName,
-            stage = Stage,
-            outcome = outcome,
-            mood = LastMood,
-            lowMoodDays = LowMoodDays,
-            permanentLoss = IsPermanentLoss,
-            departed = IsDeparted,
-            localRebellion = IsInLocalRebellion,
-            ownerThreat = IsOwnerThreat,
-            isolated = IsIsolated,
-            suppressed = IsSuppressed
-        };
+        return new StaffDiscontentSnapshot(
+            StaffId,
+            DisplayName,
+            Stage,
+            outcome,
+            LastMood,
+            LowMoodDays,
+            IsPermanentLoss,
+            IsDeparted,
+            IsInLocalRebellion,
+            IsOwnerThreat,
+            IsIsolated,
+            IsSuppressed);
     }
 }
 
@@ -269,7 +320,8 @@ public readonly struct StaffRebellionResponseResult
 
 public sealed class StaffDiscontentState
 {
-    private readonly Dictionary<int, StaffDiscontentRecord> records = new Dictionary<int, StaffDiscontentRecord>();
+    private readonly Dictionary<string, StaffDiscontentRecord> records =
+        new Dictionary<string, StaffDiscontentRecord>(StringComparer.Ordinal);
 
     public IReadOnlyCollection<StaffDiscontentRecord> Records => records.Values;
 
@@ -281,7 +333,7 @@ public sealed class StaffDiscontentState
             return null;
         }
 
-        int staffId = StaffDiscontentService.GetStaffId(staff);
+        string staffId = StaffDiscontentService.GetStaffId(staff);
         StaffDiscontentRecord record = GetOrCreate(staffId, staff);
         outcome = record.Update(staff, rules);
         return record;
@@ -298,12 +350,49 @@ public sealed class StaffDiscontentState
         return records.TryGetValue(StaffDiscontentService.GetStaffId(staff), out record);
     }
 
+    public bool TryGetRecord(string staffId, out StaffDiscontentRecord record)
+    {
+        record = null;
+        return !string.IsNullOrWhiteSpace(staffId)
+            && records.TryGetValue(staffId.Trim(), out record);
+    }
+
     public bool IsPermanentLoss(CharacterActor staff)
     {
         return TryGetRecord(staff, out StaffDiscontentRecord record) && record.IsPermanentLoss;
     }
 
-    private StaffDiscontentRecord GetOrCreate(int staffId, CharacterActor staff)
+    public IReadOnlyList<StaffDiscontentSnapshot> CaptureSnapshots()
+    {
+        return records.Values
+            .Where(record => record != null && !string.IsNullOrWhiteSpace(record.StaffId))
+            .OrderBy(record => record.StaffId, StringComparer.Ordinal)
+            .Select(record => record.ToSnapshot())
+            .ToList();
+    }
+
+    public void Restore(IEnumerable<StaffDiscontentSnapshot> savedRecords)
+    {
+        records.Clear();
+        HashSet<string> ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (StaffDiscontentSnapshot snapshot in savedRecords ?? Array.Empty<StaffDiscontentSnapshot>())
+        {
+            StaffDiscontentRecord record = StaffDiscontentRecord.FromSnapshot(snapshot);
+            if (record == null)
+            {
+                continue;
+            }
+
+            if (!ids.Add(record.StaffId))
+            {
+                throw new InvalidOperationException($"Duplicate staff discontent ID '{record.StaffId}'.");
+            }
+
+            records[record.StaffId] = record;
+        }
+    }
+
+    private StaffDiscontentRecord GetOrCreate(string staffId, CharacterActor staff)
     {
         if (!records.TryGetValue(staffId, out StaffDiscontentRecord record))
         {
@@ -315,57 +404,48 @@ public sealed class StaffDiscontentState
     }
 }
 
-public struct StaffDiscontentChangedEvent
+public readonly struct StaffDiscontentChangedEvent
 {
-    public StaffDiscontentSnapshot snapshot;
+    public StaffDiscontentSnapshot snapshot { get; }
 
     public StaffDiscontentChangedEvent(StaffDiscontentSnapshot snapshot)
     {
         this.snapshot = snapshot;
     }
 
-    private static StaffDiscontentChangedEvent e;
-
     public static void Trigger(StaffDiscontentSnapshot snapshot)
     {
-        e.snapshot = snapshot;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new StaffDiscontentChangedEvent(snapshot));
     }
 }
 
-public struct StaffPermanentLossEvent
+public readonly struct StaffPermanentLossEvent
 {
-    public StaffDiscontentSnapshot snapshot;
+    public StaffDiscontentSnapshot snapshot { get; }
 
     public StaffPermanentLossEvent(StaffDiscontentSnapshot snapshot)
     {
         this.snapshot = snapshot;
     }
 
-    private static StaffPermanentLossEvent e;
-
     public static void Trigger(StaffDiscontentSnapshot snapshot)
     {
-        e.snapshot = snapshot;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new StaffPermanentLossEvent(snapshot));
     }
 }
 
-public struct StaffRebellionResponseEvent
+public readonly struct StaffRebellionResponseEvent
 {
-    public StaffRebellionResponseResult result;
+    public StaffRebellionResponseResult result { get; }
 
     public StaffRebellionResponseEvent(StaffRebellionResponseResult result)
     {
         this.result = result;
     }
 
-    private static StaffRebellionResponseEvent e;
-
     public static void Trigger(StaffRebellionResponseResult result)
     {
-        e.result = result;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new StaffRebellionResponseEvent(result));
     }
 }
 
@@ -378,21 +458,22 @@ public static class StaffDiscontentService
             && identity != null
             && !identity.IsOwner
             && identity.CharacterType == CharacterType.NPC
+            && !string.IsNullOrWhiteSpace(identity.PersistentId)
             && staff.TryGetAbility(out AbilityWork _);
     }
 
-    public static int GetStaffId(CharacterActor staff)
+    public static string GetStaffId(CharacterActor staff)
     {
         if (staff == null)
         {
-            return -1;
+            return string.Empty;
         }
 
         CharacterIdentity identity = staff.Identity;
-        return identity != null ? identity.StableId : staff.GetInstanceID();
+        return identity != null ? identity.PersistentId : string.Empty;
     }
 
-    public static string GetStaffDisplayName(CharacterActor staff, int staffId)
+    public static string GetStaffDisplayName(CharacterActor staff, string staffId)
     {
         CharacterIdentity identity = staff != null ? staff.Identity : null;
         if (!string.IsNullOrWhiteSpace(identity != null ? identity.DisplayName : null))
@@ -432,7 +513,8 @@ public static class StaffDiscontentService
         }
 
         if (mood <= rules.departureMoodThreshold
-            || lowMoodDays >= Mathf.Max(1, rules.sustainedLowMoodForDeparture))
+            || (mood <= rules.workDisruptionMoodThreshold
+                && lowMoodDays >= Mathf.Max(1, rules.sustainedLowMoodForDeparture)))
         {
             return StaffDiscontentStage.Departure;
         }
@@ -526,6 +608,16 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
             DispatchAutoSuppress(staff);
         }
         return record;
+    }
+
+    public IReadOnlyList<StaffDiscontentSnapshot> CaptureSnapshots()
+    {
+        return state.CaptureSnapshots();
+    }
+
+    public void RestoreSnapshots(IEnumerable<StaffDiscontentSnapshot> savedRecords)
+    {
+        state.Restore(savedRecords);
     }
 
     public void ProcessAllStaff()
@@ -647,7 +739,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
             return false;
         }
 
-        rebel?.AddLog("반란 대응: 격리");
+        RecordSocial(rebel, CharacterActivityOutcomes.Completed, "반란 대응: 격리", "rebellion-isolated", 0.1f);
         result = new StaffRebellionResponseResult(true, StaffRebellionResponseType.Isolate, record.ToSnapshot(), actor, "격리 완료");
         StaffRebellionResponseEvent.Trigger(result);
         EventAlertService.RaiseStaffComplaint($"{record.DisplayName}: 격리", EventAlertImportance.Medium);
@@ -668,7 +760,7 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
             return false;
         }
 
-        staff?.AddLog("반란 대응: 진정");
+        RecordSocial(staff, CharacterActivityOutcomes.Completed, "반란 대응: 진정", "rebellion-calmed", 0.35f);
         result = new StaffRebellionResponseResult(true, StaffRebellionResponseType.Calm, record.ToSnapshot(), actor, "진정 완료");
         StaffRebellionResponseEvent.Trigger(result);
         EventAlertService.RaiseStaffComplaint($"{record.DisplayName}: 진정", EventAlertImportance.Low);
@@ -711,34 +803,51 @@ public class StaffDiscontentRuntime : MonoBehaviour, UtilEventListener<Operating
         switch (outcome)
         {
             case StaffDiscontentOutcome.Warning:
-                staff?.AddLog("직원 불만: 만족도 낮음");
+                RecordSocial(staff, CharacterActivityOutcomes.Changed, "직원 불만: 만족도 낮음", "low-satisfaction", -0.45f);
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 만족도 낮음", EventAlertImportance.Low);
                 break;
             case StaffDiscontentOutcome.EfficiencyPenalty:
-                staff?.AddLog("직원 불만: 효율 저하");
+                RecordSocial(staff, CharacterActivityOutcomes.Changed, "직원 불만: 효율 저하", "efficiency-penalty", -0.55f);
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 효율 저하", EventAlertImportance.Medium);
                 break;
             case StaffDiscontentOutcome.WorkDisruption:
-                staff?.AddLog("직원 불만: 태업/결근");
+                RecordSocial(staff, CharacterActivityOutcomes.Blocked, "직원 불만: 태업/결근", "work-disruption", -0.7f);
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 태업/결근", EventAlertImportance.Medium);
                 break;
             case StaffDiscontentOutcome.PermanentDeparture:
-                staff?.AddLog("직원 이탈: 영구 손실");
+                RecordSocial(staff, CharacterActivityOutcomes.Departed, "직원 이탈: 영구 손실", "permanent-departure", -1f);
                 staff?.Lifecycle?.SetLifecycleState(CharacterLifecycleState.Despawned);
                 StaffPermanentLossEvent.Trigger(snapshot);
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 이탈", EventAlertImportance.High);
                 break;
             case StaffDiscontentOutcome.LocalRebellion:
-                staff?.AddLog("국지 반란: 주변 피해 시작");
+                RecordSocial(staff, CharacterActivityOutcomes.Started, "국지 반란: 주변 피해 시작", "local-rebellion", -1f);
                 StaffPermanentLossEvent.Trigger(snapshot);
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 국지 반란", EventAlertImportance.High);
                 DispatchAutoSuppress(staff);
                 break;
             case StaffDiscontentOutcome.OwnerThreat:
-                staff?.AddLog("반란 확산: 사장 위협");
+                RecordSocial(staff, CharacterActivityOutcomes.Changed, "반란 확산: 사장 위협", "owner-threat", -1f);
                 EventAlertService.RaiseStaffComplaint($"{snapshot.displayName}: 반란 확산", EventAlertImportance.High);
                 break;
         }
+    }
+
+    private static void RecordSocial(
+        CharacterActor actor,
+        string outcomeId,
+        string factText,
+        string reasonCode,
+        float sentiment)
+    {
+        actor?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Social,
+            outcomeId,
+            factText,
+            actionId: "staff-discontent",
+            reasonCode: reasonCode,
+            sentiment: sentiment,
+            bubbleEligible: true));
     }
 
     private IDungeonSceneComponentQuery RequireSceneQuery()

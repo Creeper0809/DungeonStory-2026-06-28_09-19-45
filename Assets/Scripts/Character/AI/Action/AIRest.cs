@@ -5,6 +5,12 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/Rest", order = 0)]
 public class AIRest : AIActionSet
 {
+    private static readonly CharacterAiActionDescriptor ActionDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.Rest,
+        "휴식",
+        CharacterAiActionTags.SelfCare);
+
+    public override CharacterAiActionDescriptor Descriptor => ActionDescriptor;
     public override bool CanStart(CharacterActor actor)
     {
         return CanUseVisitorAction(actor);
@@ -45,11 +51,11 @@ public class AIRest : AIActionSet
             FacilityScoringContext.RequireFromActor(actor));
     }
 
-    public override bool TryResolveDestination(
+    public override bool TryResolveDestinationWithFailure(
         CharacterActor actor,
         GridPathSearchResult searchResult,
         out BuildableObject destination,
-        out string failureReason)
+        out AIActionFailure failure)
     {
         if (FacilityCandidateScorer.TrySelectBest(
             actor,
@@ -58,11 +64,11 @@ public class AIRest : AIActionSet
             FacilityScoringContext.RequireFromActor(actor),
             out destination))
         {
-            failureReason = string.Empty;
+            failure = AIActionFailure.None;
             return true;
         }
 
-        failureReason = "목적지 없음";
+        failure = AIActionFailure.Create(AIActionFailureKind.NoDestination);
         return false;
     }
 
@@ -82,9 +88,9 @@ public class AIRest : AIActionSet
             return true;
         }
 
-        failure = AIActionFailure.FromReason(
-            failureReason,
+        failure = AIActionFailure.Create(
             AIActionFailureKind.DestinationOccupied,
+            failureReason,
             destination);
         return false;
     }
@@ -110,7 +116,9 @@ public class AIRest : AIActionSet
 
         if (CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work))
         {
-            return work.IsOffDuty;
+            return work.IsOffDuty
+                || work.ShouldUseRestProtection()
+                || FacilityCandidateScorer.GetExpeditionRecoveryNeed(actor) >= 0.1f;
         }
 
         return true;

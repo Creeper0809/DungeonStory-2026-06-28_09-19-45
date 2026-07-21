@@ -32,6 +32,7 @@ public static class CustomerAiDebugScenarios
         RunScenario("뱀파이어는 마나/연구 선호", VerifyVampireSelectsManaOrResearch, errors);
         RunScenario("이용 불가 시설 제외", VerifyUnavailableFacilitiesAreExcluded, errors);
         RunScenario("Unstaffed shop allows self-service checkout", VerifyUnstaffedShopAllowsSelfServiceCheckout, errors);
+        RunScenario("Completed visit exits without optional look around", VerifyCompletedVisitExitsImmediately, errors);
         RunScenario("돈 부족 상점만 있으면 방문 종료", VerifyUnaffordableShopEndsVisitCycle, errors);
         RunScenario("방문자 필수 AI 행동 자동 보강", VerifyVisitorActionsAreCompletedFromPartialPrefab, errors);
         RunScenario("신규성/혼잡도 점수 반영", VerifyNoveltyAndCrowdScores, errors);
@@ -504,6 +505,27 @@ public static class CustomerAiDebugScenarios
         }
     }
 
+    private static bool VerifyCompletedVisitExitsImmediately()
+    {
+        using CustomerAiScenarioWorld world = new CustomerAiScenarioWorld();
+        CharacterActor customer = world.CreateCustomer("Slime", Vector2Int.zero, 90f, 90f, 10f, 20f);
+        AbilityShopping shopping = customer.GetAbility<AbilityShopping>();
+        AIExitDungeon exit = ScriptableObject.CreateInstance<AIExitDungeon>();
+        shopping.RestorePersistentState(0, 0, 0);
+
+        try
+        {
+            return shopping.ShouldEndVisitCycle()
+                && !shopping.CanLookAround()
+                && shopping.ShouldExitDungeon()
+                && exit.CanStart(CharacterActor.From(customer));
+        }
+        finally
+        {
+            Object.DestroyImmediate(exit);
+        }
+    }
+
     private static bool VerifyVisitorActionsAreCompletedFromPartialPrefab()
     {
         using CustomerAiScenarioWorld world = new CustomerAiScenarioWorld();
@@ -928,7 +950,7 @@ public static class CustomerAiDebugScenarios
             ? $"roomId={room.Id}; usable={room.IsUsable}; self={room.IsSelfContained}; roles={room.FacilityRoles}"
             : "room=none";
         report.AppendLine(
-            $"facility\t{label}\tname={Name(building)}; pos={building?.centerPos}; size={building?.BuildingData?.width}x{building?.BuildingData?.height}; roles={building?.Facility?.roles}; requiresRoom={building?.Facility?.requiresRoomRole}; roleAvailable={roleAvailable}; roomReason={roomReason}; canVisit={canVisit}; visitReason={visitReason}; reachable={reachable}; candidate={candidate}; candidateReason={candidateReason}; {roomText}");
+            $"facility\t{label}\tname={Name(building)}; pos={building?.centerPos}; size={building?.BuildingData?.width}x{building?.BuildingData?.height}; roles={building?.Facility?.roles}; requiresRoom={building?.BuildingData.RequiresRoomRole()}; roleAvailable={roleAvailable}; roomReason={roomReason}; canVisit={canVisit}; visitReason={visitReason}; reachable={reachable}; candidate={candidate}; candidateReason={candidateReason}; {roomText}");
     }
 
     private static void AppendCandidates(
@@ -1048,7 +1070,7 @@ public static class CustomerAiDebugScenarios
                 CharacterAiEditorTestDependencies.InjectShop(shop);
             }
 
-            if (building.Facility != null && building.Facility.requiresRoomRole)
+            if (building.BuildingData.RequiresRoomRole())
             {
                 PlaceRoomDoorsFor(building);
             }
@@ -1092,9 +1114,11 @@ public static class CustomerAiDebugScenarios
             buildingData.height = 1;
             buildingData.layer = GridLayer.Building;
             buildingData.category = category;
-            buildingData.type = typeof(BuildableObject);
+            buildingData.type = category == BuildingCategory.Movement
+                ? typeof(Door)
+                : typeof(BuildableObject);
             buildingData.unlocked = true;
-            buildingData.facility = new FacilityData();
+            buildingData.Facility = new FacilityData();
 
             GameObject obj = new GameObject($"Room Boundary {objectName}");
             objects.Add(obj);

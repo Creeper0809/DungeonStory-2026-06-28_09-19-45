@@ -94,8 +94,8 @@ public sealed class NoticeFeedItemFactory : INoticeFeedItemFactory
         text.color = GetColor(notice.grade);
         text.fontSize = 18f;
         text.enableAutoSizing = false;
-        text.enableWordWrapping = true;
-        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.overflowMode = TextOverflowModes.Truncate;
         text.alignment = TextAlignmentOptions.MidlineLeft;
         text.raycastTarget = false;
 

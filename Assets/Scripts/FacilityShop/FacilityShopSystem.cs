@@ -4,10 +4,10 @@ using System.Linq;
 using UnityEngine;
 using VContainer;
 
-public enum FacilityShopOfferType
+public static class FacilityShopOfferTypeIds
 {
-    Building,
-    Blueprint
+    public const string Building = "facility-shop.offer.building";
+    public const string Blueprint = "facility-shop.offer.blueprint";
 }
 
 public enum FacilityShopRarity
@@ -18,79 +18,141 @@ public enum FacilityShopRarity
 }
 
 [Serializable]
-public class FacilityShopOfferSnapshot
+public sealed class FacilityShopOfferSnapshot
 {
-    public FacilityShopOfferType type;
-    public FacilityShopRarity rarity;
-    public string displayName;
-    public int cost;
-    public int star;
-    public bool basicPurchase;
+    public FacilityShopOfferSnapshot(
+        string offerTypeId,
+        string typeDisplayName,
+        FacilityShopRarity rarity,
+        string displayName,
+        int cost,
+        int star,
+        bool basicPurchase)
+    {
+        this.offerTypeId = offerTypeId ?? string.Empty;
+        this.typeDisplayName = typeDisplayName ?? string.Empty;
+        this.rarity = rarity;
+        this.displayName = displayName ?? string.Empty;
+        this.cost = Mathf.Max(0, cost);
+        this.star = Mathf.Max(0, star);
+        this.basicPurchase = basicPurchase;
+    }
+
+    public string offerTypeId { get; }
+    public string typeDisplayName { get; }
+    public FacilityShopRarity rarity { get; }
+    public string displayName { get; }
+    public int cost { get; }
+    public int star { get; }
+    public bool basicPurchase { get; }
 
     public string ToSummaryText()
     {
-        string typeName = type == FacilityShopOfferType.Blueprint ? "설계도" : "시설";
         string rarityText = rarity == FacilityShopRarity.Common ? string.Empty : $" / {rarity}";
         string basicText = basicPurchase ? " / 기본 구매" : string.Empty;
         string starText = star > 0 ? $" / {star}성" : string.Empty;
-        return $"{typeName}: {displayName}{starText} / 비용 {cost}{rarityText}{basicText}";
+        return $"{typeDisplayName}: {displayName}{starText} / 비용 {cost}{rarityText}{basicText}";
     }
 }
 
-public class FacilityShopOffer
+public abstract class FacilityShopOffer
 {
-    public FacilityShopOffer(
-        BuildingSO building,
+    protected FacilityShopOffer(
         int cost,
         FacilityShopRarity rarity,
         bool basicPurchase,
         bool randomOffer)
     {
-        Building = building;
         Cost = Mathf.Max(0, cost);
         Rarity = rarity;
         IsBasicPurchase = basicPurchase;
         IsRandomOffer = randomOffer;
-        Type = FacilityShopOfferType.Building;
     }
 
-    public FacilityShopOffer(
-        FacilityBlueprintSO blueprint,
-        int cost,
-        FacilityShopRarity rarity,
-        bool randomOffer)
-    {
-        Blueprint = blueprint;
-        Cost = Mathf.Max(0, cost);
-        Rarity = rarity;
-        IsRandomOffer = randomOffer;
-        Type = FacilityShopOfferType.Blueprint;
-    }
-
-    public FacilityShopOfferType Type { get; }
-    public BuildingSO Building { get; }
-    public FacilityBlueprintSO Blueprint { get; }
+    public abstract string OfferTypeId { get; }
+    public abstract string TypeDisplayName { get; }
     public int Cost { get; }
     public FacilityShopRarity Rarity { get; }
     public bool IsBasicPurchase { get; }
     public bool IsRandomOffer { get; }
-    public bool IsValid => Type == FacilityShopOfferType.Building ? Building != null : Blueprint != null;
-    public int Star => Type == FacilityShopOfferType.Building ? FacilityShopService.GetBuildingStar(Building) : 0;
-    public string DisplayName => Type == FacilityShopOfferType.Building
-        ? FacilityShopService.GetBuildingName(Building)
-        : Blueprint != null ? Blueprint.DisplayName : "설계도";
+    public abstract bool IsValid { get; }
+    public abstract int Star { get; }
+    public abstract int DataId { get; }
+    public abstract string DisplayName { get; }
+
+    protected internal abstract string ApplyPurchase(FacilityShopUnlockState unlockState);
 
     public FacilityShopOfferSnapshot ToSnapshot()
     {
-        return new FacilityShopOfferSnapshot
+        return new FacilityShopOfferSnapshot(
+            OfferTypeId,
+            TypeDisplayName,
+            Rarity,
+            DisplayName,
+            Cost,
+            Star,
+            IsBasicPurchase);
+    }
+}
+
+public sealed class FacilityBuildingOffer : FacilityShopOffer
+{
+    public FacilityBuildingOffer(
+        BuildingSO building,
+        int cost,
+        FacilityShopRarity rarity,
+        bool basicPurchase,
+        bool randomOffer)
+        : base(cost, rarity, basicPurchase, randomOffer)
+    {
+        Building = building;
+    }
+
+    public BuildingSO Building { get; }
+    public override string OfferTypeId => FacilityShopOfferTypeIds.Building;
+    public override string TypeDisplayName => "시설";
+    public override bool IsValid => Building != null;
+    public override int Star => FacilityShopService.GetBuildingStar(Building);
+    public override int DataId => Building != null ? Building.id : -1;
+    public override string DisplayName => FacilityShopService.GetBuildingName(Building);
+
+    protected internal override string ApplyPurchase(FacilityShopUnlockState unlockState)
+    {
+        Building.unlocked = true;
+        if (IsBasicPurchase)
         {
-            type = Type,
-            rarity = Rarity,
-            displayName = DisplayName,
-            cost = Cost,
-            star = Star,
-            basicPurchase = IsBasicPurchase
-        };
+            unlockState?.UnlockBasicPurchase(Building);
+        }
+
+        return $"{DisplayName} 구매 완료";
+    }
+}
+
+public sealed class FacilityBlueprintOffer : FacilityShopOffer
+{
+    public FacilityBlueprintOffer(
+        FacilityBlueprintSO blueprint,
+        int cost,
+        FacilityShopRarity rarity,
+        bool randomOffer)
+        : base(cost, rarity, false, randomOffer)
+    {
+        Blueprint = blueprint;
+    }
+
+    public FacilityBlueprintSO Blueprint { get; }
+    public override string OfferTypeId => FacilityShopOfferTypeIds.Blueprint;
+    public override string TypeDisplayName => "설계도";
+    public override bool IsValid => Blueprint != null;
+    public override int Star => 0;
+    public override int DataId => Blueprint != null ? Blueprint.id : -1;
+    public override string DisplayName => Blueprint != null ? Blueprint.DisplayName : "설계도";
+
+    protected internal override string ApplyPurchase(FacilityShopUnlockState unlockState)
+    {
+        unlockState?.MarkBlueprintAcquired(Blueprint);
+        EventAlertService.RaiseBlueprintAcquired($"{DisplayName} 획득");
+        return $"{DisplayName} 설계도 획득";
     }
 }
 
@@ -98,10 +160,9 @@ public readonly struct FacilityShopPurchaseResult
 {
     public readonly bool success;
     public readonly FacilityShopOfferSnapshot offer;
-    public readonly FacilityShopOfferType offerType;
+    public readonly FacilityShopOffer purchasedOffer;
+    public readonly string offerTypeId;
     public readonly int dataId;
-    public readonly BuildingSO building;
-    public readonly FacilityBlueprintSO blueprint;
     public readonly int cost;
     public readonly string message;
 
@@ -109,24 +170,31 @@ public readonly struct FacilityShopPurchaseResult
     {
         this.success = success;
         this.offer = offer != null ? offer.ToSnapshot() : null;
-        offerType = offer != null ? offer.Type : FacilityShopOfferType.Building;
-        building = offer != null ? offer.Building : null;
-        blueprint = offer != null ? offer.Blueprint : null;
-        dataId = building != null
-            ? building.id
-            : blueprint != null
-                ? blueprint.id
-                : -1;
+        purchasedOffer = offer;
+        offerTypeId = offer?.OfferTypeId ?? string.Empty;
+        dataId = offer?.DataId ?? -1;
         this.cost = Mathf.Max(0, cost);
         this.message = message ?? string.Empty;
     }
+
+    public bool TryGetBuilding(out BuildingSO building)
+    {
+        building = (purchasedOffer as FacilityBuildingOffer)?.Building;
+        return building != null;
+    }
+
+    public bool TryGetBlueprint(out FacilityBlueprintSO blueprint)
+    {
+        blueprint = (purchasedOffer as FacilityBlueprintOffer)?.Blueprint;
+        return blueprint != null;
+    }
 }
 
-public struct FacilityShopRefreshedEvent
+public readonly struct FacilityShopRefreshedEvent
 {
-    public int day;
-    public IReadOnlyList<FacilityShopOffer> offers;
-    public IReadOnlyList<FacilityShopOffer> basicPurchaseOffers;
+    public int day { get; }
+    public IReadOnlyList<FacilityShopOffer> offers { get; }
+    public IReadOnlyList<FacilityShopOffer> basicPurchaseOffers { get; }
 
     public FacilityShopRefreshedEvent(
         int day,
@@ -134,39 +202,31 @@ public struct FacilityShopRefreshedEvent
         IReadOnlyList<FacilityShopOffer> basicPurchaseOffers)
     {
         this.day = Mathf.Max(1, day);
-        this.offers = offers ?? Array.Empty<FacilityShopOffer>();
-        this.basicPurchaseOffers = basicPurchaseOffers ?? Array.Empty<FacilityShopOffer>();
+        this.offers = EventPayloadSnapshot.Copy(offers);
+        this.basicPurchaseOffers = EventPayloadSnapshot.Copy(basicPurchaseOffers);
     }
-
-    private static FacilityShopRefreshedEvent e;
 
     public static void Trigger(
         int day,
         IReadOnlyList<FacilityShopOffer> offers,
         IReadOnlyList<FacilityShopOffer> basicPurchaseOffers)
     {
-        e.day = Mathf.Max(1, day);
-        e.offers = offers ?? Array.Empty<FacilityShopOffer>();
-        e.basicPurchaseOffers = basicPurchaseOffers ?? Array.Empty<FacilityShopOffer>();
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new FacilityShopRefreshedEvent(day, offers, basicPurchaseOffers));
     }
 }
 
-public struct FacilityShopPurchasedEvent
+public readonly struct FacilityShopPurchasedEvent
 {
-    public FacilityShopPurchaseResult result;
+    public FacilityShopPurchaseResult result { get; }
 
     public FacilityShopPurchasedEvent(FacilityShopPurchaseResult result)
     {
         this.result = result;
     }
 
-    private static FacilityShopPurchasedEvent e;
-
     public static void Trigger(FacilityShopPurchaseResult result)
     {
-        e.result = result;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new FacilityShopPurchasedEvent(result));
     }
 }
 
@@ -175,8 +235,11 @@ public class FacilityShopUnlockState
     private readonly HashSet<int> basicPurchaseBuildingIds = new HashSet<int>();
     private readonly HashSet<int> acquiredBlueprintIds = new HashSet<int>();
 
-    public IReadOnlyCollection<int> BasicPurchaseBuildingIds => basicPurchaseBuildingIds;
-    public IReadOnlyCollection<int> AcquiredBlueprintIds => acquiredBlueprintIds;
+    public IReadOnlyCollection<int> BasicPurchaseBuildingIds =>
+        Array.AsReadOnly(basicPurchaseBuildingIds.OrderBy((id) => id).ToArray());
+
+    public IReadOnlyCollection<int> AcquiredBlueprintIds =>
+        Array.AsReadOnly(acquiredBlueprintIds.OrderBy((id) => id).ToArray());
 
     public bool UnlockBasicPurchase(BuildingSO building)
     {
@@ -217,6 +280,28 @@ public class FacilityShopUnlockState
     {
         return blueprint != null && acquiredBlueprintIds.Contains(blueprint.id);
     }
+
+    public void Restore(IEnumerable<int> basicBuildingIds, IEnumerable<int> blueprintIds)
+    {
+        basicPurchaseBuildingIds.Clear();
+        acquiredBlueprintIds.Clear();
+
+        foreach (int id in basicBuildingIds ?? Array.Empty<int>())
+        {
+            if (id >= 0)
+            {
+                basicPurchaseBuildingIds.Add(id);
+            }
+        }
+
+        foreach (int id in blueprintIds ?? Array.Empty<int>())
+        {
+            if (id >= 0)
+            {
+                acquiredBlueprintIds.Add(id);
+            }
+        }
+    }
 }
 
 public static class FacilityShopService
@@ -246,7 +331,8 @@ public static class FacilityShopService
             catalog.Blueprints,
             runVariableReader.GetInitialShopSeed(),
             runVariableReader.GetFacilityShopCostMultiplier,
-            runVariableReader.GetBlueprintCostMultiplier);
+            runVariableReader.GetBlueprintCostMultiplier,
+            runVariableReader.GetStartingBlueprintCandidateIds());
     }
 
     public static IReadOnlyList<FacilityShopOffer> CreateDailyOffers(
@@ -255,7 +341,8 @@ public static class FacilityShopService
         IEnumerable<FacilityBlueprintSO> blueprints,
         int runShopSeed,
         Func<BuildingSO, float> buildingCostMultiplier,
-        Func<FacilityBlueprintSO, float> blueprintCostMultiplier)
+        Func<FacilityBlueprintSO, float> blueprintCostMultiplier,
+        IEnumerable<int> prioritizedBlueprintIds = null)
     {
         if (buildingCostMultiplier == null)
         {
@@ -284,11 +371,31 @@ public static class FacilityShopService
 
         List<FacilityBlueprintSO> commonBlueprints = blueprints?
             .Where((blueprint) => blueprint != null && blueprint.rarity == FacilityShopRarity.Common)
-            .OrderBy((blueprint) => random.NextDouble())
             .ToList()
             ?? new List<FacilityBlueprintSO>();
 
-        foreach (FacilityBlueprintSO blueprint in commonBlueprints.Take(GuaranteedBlueprintSlots))
+        List<FacilityBlueprintSO> guaranteedBlueprints = new List<FacilityBlueprintSO>();
+        if (safeDay == 1)
+        {
+            foreach (int candidateId in prioritizedBlueprintIds ?? Array.Empty<int>())
+            {
+                FacilityBlueprintSO candidate = commonBlueprints
+                    .FirstOrDefault((blueprint) => blueprint.id == candidateId);
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                guaranteedBlueprints.Add(candidate);
+                commonBlueprints.Remove(candidate);
+                break;
+            }
+        }
+
+        guaranteedBlueprints.AddRange(commonBlueprints
+            .OrderBy((blueprint) => random.NextDouble())
+            .Take(Mathf.Max(0, GuaranteedBlueprintSlots - guaranteedBlueprints.Count)));
+        foreach (FacilityBlueprintSO blueprint in guaranteedBlueprints)
         {
             offers.Add(CreateBlueprintOffer(blueprint, true, blueprintCostMultiplier));
         }
@@ -396,7 +503,7 @@ public static class FacilityShopService
         }
 
         gameData.holdingMoney.Value -= offer.Cost;
-        string message = ApplyPurchase(offer, unlockState);
+        string message = offer.ApplyPurchase(unlockState);
         result = new FacilityShopPurchaseResult(true, offer, offer.Cost, message);
         FacilityShopPurchasedEvent.Trigger(result);
         return true;
@@ -414,15 +521,14 @@ public static class FacilityShopService
             return 0;
         }
 
+        if (building.TryGetAbility(out BuildingQualityAbility quality))
+        {
+            return Mathf.Clamp(quality.star, 1, 5);
+        }
+
         if (building.Defense != null && building.Defense.IsDefenseFacility)
         {
             return Mathf.Max(1, building.Defense.star);
-        }
-
-        string objectName = GetBuildingName(building);
-        if (!string.IsNullOrWhiteSpace(objectName) && objectName.Length >= 2 && char.IsDigit(objectName[0]) && objectName[1] == '성')
-        {
-            return Mathf.Max(1, objectName[0] - '0');
         }
 
         return 1;
@@ -466,7 +572,7 @@ public static class FacilityShopService
 
         FacilityShopRarity rarity = ResolveBuildingRarity(building);
         int cost = CalculateBuildingCost(building, basicPurchase, rarity, buildingCostMultiplier);
-        return new FacilityShopOffer(building, cost, rarity, basicPurchase, randomOffer);
+        return new FacilityBuildingOffer(building, cost, rarity, basicPurchase, randomOffer);
     }
 
     private static FacilityShopOffer CreateBlueprintOffer(
@@ -479,7 +585,7 @@ public static class FacilityShopService
             return null;
         }
 
-        return new FacilityShopOffer(
+        return new FacilityBlueprintOffer(
             blueprint,
             Mathf.Max(0, Mathf.RoundToInt(blueprint.defaultCost * GetBlueprintCostMultiplier(blueprint, blueprintCostMultiplier))),
             blueprint.rarity,
@@ -512,15 +618,7 @@ public static class FacilityShopService
         Func<BuildingSO, float> buildingCostMultiplier)
     {
         int star = Mathf.Max(1, GetBuildingStar(building));
-        int categoryWeight = building.category switch
-        {
-            BuildingCategory.Shop => 90,
-            BuildingCategory.Production => 110,
-            BuildingCategory.Crafting => 120,
-            BuildingCategory.Resource => 130,
-            BuildingCategory.Special => 140,
-            _ => 100
-        };
+        int categoryWeight = BuildingCategoryCatalog.GetShopCostWeight(building.category);
 
         int rarityWeight = rarity switch
         {
@@ -545,38 +643,25 @@ public static class FacilityShopService
         return Mathf.Max(0.05f, blueprintCostMultiplier(blueprint));
     }
 
-    private static string ApplyPurchase(FacilityShopOffer offer, FacilityShopUnlockState unlockState)
-    {
-        if (offer.Type == FacilityShopOfferType.Building)
-        {
-            offer.Building.unlocked = true;
-            if (offer.IsBasicPurchase)
-            {
-                unlockState?.UnlockBasicPurchase(offer.Building);
-            }
-
-            return $"{offer.DisplayName} 구매 완료";
-        }
-
-        unlockState?.MarkBlueprintAcquired(offer.Blueprint);
-        EventAlertService.RaiseBlueprintAcquired($"{offer.DisplayName} 획득");
-        return $"{offer.DisplayName} 설계도 획득";
-    }
-
 }
 
-public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<OperatingDayEndedEvent>
+public class DailyFacilityShopRuntime :
+    MonoBehaviour,
+    UtilEventListener<OperatingDayEndedEvent>,
+    UtilEventListener<RunStartVariablesSelectedEvent>
 {
     [SerializeField] private bool raiseAlertOnRefresh = true;
 
     private readonly List<FacilityShopOffer> currentDailyOffers = new List<FacilityShopOffer>();
+    private IReadOnlyList<FacilityShopOffer> currentDailyOffersView;
     private readonly FacilityShopUnlockState unlockState = new FacilityShopUnlockState();
     private int currentOfferDay = 1;
     private IFacilityShopCatalog facilityShopCatalog;
     private IRunVariableRuntimeReader runVariableReader;
     private IMetaProgressionRuntimeReader metaProgressionReader;
 
-    public IReadOnlyList<FacilityShopOffer> CurrentDailyOffers => currentDailyOffers;
+    public IReadOnlyList<FacilityShopOffer> CurrentDailyOffers =>
+        currentDailyOffersView ??= ReadOnlyView.List(currentDailyOffers);
     public IReadOnlyList<FacilityShopOffer> CurrentBasicPurchaseOffers =>
         FacilityShopService.CreateBasicPurchaseOffers(
             ResolveFacilityShopCatalog(),
@@ -613,6 +698,14 @@ public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<Operati
         Refresh(Mathf.Max(1, eventType.day + 1), raiseAlertOnRefresh);
     }
 
+    public void OnTriggerEvent(RunStartVariablesSelectedEvent eventType)
+    {
+        if (currentOfferDay <= 1)
+        {
+            Refresh(1, false);
+        }
+    }
+
     public void Refresh(int day, bool raiseAlert)
     {
         currentOfferDay = Mathf.Max(1, day);
@@ -633,6 +726,15 @@ public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<Operati
                 EventAlertImportance.Medium,
                 "상점");
         }
+    }
+
+    public void RestoreState(
+        int offerDay,
+        IEnumerable<int> basicBuildingIds,
+        IEnumerable<int> acquiredBlueprintIds)
+    {
+        unlockState.Restore(basicBuildingIds, acquiredBlueprintIds);
+        Refresh(Mathf.Max(1, offerDay), false);
     }
 
     public bool TryPurchaseDailyOffer(int index, GameData gameData, out FacilityShopPurchaseResult result)
@@ -663,11 +765,13 @@ public class DailyFacilityShopRuntime : MonoBehaviour, UtilEventListener<Operati
     private void OnEnable()
     {
         this.EventStartListening<OperatingDayEndedEvent>();
+        this.EventStartListening<RunStartVariablesSelectedEvent>();
     }
 
     private void OnDisable()
     {
         this.EventStopListening<OperatingDayEndedEvent>();
+        this.EventStopListening<RunStartVariablesSelectedEvent>();
     }
 
     private static string FormatOfferList(

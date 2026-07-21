@@ -35,7 +35,7 @@ public static class OffensePanelUiFactory
         panelRect.anchorMax = anchorMax;
         panelRect.offsetMin = Vector2.zero;
         panelRect.offsetMax = Vector2.zero;
-        panelObject.GetComponent<Image>().color = DungeonUiTheme.Panel;
+        panelObject.GetComponent<Image>().color = color;
         return panelObject;
     }
 
@@ -59,7 +59,7 @@ public static class OffensePanelUiFactory
         VerticalLayoutGroup layout = rootObject.GetComponent<VerticalLayoutGroup>();
         layout.spacing = spacing;
         layout.childControlWidth = true;
-        layout.childControlHeight = false;
+        layout.childControlHeight = true;
         layout.childForceExpandHeight = false;
         return rootObject;
     }

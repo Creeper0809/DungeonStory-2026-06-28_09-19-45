@@ -1,23 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using VContainer;
 
 public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupant
 {
     private const float DefaultAiReservationSeconds = 12f;
-    private static readonly IFacilityCandidateCache FallbackFacilityCandidateCache =
-        new FacilityCandidateCacheStore();
-    private static readonly IRoomFacilityPolicy FallbackRoomFacilityPolicy =
-        new RoomFacilityPolicyService(new RoomLayoutCache());
-    private static readonly IBlueprintResearchWorkService FallbackBlueprintResearchWorkService =
-        new BuildableObjectNoopBlueprintResearchWorkService();
-    private static readonly IWorldInfoClickSelector FallbackWorldInfoClickSelector =
-        new BuildableObjectNoopWorldInfoClickSelector();
-
+    private const float CleaningWorkThreshold = 75f;
+    private readonly List<Vector2Int> mutableBuildPoses = new List<Vector2Int>();
+    private IReadOnlyList<Vector2Int> buildPosesView;
     public int id { get; private set; }
     public Vector2Int centerPos { get; protected set; }
-    public List<Vector2Int> buildPoses { get; private set; }
+    public IReadOnlyList<Vector2Int> buildPoses =>
+        buildPosesView ??= ReadOnlyView.List(mutableBuildPoses);
     public BuildingSO BuildingData { get; private set; }
 
     protected Grid grid;
@@ -28,7 +24,8 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     public bool isDestroy;
     [SerializeField] private bool isDamaged;
     [SerializeField] private int facilityLevel = 1;
-    [SerializeField] private FacilityOperationalState operationalState = new FacilityOperationalState();
+    [SerializeField] private FacilityRuntimeState facilityState = new FacilityRuntimeState();
+    private readonly List<IBuildingStateModule> runtimeStateModules = new List<IBuildingStateModule>();
     private int currentUserCount;
     private readonly Dictionary<CharacterActor, float> visitReservations = new Dictionary<CharacterActor, float>();
     private CharacterActor workerReservation;
@@ -37,6 +34,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     private IWorldInfoClickSelector worldInfoClickSelector;
     private IFacilityCandidateCache facilityCandidateCache;
     private IRoomFacilityPolicy roomFacilityPolicy;
+    private IExpeditionEquipmentRuntime expeditionEquipmentRuntime;
 
     public int GridId => id;
     public bool IsGridDestroyed => isDestroy;
@@ -48,8 +46,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     public bool IsDamaged => isDamaged;
     public int FacilityLevel => facilityLevel;
     public int CurrentUserCount => currentUserCount;
-    public FacilityOperationalData Operational => BuildingData != null ? BuildingData.Operational : null;
-    public FacilityOperationalState OperationalState => operationalState ??= new FacilityOperationalState();
+    public FacilityRuntimeState FacilityState => facilityState ??= new FacilityRuntimeState();
     public int EffectiveCapacity => ResolveRoomFacilityPolicy().GetEffectiveCapacity(this);
 
     public int ActiveVisitReservationCount
@@ -79,7 +76,8 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         IBlueprintResearchWorkService blueprintResearchWorkService,
         IWorldInfoClickSelector worldInfoClickSelector,
         IFacilityCandidateCache facilityCandidateCache,
-        IRoomFacilityPolicy roomFacilityPolicy)
+        IRoomFacilityPolicy roomFacilityPolicy,
+        IExpeditionEquipmentRuntime expeditionEquipmentRuntime = null)
     {
         this.blueprintResearchWorkService = blueprintResearchWorkService
             ?? throw new ArgumentNullException(nameof(blueprintResearchWorkService));
@@ -89,6 +87,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
         this.roomFacilityPolicy = roomFacilityPolicy
             ?? throw new ArgumentNullException(nameof(roomFacilityPolicy));
+        this.expeditionEquipmentRuntime = expeditionEquipmentRuntime;
     }
 
     public virtual void SetGrid(Grid grid)
@@ -98,6 +97,12 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
     public virtual void Initialization(BuildingSO buildingSO, Vector2Int buildPos)
     {
+        if (buildingSO == null)
+        {
+            throw new ArgumentNullException(nameof(buildingSO));
+        }
+
+        buildingSO.ValidateAbilitiesOrThrow();
         BuildingData = buildingSO;
         GridBuildingPlacement placement = buildingSO.Placement;
         id = buildingSO.id;
@@ -108,11 +113,21 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         visitReservations.Clear();
         workerReservation = null;
         workerReservationUntil = 0f;
-        operationalState ??= new FacilityOperationalState();
-        operationalState.CopyFrom(null);
+        facilityState ??= new FacilityRuntimeState();
+        facilityState.CopyFrom(null);
+        runtimeStateModules.Clear();
+        RegisterStateModule(new FacilityRuntimeStateModule(this));
+        foreach (BuildingAbility ability in buildingSO.Abilities)
+        {
+            if (ability is IBuildingRuntimeStateAbility stateAbility)
+            {
+                RegisterStateModule(stateAbility.CreateStateModule(this));
+            }
+        }
         centerPos = buildPos;
         category = placement.Category;
-        buildPoses = placement.GetGridPosList(buildPos);
+        mutableBuildPoses.Clear();
+        mutableBuildPoses.AddRange(placement.GetGridPosList(buildPos));
         ModularFacilityRuntimeEffects.ConfigureVisual(this);
     }
 
@@ -155,15 +170,15 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         return buildPoses != null && buildPoses.Contains(gridPosition);
     }
 
-    public Vector3 GetFacilityAnchorWorldPosition(FacilityAnchorKind kind, Vector3 fromWorld)
+    public Vector3 GetFacilityAnchorWorldPosition(string purposeId, Vector3 fromWorld)
     {
-        return TryGetFacilityAnchorWorldPosition(kind, fromWorld, out Vector3 worldPosition)
+        return TryGetFacilityAnchorWorldPosition(purposeId, fromWorld, out Vector3 worldPosition)
             ? worldPosition
             : transform.position;
     }
 
     public bool TryGetFacilityAnchorWorldPosition(
-        FacilityAnchorKind kind,
+        string purposeId,
         Vector3 fromWorld,
         out Vector3 worldPosition)
     {
@@ -173,29 +188,25 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             return false;
         }
 
-        if (TryGetConfiguredFacilityAnchorWorldPosition(kind, out worldPosition))
+        if (TryGetConfiguredFacilityAnchorWorldPosition(purposeId, fromWorld, out worldPosition))
         {
             return true;
         }
 
-        switch (kind)
+        if (FacilityAnchorPurposeCatalog.TryGet(purposeId, out FacilityAnchorPurposeDefinition definition))
         {
-            case FacilityAnchorKind.Work:
-                return TryGetHorizontalFootprintAnchorWorldPosition(0.85f, out worldPosition);
-            case FacilityAnchorKind.Checkout:
-                return TryGetHorizontalFootprintAnchorWorldPosition(0.75f, out worldPosition);
-            case FacilityAnchorKind.Use:
-            case FacilityAnchorKind.Exit:
-            default:
-                return TryGetFacilityOccupiedWorldPosition(fromWorld, out worldPosition)
-                    || TryGetHorizontalFootprintAnchorWorldPosition(0.5f, out worldPosition);
+            return definition.FallbackResolver(this, fromWorld, out worldPosition);
         }
+
+        return TryGetFacilityOccupiedWorldPosition(fromWorld, out worldPosition)
+            || TryGetHorizontalFootprintAnchorWorldPosition(0.5f, out worldPosition);
     }
 
     public void DestroySelf()
     {
         OnBuildingDestroyed?.Invoke();
         isDestroy = true;
+        DetachFromGridIfStillRegistered();
         MarkFacilityDynamicStateDirty();
         if (Application.isPlaying)
         {
@@ -205,6 +216,17 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         {
             DestroyImmediate(gameObject);
         }
+    }
+
+    private void DetachFromGridIfStillRegistered()
+    {
+        if (grid == null || BuildingData == null || buildPoses == null || buildPoses.Count == 0)
+        {
+            return;
+        }
+
+        GridBuildingPlacement placement = BuildingData.Placement;
+        grid.RemoveOccupant(this, placement.Layer, buildPoses, placement.IsMovement);
     }
 
     public void SetDamaged(bool value)
@@ -276,7 +298,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             return false;
         }
 
-        if (facilityData.requiresStock
+        if (BuildingData.RequiresStockForUse()
             && this is IStockedFacility stockedFacility
             && !stockedFacility.HasAvailableStock)
         {
@@ -296,8 +318,8 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
         ReleaseVisitReservation(visitor);
         currentUserCount++;
-        OperationalState.completedUses++;
-        OperationalState.cleanliness = Mathf.Clamp(OperationalState.cleanliness - 1.5f, 0f, 100f);
+        FacilityState.completedUses++;
+        FacilityState.cleanliness = Mathf.Clamp(FacilityState.cleanliness - 1.5f, 0f, 100f);
         MarkFacilityDynamicStateDirty();
         FacilityVisitEvent.Trigger(visitor, this);
         return true;
@@ -354,25 +376,32 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         }
     }
 
-    public bool TryReserveWorker(CharacterActor worker, out string failureReason, float seconds = DefaultAiReservationSeconds)
+    public bool TryReserveWorker(
+        CharacterActor worker,
+        out FacilityAssignmentStatus status,
+        float seconds = DefaultAiReservationSeconds)
     {
-        failureReason = string.Empty;
         if (worker == null)
         {
-            failureReason = "작업 예약 대상 없음";
+            status = FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.MissingWorker,
+                "작업 예약 대상 없음");
             return false;
         }
 
         PruneExpiredWorkerReservation();
         if (HasWorkerReservationForOther(worker))
         {
-            failureReason = "이미 작업 예약됨";
+            status = FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.Reserved,
+                "이미 작업 예약됨");
             return false;
         }
 
         workerReservation = worker;
         workerReservationUntil = Time.time + Mathf.Max(0.1f, seconds);
         MarkFacilityDynamicStateDirty();
+        status = FacilityAssignmentStatus.Allowed();
         return true;
     }
 
@@ -407,34 +436,52 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
     public bool CanAssignWork(FacilityWorkType workType, out string failureReason)
     {
+        FacilityAssignmentStatus status = GetWorkAssignmentStatus(workType);
+        failureReason = status.Reason;
+        return status.IsAllowed;
+    }
+
+    public FacilityAssignmentStatus GetWorkAssignmentStatus(FacilityWorkType workType)
+    {
         PruneExpiredWorkerReservation();
-        failureReason = string.Empty;
         if (isDestroy)
         {
-            failureReason = "시설 파괴됨";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.Destroyed,
+                "시설 파괴됨");
         }
 
         FacilityData facilityData = Facility;
         if (facilityData == null || !facilityData.SupportsWork(workType))
         {
-            failureReason = "지원하지 않는 작업";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.UnsupportedWork,
+                "지원하지 않는 작업");
         }
 
         if (workType == FacilityWorkType.Repair && !isDamaged)
         {
-            failureReason = "수리할 필요가 없음";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.WorkNotNeeded,
+                "수리할 필요가 없음");
+        }
+
+        if (workType == FacilityWorkType.Clean
+            && FacilityState.cleanliness >= CleaningWorkThreshold)
+        {
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.WorkNotNeeded,
+                "청소할 필요가 없음");
         }
 
         if (isDamaged && facilityData.disabledWhenDamaged && workType != FacilityWorkType.Repair)
         {
-            failureReason = "시설 파손";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.Damaged,
+                "시설 파손");
         }
 
-        return true;
+        return FacilityAssignmentStatus.Allowed();
     }
     private int GetActiveVisitReservationCountExcept(CharacterActor visitor)
     {
@@ -550,22 +597,40 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     }
 
     private bool TryGetConfiguredFacilityAnchorWorldPosition(
-        FacilityAnchorKind kind,
+        string purposeId,
+        Vector3 fromWorld,
         out Vector3 worldPosition)
     {
         worldPosition = transform.position;
         if (BuildingData == null
             || BuildingData.FacilityAnchors == null
-            || !BuildingData.FacilityAnchors.TryGetOffset(kind, out Vector2 offset))
+            || string.IsNullOrWhiteSpace(purposeId))
         {
             return false;
         }
 
-        worldPosition = grid.GetWorldPos(new Vector2(centerPos.x + offset.x, centerPos.y + offset.y));
-        return true;
+        bool found = false;
+        float bestDistance = float.MaxValue;
+        foreach (FacilityAnchorSlot slot in BuildingData.FacilityAnchors.Enumerate(purposeId))
+        {
+            Vector3 candidate = grid.GetWorldPos(new Vector2(
+                centerPos.x + slot.offset.x,
+                centerPos.y + slot.offset.y));
+            float distance = (candidate - fromWorld).sqrMagnitude;
+            if (found && distance >= bestDistance)
+            {
+                continue;
+            }
+
+            found = true;
+            bestDistance = distance;
+            worldPosition = candidate;
+        }
+
+        return found;
     }
 
-    private bool TryGetHorizontalFootprintAnchorWorldPosition(
+    public bool TryGetHorizontalFootprintAnchorWorldPosition(
         float normalizedX,
         out Vector3 worldPosition)
     {
@@ -613,13 +678,14 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             urgency += 80f;
         }
 
+        int internalStockCapacity = BuildingData.GetInternalStockCapacity();
         if (workType == FacilityWorkType.Restock
-            && facilityData.internalStockMax > 0
+            && internalStockCapacity > 0
             && this is IStockedFacility stockedFacility)
         {
-            float stockRatio = Mathf.Clamp01((float)stockedFacility.CurrentStock / facilityData.internalStockMax);
+            float stockRatio = Mathf.Clamp01((float)stockedFacility.CurrentStock / internalStockCapacity);
             urgency += Mathf.Lerp(70f, 0f, stockRatio);
-            if (stockedFacility.CurrentStock <= facilityData.restockRequestThreshold)
+            if (stockedFacility.CurrentStock <= BuildingData.GetRestockRequestThreshold())
             {
                 urgency += 20f;
             }
@@ -630,17 +696,22 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             urgency += 45f;
         }
 
+        if (workType == FacilityWorkType.Craft && HasPendingEquipmentCraftWork())
+        {
+            urgency += 55f;
+        }
+
+        if (workType == FacilityWorkType.Clean && FacilityState.cleanliness < CleaningWorkThreshold)
+        {
+            urgency += Mathf.Lerp(15f, 70f, 1f - (FacilityState.cleanliness / CleaningWorkThreshold));
+        }
+
         return urgency;
     }
 
     public virtual bool isVisitable()
     {
         return CanVisit((CharacterActor)null, out _);
-    }
-
-    private void OnMouseDown()
-    {
-        RequireWorldInfoClickSelector().TryHandleWorldInfoClick();
     }
 
     public void TriggerWorldInfoClick()
@@ -658,78 +729,152 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         return ResolveRoomFacilityPolicy().GetOperationalProfile(this);
     }
 
-    public void RestoreOperationalState(FacilityOperationalState state)
+    public void RestoreFacilityState(FacilityRuntimeState state)
     {
-        operationalState ??= new FacilityOperationalState();
-        operationalState.CopyFrom(state);
+        facilityState ??= new FacilityRuntimeState();
+        facilityState.CopyFrom(state);
         MarkFacilityDynamicStateDirty();
+    }
+
+    public void RestoreLegacyFacilityStateV1(LegacyFacilityOperationalStateV1 state)
+    {
+        state ??= new LegacyFacilityOperationalStateV1();
+        RestoreFacilityState(new FacilityRuntimeState
+        {
+            completedUses = state.completedUses,
+            completedWorkCycles = state.completedWorkCycles,
+            cleanliness = state.cleanliness
+        });
+
+        BuildingProductionStateModule production = runtimeStateModules
+            .OfType<BuildingProductionStateModule>()
+            .FirstOrDefault();
+        production?.SetProducedStock(state.producedStock);
+
+        BuildingSecurityStateModule security = runtimeStateModules
+            .OfType<BuildingSecurityStateModule>()
+            .FirstOrDefault();
+        security?.SetAlarmCharges(state.alarmCharges);
+    }
+
+    public void RecordCompletedWorkCycle()
+    {
+        FacilityState.completedWorkCycles++;
+        MarkFacilityDynamicStateDirty();
+    }
+
+    public void SetCleanliness(float value)
+    {
+        FacilityState.cleanliness = Mathf.Clamp(value, 0f, 100f);
+        MarkFacilityDynamicStateDirty();
+    }
+
+    public IReadOnlyList<IBuildingStateModule> GetStateModules()
+    {
+        List<IBuildingStateModule> modules = new List<IBuildingStateModule>(runtimeStateModules);
+        MonoBehaviour[] components = GetComponents<MonoBehaviour>();
+        foreach (MonoBehaviour component in components)
+        {
+            if (component is IBuildingStateModule module && !modules.Contains(module))
+            {
+                modules.Add(module);
+            }
+        }
+
+        return modules;
+    }
+
+    protected void RegisterStateModule(IBuildingStateModule module)
+    {
+        if (module == null)
+        {
+            throw new ArgumentNullException(nameof(module));
+        }
+
+        string moduleId = module.ModuleId?.Trim();
+        if (string.IsNullOrWhiteSpace(moduleId))
+        {
+            throw new InvalidOperationException(
+                $"{GetType().Name} '{name}' cannot register a state module without an ID.");
+        }
+
+        if (module.CurrentVersion <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{GetType().Name} '{name}' state module '{moduleId}' has invalid version {module.CurrentVersion}.");
+        }
+
+        if (runtimeStateModules.Any(candidate => candidate != null
+                && string.Equals(candidate.ModuleId?.Trim(), moduleId, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"{GetType().Name} '{name}' already registered state module '{moduleId}'.");
+        }
+
+        runtimeStateModules.Add(module);
+    }
+
+    public bool TryGetStateModule<TModule>(string moduleId, out TModule module)
+        where TModule : class, IBuildingStateModule
+    {
+        foreach (IBuildingStateModule candidate in runtimeStateModules)
+        {
+            if (candidate is TModule typed
+                && string.Equals(candidate.ModuleId, moduleId, StringComparison.Ordinal))
+            {
+                module = typed;
+                return true;
+            }
+        }
+
+        module = null;
+        return false;
+    }
+
+    public TModule RequireStateModule<TModule>(string moduleId)
+        where TModule : class, IBuildingStateModule
+    {
+        if (TryGetStateModule(moduleId, out TModule module))
+        {
+            return module;
+        }
+
+        throw new InvalidOperationException(
+            $"{GetType().Name} '{name}' is missing runtime state module '{moduleId}'.");
     }
 
     private IFacilityCandidateCache ResolveFacilityCandidateCache()
     {
-        return facilityCandidateCache ?? FallbackFacilityCandidateCache;
+        return RuntimeDependency.Require(facilityCandidateCache, this);
     }
 
     private IRoomFacilityPolicy ResolveRoomFacilityPolicy()
     {
-        return roomFacilityPolicy ?? FallbackRoomFacilityPolicy;
+        return RuntimeDependency.Require(roomFacilityPolicy, this);
     }
 
     private IBlueprintResearchWorkService ResolveBlueprintResearchWorkService()
     {
-        return blueprintResearchWorkService ?? FallbackBlueprintResearchWorkService;
+        return RuntimeDependency.Require(blueprintResearchWorkService, this);
+    }
+
+    public bool TryGetExpeditionEquipmentRuntime(out IExpeditionEquipmentRuntime runtime)
+    {
+        runtime = expeditionEquipmentRuntime;
+        return runtime != null;
+    }
+
+    public bool HasPendingEquipmentCraftWork()
+    {
+        BuildingEquipmentCraftingAbility crafting = BuildingData?.GetAbility<BuildingEquipmentCraftingAbility>();
+        return crafting != null
+            && expeditionEquipmentRuntime != null
+            && expeditionEquipmentRuntime.HasPendingCraftWork(crafting.CraftableEquipmentIds);
     }
 
     private IWorldInfoClickSelector RequireWorldInfoClickSelector()
     {
-        return worldInfoClickSelector ?? FallbackWorldInfoClickSelector;
+        return RuntimeDependency.Require(worldInfoClickSelector, this);
     }
 
-    private sealed class BuildableObjectNoopBlueprintResearchWorkService : IBlueprintResearchWorkService
-    {
-        public bool HasResearchWorkFor(BuildableObject facility) => false;
-
-        public BlueprintResearchWorkResult ApplyResearchWork(
-            CharacterActor researcher,
-            BuildableObject researchFacility,
-            float seconds)
-        {
-            return new BlueprintResearchWorkResult(
-                false,
-                null,
-                0f,
-                0f,
-                1f,
-                false,
-                "Blueprint research runtime is not available.");
-        }
-    }
-
-    private sealed class BuildableObjectNoopWorldInfoClickSelector : IWorldInfoClickSelector
-    {
-        public bool TryHandleWorldInfoClick() => false;
-
-        public bool TryTriggerCharacterUnderPointer() => false;
-
-        public bool TryGetPreferredCharacterUnderPointer(out CharacterActor actor)
-        {
-            actor = null;
-            return false;
-        }
-
-        public bool TryGetPreferredCharacterAtScreenPosition(
-            Vector3 screenPosition,
-            Camera camera,
-            out CharacterActor actor)
-        {
-            actor = null;
-            return false;
-        }
-
-        public bool TryGetPreferredCharacter(Collider2D[] hits, out CharacterActor actor)
-        {
-            actor = null;
-            return false;
-        }
-    }
 }

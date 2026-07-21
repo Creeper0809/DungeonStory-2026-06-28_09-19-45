@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using VContainer;
@@ -10,12 +12,13 @@ public class EventAlertRuntime : MonoBehaviour, UtilEventListener<EventAlertRequ
     [SerializeField] private TMP_Text detailText;
 
     private readonly List<EventAlertRecord> eventLog = new List<EventAlertRecord>();
+    private ReadOnlyCollection<EventAlertRecord> eventLogView;
     private readonly EventAlertSelectionState selectionState = new EventAlertSelectionState();
     private int nextId = 1;
     private IEventAlertViewPresenterFactory viewPresenterFactory;
     private IEventAlertViewPresenter viewPresenter;
 
-    public IReadOnlyList<EventAlertRecord> EventLog => eventLog;
+    public IReadOnlyList<EventAlertRecord> EventLog => eventLogView ??= eventLog.AsReadOnly();
     public bool IsDetailVisible => viewPresenter != null
         ? viewPresenter.IsDetailVisible
         : detailPanel != null && detailPanel.activeSelf;
@@ -26,7 +29,10 @@ public class EventAlertRuntime : MonoBehaviour, UtilEventListener<EventAlertRequ
     {
         this.viewPresenterFactory = viewPresenterFactory
             ?? throw new System.ArgumentNullException(nameof(viewPresenterFactory));
-        ResolveViewPresenter().EnsureRuntimeUI();
+        if (TryResolveViewPresenter(out IEventAlertViewPresenter presenter))
+        {
+            presenter.EnsureRuntimeUI();
+        }
     }
 
     public void OnTriggerEvent(EventAlertRequestedEvent eventType)
@@ -60,7 +66,10 @@ public class EventAlertRuntime : MonoBehaviour, UtilEventListener<EventAlertRequ
         }
 
         selectionState.Select(record);
-        ResolveViewPresenter().OpenDetail(record);
+        if (TryResolveViewPresenter(out IEventAlertViewPresenter presenter))
+        {
+            presenter.OpenDetail(record);
+        }
     }
 
     public void CloseDetail()
@@ -77,6 +86,35 @@ public class EventAlertRuntime : MonoBehaviour, UtilEventListener<EventAlertRequ
 
         CloseDetail();
         return true;
+    }
+
+    public void RestoreHistory(IEnumerable<EventAlertRecordSnapshot> records)
+    {
+        viewPresenter?.DestroyRuntimeUI();
+        viewPresenter = null;
+        selectionState.Clear();
+        eventLog.Clear();
+        nextId = 1;
+
+        foreach (EventAlertRecordSnapshot snapshot in records ?? System.Array.Empty<EventAlertRecordSnapshot>())
+        {
+            if (snapshot == null)
+            {
+                continue;
+            }
+
+            EventAlertRecord record = new EventAlertRecord(
+                snapshot.Id,
+                snapshot.Title,
+                snapshot.Detail,
+                snapshot.Importance,
+                snapshot.Category,
+                snapshot.Count,
+                snapshot.Choices.Select(choice => new EventAlertChoice(choice.Label, choice.Description)));
+            eventLog.Add(record);
+            nextId = System.Math.Max(nextId, record.Id + 1);
+            CreateButton(record);
+        }
     }
 
     private void OnEnable()
@@ -96,25 +134,32 @@ public class EventAlertRuntime : MonoBehaviour, UtilEventListener<EventAlertRequ
 
     private void CreateButton(EventAlertRecord record)
     {
-        ResolveViewPresenter().CreateButton(record);
+        if (TryResolveViewPresenter(out IEventAlertViewPresenter presenter))
+        {
+            presenter.CreateButton(record);
+        }
     }
 
     private void UpdateButton(EventAlertRecord record)
     {
-        ResolveViewPresenter().UpdateButton(record);
+        if (TryResolveViewPresenter(out IEventAlertViewPresenter presenter))
+        {
+            presenter.UpdateButton(record);
+        }
     }
 
-    private IEventAlertViewPresenter ResolveViewPresenter()
+    private bool TryResolveViewPresenter(out IEventAlertViewPresenter presenter)
     {
         if (viewPresenter != null)
         {
-            return viewPresenter;
+            presenter = viewPresenter;
+            return true;
         }
 
         if (viewPresenterFactory == null)
         {
-            throw new System.InvalidOperationException(
-                $"{nameof(EventAlertRuntime)} requires {nameof(IEventAlertViewPresenterFactory)} injection.");
+            presenter = null;
+            return false;
         }
 
         viewPresenter = viewPresenterFactory.Create(new EventAlertViewPresenterContext(
@@ -124,6 +169,7 @@ public class EventAlertRuntime : MonoBehaviour, UtilEventListener<EventAlertRequ
             Open,
             ExecuteChoice,
             CloseDetail));
-        return viewPresenter;
+        presenter = viewPresenter;
+        return presenter != null;
     }
 }

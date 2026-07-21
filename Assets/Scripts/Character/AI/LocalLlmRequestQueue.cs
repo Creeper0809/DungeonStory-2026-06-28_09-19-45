@@ -1,20 +1,107 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Sirenix.OdinInspector;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.Serialization;
 
-public enum LocalLlmRequestType
+public enum LocalLlmQueueFullBehavior
 {
-    Persona,
-    MacroGoal,
-    MoodImpulse,
-    SocialRumor,
-    FacilityEvolution,
-    CharacterRecord,
-    BubbleLine
+    Fail,
+    RejectQuietly,
+    Drop
+}
+
+public sealed class LocalLlmRequestProfile
+{
+    public LocalLlmRequestProfile(
+        string id,
+        int priority,
+        float temperature = 0.4f,
+        LocalLlmQueueFullBehavior queueFullBehavior = LocalLlmQueueFullBehavior.Fail,
+        bool canBeEvictedForQueuePressure = false,
+        float maxQueueAgeSeconds = 0f,
+        bool logFailureWarnings = false,
+        int maxOutputTokens = 256)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new ArgumentException("A local LLM request profile requires a stable id.", nameof(id));
+        }
+
+        Id = id.Trim();
+        Priority = priority;
+        Temperature = Mathf.Clamp(temperature, 0f, 2f);
+        QueueFullBehavior = queueFullBehavior;
+        CanBeEvictedForQueuePressure = canBeEvictedForQueuePressure;
+        MaxQueueAgeSeconds = Mathf.Max(0f, maxQueueAgeSeconds);
+        LogFailureWarnings = logFailureWarnings;
+        MaxOutputTokens = Mathf.Max(64, maxOutputTokens);
+    }
+
+    public string Id { get; }
+    public int Priority { get; }
+    public float Temperature { get; }
+    public LocalLlmQueueFullBehavior QueueFullBehavior { get; }
+    public bool CanBeEvictedForQueuePressure { get; }
+    public float MaxQueueAgeSeconds { get; }
+    public bool LogFailureWarnings { get; }
+    public int MaxOutputTokens { get; }
+
+    public LocalLlmRequestProfile WithMaxQueueAge(float maxQueueAgeSeconds)
+    {
+        return new LocalLlmRequestProfile(
+            Id,
+            Priority,
+            Temperature,
+            QueueFullBehavior,
+            CanBeEvictedForQueuePressure,
+            maxQueueAgeSeconds,
+            LogFailureWarnings,
+            MaxOutputTokens);
+    }
+}
+
+public static class LocalLlmRequestProfiles
+{
+    public static readonly LocalLlmRequestProfile CharacterSkill = new LocalLlmRequestProfile(
+        "CharacterSkill",
+        40,
+        temperature: 0.35f,
+        queueFullBehavior: LocalLlmQueueFullBehavior.Fail,
+        logFailureWarnings: false,
+        maxOutputTokens: 768);
+    public static readonly LocalLlmRequestProfile Persona = new LocalLlmRequestProfile("Persona", 30);
+    public static readonly LocalLlmRequestProfile MacroGoal = new LocalLlmRequestProfile(
+        "MacroGoal",
+        20,
+        queueFullBehavior: LocalLlmQueueFullBehavior.RejectQuietly);
+    public static readonly LocalLlmRequestProfile MoodImpulse = new LocalLlmRequestProfile(
+        "MoodImpulse",
+        18,
+        queueFullBehavior: LocalLlmQueueFullBehavior.RejectQuietly);
+    public static readonly LocalLlmRequestProfile FacilityEvolution = new LocalLlmRequestProfile(
+        "FacilityEvolution",
+        16,
+        logFailureWarnings: false);
+    public static readonly LocalLlmRequestProfile SocialRumor = new LocalLlmRequestProfile(
+        "SocialRumor",
+        15,
+        queueFullBehavior: LocalLlmQueueFullBehavior.RejectQuietly);
+    public static readonly LocalLlmRequestProfile CharacterRecord = new LocalLlmRequestProfile(
+        "CharacterRecord",
+        12,
+        temperature: 0.7f,
+        queueFullBehavior: LocalLlmQueueFullBehavior.RejectQuietly);
+    public static readonly LocalLlmRequestProfile BubbleLine = new LocalLlmRequestProfile(
+        "BubbleLine",
+        10,
+        queueFullBehavior: LocalLlmQueueFullBehavior.Drop,
+        canBeEvictedForQueuePressure: true,
+        maxQueueAgeSeconds: 3f);
 }
 
 public enum LocalLlmRequestStatus
@@ -22,11 +109,13 @@ public enum LocalLlmRequestStatus
     Succeeded,
     Failed,
     Dropped,
-    TimedOut
+    TimedOut,
+    Cancelled
 }
 
 public interface ILocalLlmRuntime
 {
+    bool GenerateCharacterSkillAsync(string prompt, Action<LocalLlmResult> callback);
     bool GeneratePersonaAsync(string prompt, Action<LocalLlmResult> callback);
     bool GenerateMacroGoalAsync(string prompt, Action<LocalLlmResult> callback);
     bool GenerateMoodImpulseAsync(string prompt, Action<LocalLlmResult> callback);
@@ -34,6 +123,16 @@ public interface ILocalLlmRuntime
     bool GenerateFacilityEvolutionAsync(string prompt, Action<LocalLlmResult> callback);
     bool GenerateCharacterRecordAsync(string prompt, string originalText, Action<LocalLlmResult> callback);
     bool GenerateBubbleLineAsync(string prompt, string originalText, Action<LocalLlmResult> callback);
+}
+
+public interface ICorrelatedCharacterSkillLlmRuntime
+{
+    bool GenerateCharacterSkillAsync(
+        string requestKey,
+        string prompt,
+        Action<LocalLlmResult> callback);
+
+    void CancelCharacterSkillRequest(string requestKey);
 }
 
 public readonly struct LocalLlmResult
@@ -55,30 +154,86 @@ public readonly struct LocalLlmResult
     public string Error { get; }
     public string OriginalText { get; }
     public bool IsSuccess => Status == LocalLlmRequestStatus.Succeeded;
+    public bool IsCancelled => Status == LocalLlmRequestStatus.Cancelled;
 }
 
 internal sealed class LocalLlmQueuedRequest
 {
-    public LocalLlmRequestType Type;
-    public string Prompt;
-    public string OriginalText;
-    public float TimeoutSeconds;
-    public float EnqueuedAt;
-    public Action<LocalLlmResult> Callback;
+    public LocalLlmQueuedRequest(
+        LocalLlmRequestProfile profile,
+        string prompt,
+        string originalText,
+        float timeoutSeconds,
+        float enqueuedAt,
+        string correlationId,
+        Action<LocalLlmResult> callback)
+    {
+        Profile = profile ?? throw new ArgumentNullException(nameof(profile));
+        Prompt = prompt ?? throw new ArgumentNullException(nameof(prompt));
+        OriginalText = originalText ?? string.Empty;
+        TimeoutSeconds = Mathf.Max(0.1f, timeoutSeconds);
+        EnqueuedAt = enqueuedAt;
+        CorrelationId = correlationId ?? string.Empty;
+        Callback = callback;
+    }
+
+    public LocalLlmRequestProfile Profile { get; }
+    public string Prompt { get; }
+    public string OriginalText { get; }
+    public float TimeoutSeconds { get; }
+    public float EnqueuedAt { get; }
+    public string CorrelationId { get; }
+    public float StartedAt { get; private set; } = -1f;
+    private Action<LocalLlmResult> Callback { get; set; }
+    private UnityWebRequest ActiveWebRequest { get; set; }
+
+    public bool IsCompleted { get; private set; }
+
+    public bool TryTakeCallback(out Action<LocalLlmResult> callback)
+    {
+        if (IsCompleted)
+        {
+            callback = null;
+            return false;
+        }
+
+        IsCompleted = true;
+        callback = Callback;
+        Callback = null;
+        return true;
+    }
+
+    public void Attach(UnityWebRequest request)
+    {
+        ActiveWebRequest = request;
+        StartedAt = Time.realtimeSinceStartup;
+    }
+
+    public void Detach()
+    {
+        ActiveWebRequest = null;
+    }
+
+    public void Abort()
+    {
+        ActiveWebRequest?.Abort();
+    }
 }
 
 [DisallowMultipleComponent]
 [DrawWithUnity]
-public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRuntime
+public sealed class LocalLlmRequestQueue :
+    SerializedMonoBehaviour,
+    ILocalLlmRuntime,
+    ICorrelatedCharacterSkillLlmRuntime
 {
-    private static LocalLlmRequestQueue instance;
-
     [SerializeField] private string endpointUrl = "http://localhost:11434/v1/chat/completions";
     [SerializeField] private string modelName = "llama3.1";
     [SerializeField] private bool enableJsonMode = true;
     [SerializeField, Min(1)] private int maxQueueSize = 64;
-    [SerializeField, Range(1, 2)] private int maxConcurrentRequests = 1;
+    [SerializeField, Range(1, 2)] private int maxConcurrentRequests = 2;
     [SerializeField, Min(0.1f)] private float personaTimeoutSeconds = 20f;
+    [SerializeField, Min(0.1f)] private float characterSkillTimeoutSeconds = 60f;
     [SerializeField, Min(0.1f)] private float macroGoalTimeoutSeconds = 12f;
     [SerializeField, Min(0.1f)] private float moodImpulseTimeoutSeconds = 8f;
     [SerializeField, Min(0.1f)] private float socialRumorTimeoutSeconds = 8f;
@@ -86,22 +241,47 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
     [SerializeField, Min(0.1f)] private float characterRecordTimeoutSeconds = 8f;
     [SerializeField, Min(0.1f)] private float bubbleTimeoutSeconds = 4f;
     [SerializeField, Min(0.1f)] private float bubbleMaxQueueAgeSeconds = 3f;
-    [SerializeField, ReadOnly] private int runningCount;
-    [SerializeField, ReadOnly] private int droppedBubbleCount;
+    [FormerlySerializedAs("droppedBubbleCount")]
+    [SerializeField, ReadOnly] private int droppedEphemeralRequestCount;
     [SerializeField, ReadOnly] private int timeoutCount;
     [SerializeField, ReadOnly] private string lastError;
+    [SerializeField, ReadOnly] private string lastCompletionDiagnostic;
     [SerializeField, ReadOnly] private bool suppressWarningLogsForDebug;
 
     private readonly List<LocalLlmQueuedRequest> queue = new List<LocalLlmQueuedRequest>();
+    private readonly HashSet<LocalLlmQueuedRequest> runningRequests = new HashSet<LocalLlmQueuedRequest>();
+    private bool isSuspended;
 
     public int QueuedCount => queue.Count;
-    public int RunningCount => runningCount;
-    public int DroppedBubbleCount => droppedBubbleCount;
+    public int RunningCount => runningRequests.Count;
+    public int DroppedEphemeralRequestCount => droppedEphemeralRequestCount;
+    public int DroppedBubbleCount => droppedEphemeralRequestCount;
     public int TimeoutCount => timeoutCount;
     public int MaxQueueSize => maxQueueSize;
     public string LastError => lastError;
+    public string LastCompletionDiagnostic => lastCompletionDiagnostic;
     public bool HasConfiguredEndpoint => !string.IsNullOrWhiteSpace(endpointUrl)
         && !string.IsNullOrWhiteSpace(modelName);
+
+    public string PeekNextProfileIdForDebug()
+    {
+        return queue.Count > 0
+            ? queue[FindNextRequestIndex()].Profile.Id
+            : string.Empty;
+    }
+
+    public string GetRequestDiagnosticsForDebug()
+    {
+        float now = Time.realtimeSinceStartup;
+        string running = string.Join(",", runningRequests
+            .Where(request => request != null)
+            .Select(request => $"{request.Profile.Id}:age={Mathf.Max(0f, now - request.StartedAt):0.0}s/timeout={request.TimeoutSeconds:0.0}s/prompt={request.Prompt.Length}"));
+        string waiting = string.Join(",", queue
+            .Where(request => request != null)
+            .Take(8)
+            .Select(request => $"{request.Profile.Id}:wait={Mathf.Max(0f, Time.time - request.EnqueuedAt):0.0}s/prompt={request.Prompt.Length}"));
+        return $"running=[{running}] queued=[{waiting}] last=[{lastCompletionDiagnostic}]";
+    }
 
     public void ConfigureBubblePolicyForDebug(float timeoutSeconds, float maxQueueAgeSeconds)
     {
@@ -116,7 +296,8 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         float bubbleSeconds,
         float moodImpulseSeconds = 8f,
         float facilityEvolutionSeconds = 10f,
-        float characterRecordSeconds = 8f)
+        float characterRecordSeconds = 8f,
+        float characterSkillSeconds = 30f)
     {
         personaTimeoutSeconds = Mathf.Max(0.1f, personaSeconds);
         macroGoalTimeoutSeconds = Mathf.Max(0.1f, macroGoalSeconds);
@@ -124,27 +305,18 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         socialRumorTimeoutSeconds = Mathf.Max(0.1f, socialRumorSeconds);
         facilityEvolutionTimeoutSeconds = Mathf.Max(0.1f, facilityEvolutionSeconds);
         characterRecordTimeoutSeconds = Mathf.Max(0.1f, characterRecordSeconds);
+        characterSkillTimeoutSeconds = Mathf.Max(0.1f, characterSkillSeconds);
         bubbleTimeoutSeconds = Mathf.Max(0.1f, bubbleSeconds);
     }
 
     public void ClearForDebug()
     {
-        queue.Clear();
-        droppedBubbleCount = 0;
-        timeoutCount = 0;
-        lastError = string.Empty;
-        suppressWarningLogsForDebug = false;
+        ResetTransientState("Local LLM queue was cleared for debug.", remainSuspended: false);
     }
 
     public void AbortAllForDebug()
     {
-        StopAllCoroutines();
-        queue.Clear();
-        runningCount = 0;
-        droppedBubbleCount = 0;
-        timeoutCount = 0;
-        lastError = string.Empty;
-        suppressWarningLogsForDebug = false;
+        ResetTransientState("Local LLM requests were aborted for debug.", remainSuspended: false);
     }
 
     public void SetWarningLogsSuppressedForDebug(bool value)
@@ -152,30 +324,56 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         suppressWarningLogsForDebug = value;
     }
 
-    private void Awake()
+    private void OnEnable()
     {
-        if (instance != null && instance != this)
-        {
-            Debug.LogError("Multiple LocalLlmRequestQueue instances exist. Remove the duplicate.", this);
-            enabled = false;
-            return;
-        }
-
-        instance = this;
+        isSuspended = false;
     }
 
-    private void OnDestroy()
+    private void OnDisable()
     {
-        if (instance == this)
+        ResetTransientState("Local LLM queue was disabled.", remainSuspended: true);
+    }
+
+    private void ResetTransientState(string reason, bool remainSuspended)
+    {
+        isSuspended = true;
+        List<LocalLlmQueuedRequest> cancelled = new List<LocalLlmQueuedRequest>(
+            queue.Count + runningRequests.Count);
+        cancelled.AddRange(queue);
+        cancelled.AddRange(runningRequests);
+
+        StopAllCoroutines();
+        queue.Clear();
+        runningRequests.Clear();
+
+        LocalLlmResult result = new LocalLlmResult(
+            LocalLlmRequestStatus.Cancelled,
+            string.Empty,
+            reason,
+            string.Empty);
+        foreach (LocalLlmQueuedRequest request in cancelled)
         {
-            instance = null;
+            request.Abort();
+            Complete(request, new LocalLlmResult(
+                result.Status,
+                result.Content,
+                result.Error,
+                request.OriginalText),
+                logFailure: false);
         }
+
+        droppedEphemeralRequestCount = 0;
+        timeoutCount = 0;
+        lastError = string.Empty;
+        lastCompletionDiagnostic = string.Empty;
+        suppressWarningLogsForDebug = false;
+        isSuspended = remainSuspended;
     }
 
     private void Update()
     {
-        DropExpiredBubbleRequests();
-        while (runningCount < Mathf.Max(1, maxConcurrentRequests) && queue.Count > 0)
+        DropExpiredRequests();
+        while (RunningCount < Mathf.Max(1, maxConcurrentRequests) && queue.Count > 0)
         {
             int index = FindNextRequestIndex();
             LocalLlmQueuedRequest request = queue[index];
@@ -187,6 +385,11 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
     public bool EnqueuePersona(string prompt, Action<LocalLlmResult> callback)
     {
         return GeneratePersonaAsync(prompt, callback);
+    }
+
+    public bool EnqueueCharacterSkill(string prompt, Action<LocalLlmResult> callback)
+    {
+        return GenerateCharacterSkillAsync(prompt, callback);
     }
 
     public bool EnqueueMacroGoal(string prompt, Action<LocalLlmResult> callback)
@@ -221,27 +424,77 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
 
     public bool GeneratePersonaAsync(string prompt, Action<LocalLlmResult> callback)
     {
-        return Enqueue(LocalLlmRequestType.Persona, prompt, string.Empty, personaTimeoutSeconds, callback);
+        return Enqueue(LocalLlmRequestProfiles.Persona, prompt, string.Empty, personaTimeoutSeconds, callback);
+    }
+
+    public bool GenerateCharacterSkillAsync(string prompt, Action<LocalLlmResult> callback)
+    {
+        return Enqueue(
+            LocalLlmRequestProfiles.CharacterSkill,
+            prompt,
+            string.Empty,
+            characterSkillTimeoutSeconds,
+            callback);
+    }
+
+    public bool GenerateCharacterSkillAsync(
+        string requestKey,
+        string prompt,
+        Action<LocalLlmResult> callback)
+    {
+        return Enqueue(
+            LocalLlmRequestProfiles.CharacterSkill,
+            prompt,
+            string.Empty,
+            characterSkillTimeoutSeconds,
+            callback,
+            requestKey);
+    }
+
+    public void CancelCharacterSkillRequest(string requestKey)
+    {
+        if (string.IsNullOrWhiteSpace(requestKey))
+        {
+            return;
+        }
+
+        LocalLlmQueuedRequest[] cancelled = queue
+            .Concat(runningRequests)
+            .Where(request => request != null
+                && string.Equals(request.CorrelationId, requestKey, StringComparison.Ordinal))
+            .Distinct()
+            .ToArray();
+        foreach (LocalLlmQueuedRequest request in cancelled)
+        {
+            queue.Remove(request);
+            request.Abort();
+            Complete(request, new LocalLlmResult(
+                LocalLlmRequestStatus.Cancelled,
+                string.Empty,
+                "Character skill request was cancelled.",
+                request.OriginalText),
+                logFailure: false);
+        }
     }
 
     public bool GenerateMacroGoalAsync(string prompt, Action<LocalLlmResult> callback)
     {
-        return Enqueue(LocalLlmRequestType.MacroGoal, prompt, string.Empty, macroGoalTimeoutSeconds, callback);
+        return Enqueue(LocalLlmRequestProfiles.MacroGoal, prompt, string.Empty, macroGoalTimeoutSeconds, callback);
     }
 
     public bool GenerateMoodImpulseAsync(string prompt, Action<LocalLlmResult> callback)
     {
-        return Enqueue(LocalLlmRequestType.MoodImpulse, prompt, string.Empty, moodImpulseTimeoutSeconds, callback);
+        return Enqueue(LocalLlmRequestProfiles.MoodImpulse, prompt, string.Empty, moodImpulseTimeoutSeconds, callback);
     }
 
     public bool GenerateSocialRumorAsync(string prompt, Action<LocalLlmResult> callback)
     {
-        return Enqueue(LocalLlmRequestType.SocialRumor, prompt, string.Empty, socialRumorTimeoutSeconds, callback);
+        return Enqueue(LocalLlmRequestProfiles.SocialRumor, prompt, string.Empty, socialRumorTimeoutSeconds, callback);
     }
 
     public bool GenerateFacilityEvolutionAsync(string prompt, Action<LocalLlmResult> callback)
     {
-        return Enqueue(LocalLlmRequestType.FacilityEvolution, prompt, string.Empty, facilityEvolutionTimeoutSeconds, callback);
+        return Enqueue(LocalLlmRequestProfiles.FacilityEvolution, prompt, string.Empty, facilityEvolutionTimeoutSeconds, callback);
     }
 
     public bool GenerateCharacterRecordAsync(
@@ -250,7 +503,7 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         Action<LocalLlmResult> callback)
     {
         return Enqueue(
-            LocalLlmRequestType.CharacterRecord,
+            LocalLlmRequestProfiles.CharacterRecord,
             prompt,
             originalText,
             characterRecordTimeoutSeconds,
@@ -259,19 +512,43 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
 
     public bool GenerateBubbleLineAsync(string prompt, string originalText, Action<LocalLlmResult> callback)
     {
-        return Enqueue(LocalLlmRequestType.BubbleLine, prompt, originalText, bubbleTimeoutSeconds, callback);
+        return Enqueue(
+            LocalLlmRequestProfiles.BubbleLine.WithMaxQueueAge(bubbleMaxQueueAgeSeconds),
+            prompt,
+            originalText,
+            bubbleTimeoutSeconds,
+            callback);
     }
 
-    private bool Enqueue(
-        LocalLlmRequestType type,
+    public bool Enqueue(
+        LocalLlmRequestProfile profile,
         string prompt,
         string originalText,
         float timeoutSeconds,
-        Action<LocalLlmResult> callback)
+        Action<LocalLlmResult> callback,
+        string correlationId = "")
     {
+        string profileId = profile != null ? profile.Id : "Unknown";
+        if (isSuspended || !isActiveAndEnabled)
+        {
+            lastError = $"{profileId}: Skipped - Local LLM queue is not active.";
+            return false;
+        }
+
+        if (profile == null)
+        {
+            lastError = "Unknown: Failed - Local LLM request profile is null.";
+            InvokeCallbackSafely(callback, new LocalLlmResult(
+                LocalLlmRequestStatus.Failed,
+                string.Empty,
+                "Local LLM request profile is null.",
+                originalText));
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            callback?.Invoke(new LocalLlmResult(
+            InvokeCallbackSafely(callback, new LocalLlmResult(
                 LocalLlmRequestStatus.Failed,
                 string.Empty,
                 "LLM prompt is empty.",
@@ -279,44 +556,56 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
             return false;
         }
 
-        if (queue.Count >= maxQueueSize && !TryDropLowestPriorityBubble())
+        if (queue.Count >= maxQueueSize && !TryDropLowestPriorityEvictableRequest())
         {
-            if (type == LocalLlmRequestType.BubbleLine)
+            if (profile.QueueFullBehavior == LocalLlmQueueFullBehavior.Drop)
             {
-                droppedBubbleCount++;
-                callback?.Invoke(new LocalLlmResult(
+                droppedEphemeralRequestCount++;
+                InvokeCallbackSafely(callback, new LocalLlmResult(
                     LocalLlmRequestStatus.Dropped,
                     string.Empty,
-                    "Bubble request dropped because the LLM queue is full.",
+                    $"{profile.Id} request dropped because the LLM queue is full.",
                     originalText));
                 return false;
             }
 
-            lastError = $"{type}: Failed - LLM queue is full and no bubble request can be dropped.";
-            callback?.Invoke(new LocalLlmResult(
+            if (profile.QueueFullBehavior == LocalLlmQueueFullBehavior.RejectQuietly)
+            {
+                lastError = $"{profile.Id}: Skipped - LLM queue is full.";
+                return false;
+            }
+
+            lastError = $"{profile.Id}: Failed - LLM queue is full and no queued request can be evicted.";
+            InvokeCallbackSafely(callback, new LocalLlmResult(
                 LocalLlmRequestStatus.Failed,
                 string.Empty,
-                "LLM queue is full and no bubble request can be dropped.",
+                "LLM queue is full and no queued request can be evicted.",
                 originalText));
-            LogWarningIfAllowed(lastError);
+            if (profile.LogFailureWarnings)
+            {
+                LogWarningIfAllowed(lastError);
+            }
             return false;
         }
 
-        queue.Add(new LocalLlmQueuedRequest
-        {
-            Type = type,
-            Prompt = prompt,
-            OriginalText = originalText,
-            TimeoutSeconds = Mathf.Max(0.1f, timeoutSeconds),
-            EnqueuedAt = Time.time,
-            Callback = callback
-        });
+        queue.Add(new LocalLlmQueuedRequest(
+            profile,
+            prompt,
+            originalText,
+            timeoutSeconds,
+            Time.time,
+            correlationId,
+            callback));
         return true;
     }
 
     private IEnumerator ProcessRequest(LocalLlmQueuedRequest request)
     {
-        runningCount++;
+        if (request == null || request.IsCompleted || !runningRequests.Add(request))
+        {
+            yield break;
+        }
+
         try
         {
             if (!HasConfiguredEndpoint)
@@ -329,13 +618,21 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
                 yield break;
             }
 
-            using UnityWebRequest webRequest = BuildRequest(request.Type, request.Prompt);
+            using UnityWebRequest webRequest = BuildRequest(request.Profile, request.Prompt);
+            request.Attach(webRequest);
             webRequest.timeout = Mathf.CeilToInt(request.TimeoutSeconds);
             UnityWebRequestAsyncOperation operation = webRequest.SendWebRequest();
             float timeoutAt = Time.realtimeSinceStartup + Mathf.Max(0.1f, request.TimeoutSeconds);
-            while (!operation.isDone && Time.realtimeSinceStartup < timeoutAt)
+            while (!operation.isDone
+                && !request.IsCompleted
+                && Time.realtimeSinceStartup < timeoutAt)
             {
                 yield return null;
+            }
+
+            if (request.IsCompleted)
+            {
+                yield break;
             }
 
             if (!operation.isDone)
@@ -383,16 +680,18 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         }
         finally
         {
-            runningCount = Mathf.Max(0, runningCount - 1);
+            request.Detach();
+            runningRequests.Remove(request);
         }
     }
 
-    private UnityWebRequest BuildRequest(LocalLlmRequestType type, string prompt)
+    private UnityWebRequest BuildRequest(LocalLlmRequestProfile profile, string prompt)
     {
         OpenAiChatRequest payload = new OpenAiChatRequest
         {
             model = modelName,
-            temperature = type == LocalLlmRequestType.CharacterRecord ? 0.7f : 0.4f,
+            temperature = profile.Temperature,
+            max_tokens = profile.MaxOutputTokens,
             messages = new[]
             {
                 new OpenAiChatMessage
@@ -417,20 +716,53 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         return request;
     }
 
-    private void Complete(LocalLlmQueuedRequest request, LocalLlmResult result)
+    private void Complete(
+        LocalLlmQueuedRequest request,
+        LocalLlmResult result,
+        bool logFailure = true)
     {
+        if (request == null || !request.TryTakeCallback(out Action<LocalLlmResult> callback))
+        {
+            return;
+        }
+
         if (result.Status == LocalLlmRequestStatus.TimedOut)
         {
             timeoutCount++;
         }
 
-        if (!result.IsSuccess)
+        lastCompletionDiagnostic = $"{request.Profile.Id}:{result.Status}:response={result.Content.Length}:error={result.Error}";
+
+        if (!result.IsSuccess
+            && !result.IsCancelled
+            && result.Status != LocalLlmRequestStatus.Dropped
+            && logFailure)
         {
-            lastError = $"{request.Type}: {result.Status} - {result.Error}";
-            LogWarningIfAllowed(lastError);
+            lastError = $"{request.Profile.Id}: {result.Status} - {result.Error}";
+            if (request.Profile.LogFailureWarnings)
+            {
+                LogWarningIfAllowed(lastError);
+            }
         }
 
-        request.Callback?.Invoke(result);
+        InvokeCallbackSafely(callback, result);
+    }
+
+    private void InvokeCallbackSafely(Action<LocalLlmResult> callback, LocalLlmResult result)
+    {
+        if (callback == null)
+        {
+            return;
+        }
+
+        try
+        {
+            callback(result);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogException(exception, this);
+        }
     }
 
     private void LogWarningIfAllowed(string message)
@@ -440,21 +772,25 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
             return;
         }
 
-        Debug.LogWarning($"{name}: {message}", this);
+        Debug.Log($"{name}: {message}", this);
     }
 
-    private bool TryDropLowestPriorityBubble()
+    private bool TryDropLowestPriorityEvictableRequest()
     {
         int index = -1;
+        int lowestPriority = int.MaxValue;
         float oldestTime = float.MaxValue;
         for (int i = 0; i < queue.Count; i++)
         {
             LocalLlmQueuedRequest request = queue[i];
-            if (request.Type != LocalLlmRequestType.BubbleLine || request.EnqueuedAt >= oldestTime)
+            if (!request.Profile.CanBeEvictedForQueuePressure
+                || request.Profile.Priority > lowestPriority
+                || (request.Profile.Priority == lowestPriority && request.EnqueuedAt >= oldestTime))
             {
                 continue;
             }
 
+            lowestPriority = request.Profile.Priority;
             oldestTime = request.EnqueuedAt;
             index = i;
         }
@@ -466,16 +802,16 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
 
         LocalLlmQueuedRequest dropped = queue[index];
         queue.RemoveAt(index);
-        droppedBubbleCount++;
-        dropped.Callback?.Invoke(new LocalLlmResult(
+        droppedEphemeralRequestCount++;
+        Complete(dropped, new LocalLlmResult(
             LocalLlmRequestStatus.Dropped,
             string.Empty,
-            "Bubble request dropped by queue pressure.",
+            $"{dropped.Profile.Id} request dropped by queue pressure.",
             dropped.OriginalText));
         return true;
     }
 
-    private void DropExpiredBubbleRequests()
+    private void DropExpiredRequests()
     {
         if (queue.Count == 0)
         {
@@ -485,18 +821,18 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         for (int i = queue.Count - 1; i >= 0; i--)
         {
             LocalLlmQueuedRequest request = queue[i];
-            if (request.Type != LocalLlmRequestType.BubbleLine
-                || Time.time - request.EnqueuedAt <= bubbleMaxQueueAgeSeconds)
+            if (request.Profile.MaxQueueAgeSeconds <= 0f
+                || Time.time - request.EnqueuedAt <= request.Profile.MaxQueueAgeSeconds)
             {
                 continue;
             }
 
             queue.RemoveAt(i);
-            droppedBubbleCount++;
-            request.Callback?.Invoke(new LocalLlmResult(
+            droppedEphemeralRequestCount++;
+            Complete(request, new LocalLlmResult(
                 LocalLlmRequestStatus.Dropped,
                 string.Empty,
-                "Bubble request expired in the LLM queue.",
+                $"{request.Profile.Id} request expired in the LLM queue.",
                 request.OriginalText));
         }
     }
@@ -508,7 +844,7 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         float bestEnqueuedAt = float.MaxValue;
         for (int i = 0; i < queue.Count; i++)
         {
-            int priority = GetPriority(queue[i].Type);
+            int priority = queue[i].Profile.Priority;
             if (priority > bestPriority
                 || (priority == bestPriority && queue[i].EnqueuedAt < bestEnqueuedAt))
             {
@@ -519,21 +855,6 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         }
 
         return bestIndex;
-    }
-
-    private static int GetPriority(LocalLlmRequestType type)
-    {
-        return type switch
-        {
-            LocalLlmRequestType.Persona => 30,
-            LocalLlmRequestType.MacroGoal => 20,
-            LocalLlmRequestType.MoodImpulse => 18,
-            LocalLlmRequestType.FacilityEvolution => 16,
-            LocalLlmRequestType.SocialRumor => 15,
-            LocalLlmRequestType.CharacterRecord => 12,
-            LocalLlmRequestType.BubbleLine => 10,
-            _ => 0
-        };
     }
 
     private static bool TryExtractContent(string responseJson, out string content, out string error)
@@ -581,6 +902,7 @@ public sealed class LocalLlmRequestQueue : SerializedMonoBehaviour, ILocalLlmRun
         public string model;
         public OpenAiChatMessage[] messages;
         public float temperature;
+        public int max_tokens;
         public OpenAiResponseFormat response_format;
     }
 

@@ -2,15 +2,19 @@ public static class WorkDebugLog
 {
     public static void LogStarted(CharacterActor actor)
     {
-        if (TryGetWorkContext(actor, out string context))
+        if (TryGetWorkContext(actor, out AbilityWork work, out BuildableObject target, out string context))
         {
-            actor.AddLog($"작업 시작 · {context}");
+            actor.AddActivity(CharacterActivityEvent.Work(
+                work.AssignedWorkType,
+                CharacterActivityOutcomes.Started,
+                $"작업 시작 · {context}",
+                target));
         }
     }
 
     public static void LogEnd(CharacterActor actor, string reason = null)
     {
-        if (!TryGetWorkContext(actor, out string context))
+        if (!TryGetWorkContext(actor, out AbilityWork work, out BuildableObject target, out string context))
         {
             return;
         }
@@ -21,25 +25,37 @@ public static class WorkDebugLog
             message += $" · {reason}";
         }
 
-        actor?.AddLog(message);
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            work.AssignedWorkType,
+            CharacterActivityOutcomes.Completed,
+            message,
+            target,
+            reasonCode: reason));
     }
 
-    private static bool TryGetWorkContext(CharacterActor actor, out string context)
+    private static bool TryGetWorkContext(
+        CharacterActor actor,
+        out AbilityWork work,
+        out BuildableObject target,
+        out string context)
     {
-        if (actor == null || !actor.TryGetAbility(out AbilityWork work))
+        work = null;
+        if (actor == null || !actor.TryGetAbility(out work))
         {
+            target = null;
             context = string.Empty;
             return false;
         }
 
         if (work.AssignedWorkType == FacilityWorkType.None || work.assignedShop == null)
         {
+            target = null;
             context = string.Empty;
             return false;
         }
 
         string workName = WorkTaskCatalog.GetDisplayName(work.AssignedWorkType);
-        BuildableObject target = work.assignedShop;
+        target = work.assignedShop;
         string targetName = target != null && target.BuildingData != null
             && !string.IsNullOrWhiteSpace(target.BuildingData.objectName)
                 ? target.BuildingData.objectName

@@ -18,7 +18,7 @@ public readonly struct GeneratedUITabPanel
 
 public interface IUITabGeneratedPanelFactory
 {
-    GeneratedUITabPanel Create(Transform parent, int id, string panelTitle);
+    GeneratedUITabPanel Create(Transform parent, TabId id, string panelTitle);
 }
 
 public interface IStaffWorkPriorityPanelFactory
@@ -48,7 +48,7 @@ public sealed class UITabGeneratedPanelFactory : IUITabGeneratedPanelFactory
             ?? throw new ArgumentNullException(nameof(staffWorkPriorityPanelFactory));
     }
 
-    public GeneratedUITabPanel Create(Transform parent, int id, string panelTitle)
+    public GeneratedUITabPanel Create(Transform parent, TabId id, string panelTitle)
     {
         if (parent == null)
         {
@@ -92,10 +92,11 @@ public sealed class UITabGeneratedPanelFactory : IUITabGeneratedPanelFactory
         bodyText.textWrappingMode = TextWrappingModes.Normal;
 
         UITab tab = panelObject.AddComponent<UITab>();
-        tab.id = id;
+        tab.id = (int)id;
+        panelObject.AddComponent<UITabIdentity>().Set(id);
         objectResolver.Inject(tab);
 
-        if (id == 2)
+        if (id == TabId.Staff)
         {
             staffWorkPriorityPanelFactory.Ensure(panelObject);
         }

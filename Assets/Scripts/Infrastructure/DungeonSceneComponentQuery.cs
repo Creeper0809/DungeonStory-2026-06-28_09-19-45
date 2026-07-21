@@ -11,6 +11,7 @@ public interface IDungeonSceneComponentQuery
 public sealed class DungeonSceneComponentQuery : IDungeonSceneComponentQuery
 {
     private readonly int prioritySceneHandle;
+    private readonly Scene priorityScene;
 
     public DungeonSceneComponentQuery()
     {
@@ -18,6 +19,7 @@ public sealed class DungeonSceneComponentQuery : IDungeonSceneComponentQuery
 
     public DungeonSceneComponentQuery(Scene priorityScene)
     {
+        this.priorityScene = priorityScene;
         prioritySceneHandle = priorityScene.IsValid() ? priorityScene.handle : 0;
     }
 
@@ -52,7 +54,8 @@ public sealed class DungeonSceneComponentQuery : IDungeonSceneComponentQuery
     {
         foreach (Scene scene in EnumerateLoadedScenesByPriority())
         {
-            if (!scene.IsValid() || !scene.isLoaded)
+            if (!scene.IsValid()
+                || (!scene.isLoaded && scene.handle != prioritySceneHandle))
             {
                 continue;
             }
@@ -79,7 +82,7 @@ public sealed class DungeonSceneComponentQuery : IDungeonSceneComponentQuery
     {
         Scene activeScene = SceneManager.GetActiveScene();
         Scene priorityScene = FindPriorityScene();
-        if (priorityScene.IsValid() && priorityScene.isLoaded)
+        if (priorityScene.IsValid())
         {
             yield return priorityScene;
         }
@@ -109,21 +112,9 @@ public sealed class DungeonSceneComponentQuery : IDungeonSceneComponentQuery
 
     private Scene FindPriorityScene()
     {
-        if (prioritySceneHandle == 0)
-        {
-            return default;
-        }
-
-        for (int i = 0; i < SceneManager.sceneCount; i++)
-        {
-            Scene scene = SceneManager.GetSceneAt(i);
-            if (scene.IsValid() && scene.handle == prioritySceneHandle)
-            {
-                return scene;
-            }
-        }
-
-        return default;
+        return prioritySceneHandle != 0 && priorityScene.IsValid()
+            ? priorityScene
+            : default;
     }
 
     private static IEnumerable<T> EnumerateRootComponents<T>(

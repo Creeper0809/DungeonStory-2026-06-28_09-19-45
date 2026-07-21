@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -11,8 +11,18 @@ public static class ModularFacilityAssetBuilder
     private const string SpriteFolder = "Assets/Images/ModularFacilities";
     private const string BuildingFolder = "Assets/Resources/SO/Building/Modular";
     private const string StockFolder = "Assets/Resources/SO/Stock/Modular";
+    private const string EquipmentCatalogPath = "Assets/Resources/Config/ExpeditionEquipmentCatalog.asset";
     private const string GeneralStockSource = "Assets/Resources/SO/Stock/P1/P1_GeneralStoreStock.asset";
     private const string SaleItemFolder = "Assets/Resources/SO/Stock/Item";
+    private static readonly string[] DefaultCraftableEquipmentIds =
+    {
+        "weapon:attack-iron",
+        "weapon:strength-maul",
+        "weapon:dexterity-needle",
+        "armor:toughness-plate",
+        "armor:move-cloak",
+        "armor:endurance-mail"
+    };
 
     private static readonly string[] LegacyRoomAssetPaths =
     {
@@ -45,6 +55,22 @@ public static class ModularFacilityAssetBuilder
         BuildAll();
     }
 
+    [MenuItem("DungeonStory/Content/Patch Expedition Equipment Assets")]
+    public static void PatchExpeditionEquipmentAssetsFromMenu()
+    {
+        PatchExpeditionEquipmentAssets();
+    }
+
+    public static void PatchExpeditionEquipmentAssets()
+    {
+        EnsureFolder("Assets/Resources/Config");
+        EnsureEquipmentCatalogAsset();
+        PatchEquipmentFacilityAbilities();
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        Debug.Log("Expedition equipment catalog and facility abilities patched.");
+    }
+
     public static void BuildAll()
     {
         FacilityPartSpec[] specs = CreateSpecs();
@@ -68,12 +94,168 @@ public static class ModularFacilityAssetBuilder
 
         }
 
+        NormalizeAbilityLists();
         EnsureShopStock(FirstBuildingId + Array.FindIndex(specs, (spec) => spec.Code == "S01"));
 
         HideLegacyRoomAssets();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         Debug.Log($"Built {specs.Length} modular facility sprites and BuildingSO assets.");
+    }
+
+    private static void NormalizeAbilityLists()
+    {
+        string[] guids = AssetDatabase.FindAssets("t:BuildingSO", new[] { "Assets/Resources/SO/Building" });
+        foreach (string guid in guids)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            BuildingSO building = AssetDatabase.LoadAssetAtPath<BuildingSO>(path);
+            if (building == null)
+            {
+                continue;
+            }
+
+            if (SerializationUtility.HasManagedReferencesWithMissingTypes(building))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot normalize '{path}' because one or more building ability types are missing.");
+            }
+
+            bool isLegacyDoor = string.Equals(
+                path.Replace('\\', '/'),
+                "Assets/Resources/SO/Building/Door.asset",
+                StringComparison.OrdinalIgnoreCase);
+            int removedNulls = building.AbilityModules.RemoveNullEntries();
+            int stabilizedIds = building.AbilityModules.EnsureStableIds();
+            if (removedNulls > 0 || stabilizedIds > 0 || isLegacyDoor)
+            {
+                EditorUtility.SetDirty(building);
+            }
+
+            building.ValidateAbilitiesOrThrow();
+        }
+    }
+
+    private static void EnsureEquipmentCatalogAsset()
+    {
+        ExpeditionEquipmentCatalogSO catalog =
+            AssetDatabase.LoadAssetAtPath<ExpeditionEquipmentCatalogSO>(EquipmentCatalogPath);
+        ExpeditionEquipmentCatalogSO defaults = ExpeditionEquipmentCatalogSO.CreateRuntimeDefaults();
+        defaults.name = "ExpeditionEquipmentCatalog";
+        try
+        {
+            if (catalog == null)
+            {
+                catalog = ScriptableObject.CreateInstance<ExpeditionEquipmentCatalogSO>();
+                catalog.name = "ExpeditionEquipmentCatalog";
+                AssetDatabase.CreateAsset(catalog, EquipmentCatalogPath);
+            }
+
+            EditorUtility.CopySerialized(defaults, catalog);
+            catalog.name = "ExpeditionEquipmentCatalog";
+            EditorUtility.SetDirty(catalog);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(defaults);
+        }
+    }
+
+    private static void PatchEquipmentFacilityAbilities()
+    {
+        foreach (string path in AssetDatabase.FindAssets("t:BuildingSO", new[] { "Assets/Resources/SO/Building" })
+            .Select(AssetDatabase.GUIDToAssetPath))
+        {
+            BuildingSO building = AssetDatabase.LoadAssetAtPath<BuildingSO>(path);
+            if (building == null)
+            {
+                continue;
+            }
+
+            string code = building.GetFacilityCode();
+            string recoveryKey = !string.IsNullOrWhiteSpace(code)
+                ? code
+                : Path.GetFileNameWithoutExtension(path);
+            bool changed = false;
+
+            if (string.Equals(code, "S08", StringComparison.Ordinal))
+            {
+                changed |= building.AbilityModules.Remove<BuildingProductionAbility>() > 0;
+                changed |= building.AbilityModules.Remove<BuildingRetailAbility>() > 0;
+                changed |= building.AbilityModules.Remove<BuildingEquipmentCraftingAbility>() > 0;
+                building.AbilityModules.Add(new BuildingEquipmentCraftingAbility
+                {
+                    craftableEquipmentIds = DefaultCraftableEquipmentIds.ToArray(),
+                    workSecondsPerCycle = 1f
+                });
+                FacilityData facility = building.Facility ?? new FacilityData();
+                facility.supportedWorkTypes = FacilityWorkType.Craft | FacilityWorkType.Repair;
+                facility.requiredWorkers = Mathf.Max(1, facility.requiredWorkers);
+                building.Facility = facility;
+                changed = true;
+            }
+
+            BuildingExpeditionRecoveryAbility recovery = CreateExpeditionRecoveryAbility(recoveryKey);
+            if (recovery != null)
+            {
+                changed |= building.AbilityModules.Remove<BuildingExpeditionRecoveryAbility>() > 0;
+                building.AbilityModules.Add(recovery);
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                continue;
+            }
+
+            building.AbilityModules.EnsureStableIds();
+            building.ValidateAbilitiesOrThrow();
+            EditorUtility.SetDirty(building);
+        }
+    }
+
+    private static BuildingExpeditionRecoveryAbility CreateExpeditionRecoveryAbility(string code)
+    {
+        return code switch
+        {
+            "R01" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.12f,
+                injuryReduction = 0.03f,
+                stressRecovery = 12f
+            },
+            "R02" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.22f,
+                injuryReduction = 0.08f,
+                stressRecovery = 22f
+            },
+            "R03" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.18f,
+                injuryReduction = 0.05f,
+                stressRecovery = 18f
+            },
+            "H04" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.08f,
+                injuryReduction = 0.12f,
+                stressRecovery = 26f
+            },
+            "P1_RestRoom" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.18f,
+                injuryReduction = 0.1f,
+                stressRecovery = 18f
+            },
+            "P1_Washroom" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.08f,
+                injuryReduction = 0.08f,
+                stressRecovery = 24f
+            },
+            _ => null
+        };
     }
 
     public static IReadOnlyList<string> GetCatalogCodes()
@@ -106,13 +288,279 @@ public static class ModularFacilityAssetBuilder
         building.tiles = null;
         building.movementAnchorOffset = Vector2.zero;
         building.movementTravelTime = 2f;
-        building.maintenance = spec.Core ? 2 + spec.Phase : spec.Phase;
-        building.facility = CreateFacilityData(spec);
-        building.defense = new DefenseFacilityData();
-        building.evolution = CreateEvolutionData(spec);
-        building.operational = CreateOperationalData(spec);
+        building.ReplaceAbilities(CreateAbilities(spec));
         building.unlocked = true;
         EditorUtility.SetDirty(building);
+    }
+
+    private static BuildingAbilityCollection CreateAbilities(FacilityPartSpec spec)
+    {
+        BuildingAbilityCollection abilities = new BuildingAbilityCollection();
+        AddAbility(abilities, new BuildingFacilityPartAbility { code = spec.Code });
+        AddAbility(abilities, EnsureEconomyAbility(spec));
+        AddAbility(abilities, spec.Core
+            ? new BuildingFacilityAbility { settings = CreateFacilityData(spec) }
+            : null);
+        AddAbility(abilities, EnsureInternalStockAbility(spec));
+        AddAbility(abilities, spec.RuntimeType == typeof(Shop)
+            ? new BuildingRequiresStockAbility()
+            : null);
+        AddAbility(abilities, spec.RuntimeType == typeof(Shop)
+            ? new BuildingStaffedServiceAbility()
+            : null);
+        AddAbility(abilities, spec.Core && spec.Roles != FacilityRole.None
+            ? new BuildingRoomRequirementAbility()
+            : null);
+        AddAbility(abilities, new BuildingEvolutionAbility { settings = CreateEvolutionData(spec) });
+        AddAbility(abilities, EnsureNeedRecoveryAbility(spec));
+        AddAbility(abilities, EnsureStorageAbility(spec));
+        AddAbility(abilities, EnsureSeatingAbility(spec));
+        AddAbility(abilities, EnsureTableAbility(spec));
+        AddAbility(abilities, EnsureServiceAbility(spec));
+        AddAbility(abilities, EnsureProductionAbility(spec));
+        BuildingLightingAbility lighting = EnsureLightingAbility(spec);
+        AddAbility(abilities, lighting);
+        AddAbility(abilities, EnsureRetailAbility(spec));
+        AddAbility(abilities, EnsureTrainingAbility(spec));
+        AddAbility(abilities, EnsureCleaningAbility(spec));
+        AddAbility(abilities, EnsureSecurityAbility(spec));
+        AddAbility(abilities, EnsureEquipmentCraftingAbility(spec));
+        AddAbility(abilities, EnsureExpeditionRecoveryAbility(spec));
+
+        return abilities;
+    }
+
+    private static void AddAbility(BuildingAbilityCollection abilities, BuildingAbility ability)
+    {
+        if (ability != null)
+        {
+            abilities.Add(ability);
+        }
+    }
+
+    private static BuildingEconomyAbility EnsureEconomyAbility(FacilityPartSpec spec)
+    {
+        return new BuildingEconomyAbility
+        {
+            constructionCost = GetConstructionCost(spec),
+            maintenance = spec.Core ? 2 + spec.Phase : spec.Phase,
+            unlockPhase = Mathf.Clamp(spec.Phase, 1, 3),
+            demolitionRefundRate = 0.5f
+        };
+    }
+
+    private static BuildingNeedRecoveryAbility EnsureNeedRecoveryAbility(FacilityPartSpec spec)
+    {
+        FacilityNeedRecoveryData recovery = GetRecovery(spec.Code);
+        if (!recovery.HasEffect)
+        {
+            return null;
+        }
+
+        return new BuildingNeedRecoveryAbility
+        {
+            recovery = recovery
+        };
+    }
+
+    private static BuildingInternalStockAbility EnsureInternalStockAbility(FacilityPartSpec spec)
+    {
+        if (spec.InternalStockCapacity <= 0)
+        {
+            return null;
+        }
+
+        return new BuildingInternalStockAbility
+        {
+            capacity = spec.InternalStockCapacity,
+            restockRequestThreshold = Mathf.Max(1, spec.InternalStockCapacity / 4)
+        };
+    }
+
+    private static BuildingStorageAbility EnsureStorageAbility(FacilityPartSpec spec)
+    {
+        int capacity = GetStorageCapacity(spec.Code);
+        if (capacity <= 0)
+        {
+            return null;
+        }
+
+        return new BuildingStorageAbility
+        {
+            category = GetStorageCategory(spec.Code),
+            capacity = capacity,
+            allCategories = spec.Code == "L01"
+        };
+    }
+
+    private static BuildingSeatingAbility EnsureSeatingAbility(FacilityPartSpec spec)
+    {
+        int capacity = GetSeatCapacity(spec.Code);
+        if (capacity <= 0)
+        {
+            return null;
+        }
+
+        return new BuildingSeatingAbility
+        {
+            capacity = capacity
+        };
+    }
+
+    private static BuildingTableAbility EnsureTableAbility(FacilityPartSpec spec)
+    {
+        int capacity = GetTableCapacity(spec.Code);
+        if (capacity <= 0)
+        {
+            return null;
+        }
+
+        return new BuildingTableAbility
+        {
+            capacity = capacity
+        };
+    }
+
+    private static BuildingServiceAbility EnsureServiceAbility(FacilityPartSpec spec)
+    {
+        int capacity = GetServiceCapacity(spec.Code);
+        if (capacity <= 0)
+        {
+            return null;
+        }
+
+        return new BuildingServiceAbility
+        {
+            capacity = capacity,
+            contributesStockCategory = spec.Code is "D03" or "D04" or "D12",
+            stockCategory = StockCategory.Food
+        };
+    }
+
+    private static BuildingProductionAbility EnsureProductionAbility(FacilityPartSpec spec)
+    {
+        int amount = GetWorkOutput(spec.Code);
+        if (amount <= 0)
+        {
+            return null;
+        }
+
+        return new BuildingProductionAbility
+        {
+            outputCategory = GetProductionCategory(spec.Code),
+            amount = amount
+        };
+    }
+
+    private static BuildingLightingAbility EnsureLightingAbility(FacilityPartSpec spec)
+    {
+        float intensity = GetLightIntensity(spec.Code);
+        float radius = GetLightRadius(spec.Code);
+        if (intensity <= 0f || radius <= 0f)
+        {
+            return null;
+        }
+
+        return new BuildingLightingAbility
+        {
+            intensity = intensity,
+            radius = radius
+        };
+    }
+
+    private static BuildingRetailAbility EnsureRetailAbility(FacilityPartSpec spec)
+    {
+        if (spec.Code is "S01" or "S02" or "S03" or "S04")
+        {
+            return new BuildingRetailAbility { category = StockCategory.General };
+        }
+
+        if (spec.Code is "S05" or "S06" or "S07")
+        {
+            return new BuildingRetailAbility { category = StockCategory.Weapon };
+        }
+
+        return null;
+    }
+
+    private static BuildingTrainingAbility EnsureTrainingAbility(FacilityPartSpec spec)
+    {
+        return spec.Code switch
+        {
+            "T01" or "T04" => new BuildingTrainingAbility
+            {
+                moodLabel = "근접 훈련 감각이 살아남",
+                moodAmount = 4f
+            },
+            "T02" => new BuildingTrainingAbility
+            {
+                moodLabel = "과녁에 집중해 마음이 맑아짐",
+                moodAmount = 3f
+            },
+            "T03" => new BuildingTrainingAbility
+            {
+                moodLabel = "묵직한 훈련으로 성취감이 남음",
+                moodAmount = 5f
+            },
+            _ => null
+        };
+    }
+
+    private static BuildingCleaningAbility EnsureCleaningAbility(FacilityPartSpec spec)
+    {
+        return spec.Code is "H01" or "H02" or "H03" or "H04" or "H05" or "H06" or "H07"
+            ? new BuildingCleaningAbility { restoredCleanliness = 100f }
+            : null;
+    }
+
+    private static BuildingSecurityAbility EnsureSecurityAbility(FacilityPartSpec spec)
+    {
+        return spec.Code is "G01" or "G02" or "G03" or "G04" or "G05" or "G06"
+            ? new BuildingSecurityAbility { maxAlarmCharges = 3, chargesPerGuardWork = 1 }
+            : null;
+    }
+
+    private static BuildingEquipmentCraftingAbility EnsureEquipmentCraftingAbility(FacilityPartSpec spec)
+    {
+        return spec.Code == "S08"
+            ? new BuildingEquipmentCraftingAbility
+            {
+                craftableEquipmentIds = DefaultCraftableEquipmentIds.ToArray(),
+                workSecondsPerCycle = 1f
+            }
+            : null;
+    }
+
+    private static BuildingExpeditionRecoveryAbility EnsureExpeditionRecoveryAbility(FacilityPartSpec spec)
+    {
+        return spec.Code switch
+        {
+            "R01" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.12f,
+                injuryReduction = 0.03f,
+                stressRecovery = 12f
+            },
+            "R02" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.22f,
+                injuryReduction = 0.08f,
+                stressRecovery = 22f
+            },
+            "R03" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.18f,
+                injuryReduction = 0.05f,
+                stressRecovery = 18f
+            },
+            "H04" => new BuildingExpeditionRecoveryAbility
+            {
+                healthHealRatio = 0.08f,
+                injuryReduction = 0.12f,
+                stressRecovery = 26f
+            },
+            _ => null
+        };
     }
 
     private static FacilityData CreateFacilityData(FacilityPartSpec spec)
@@ -122,19 +570,9 @@ public static class ModularFacilityAssetBuilder
             roles = spec.Roles,
             capacity = spec.Core ? Mathf.Max(1, spec.Capacity) : 0,
             useDuration = spec.Core ? Mathf.Max(0.5f, spec.UseDuration) : 0f,
-            internalStockMax = Mathf.Max(0, spec.InternalStockMax),
-            restockRequestThreshold = spec.InternalStockMax > 0
-                ? Mathf.Max(1, spec.InternalStockMax / 4)
-                : 0,
             requiredWorkers = spec.WorkTypes == FacilityWorkType.None ? 0 : 1,
             supportedWorkTypes = spec.WorkTypes,
-            preferredSpeciesTags = Array.Empty<string>(),
-            dislikedSpeciesTags = Array.Empty<string>(),
-            disabledWhenDamaged = true,
-            requiresStock = spec.RuntimeType == typeof(Shop),
-            requiresRoomRole = spec.Roles != FacilityRole.None,
-            requiresStaffedService = spec.RuntimeType == typeof(Shop),
-            selfContainedRoom = false
+            disabledWhenDamaged = true
         };
     }
 
@@ -150,81 +588,6 @@ public static class ModularFacilityAssetBuilder
                 .Select((trait) => new FacilityEvolutionValue(trait, GetTraitScore(trait)))
                 .ToArray(),
             metrics = spec.Metrics ?? Array.Empty<FacilityEvolutionValue>()
-        };
-    }
-
-    private static FacilityOperationalData CreateOperationalData(FacilityPartSpec spec)
-    {
-        FacilityOperationalData data = new FacilityOperationalData
-        {
-            code = spec.Code,
-            functions = GetFunctions(spec.Code) | (spec.Core ? FacilityFunction.None : FacilityFunction.Support),
-            recovery = GetRecovery(spec.Code),
-            storageCategory = GetStorageCategory(spec.Code),
-            storageCapacity = GetStorageCapacity(spec.Code),
-            seatCapacity = GetSeatCapacity(spec.Code),
-            tableCapacity = GetTableCapacity(spec.Code),
-            serviceCapacity = GetServiceCapacity(spec.Code),
-            workOutputAmount = GetWorkOutput(spec.Code),
-            constructionCost = 20 + spec.Width * 15 + spec.Phase * 25 + (spec.Core ? 35 : 0),
-            unlockPhase = Mathf.Clamp(spec.Phase, 1, 3),
-            demolitionRefundRate = 0.5f,
-            lightIntensity = GetLightIntensity(spec.Code),
-            lightRadius = GetLightRadius(spec.Code)
-        };
-        return data;
-    }
-
-    private static FacilityFunction GetFunctions(string code)
-    {
-        return code switch
-        {
-            "D01" => FacilityFunction.MealProduction,
-            "D02" => FacilityFunction.MealProduction | FacilityFunction.MeatProduction,
-            "D03" => FacilityFunction.MealService,
-            "D04" => FacilityFunction.MealService,
-            "D05" or "D06" => FacilityFunction.Table,
-            "D07" or "D08" or "D09" => FacilityFunction.Seating,
-            "D10" => FacilityFunction.Storage,
-            "D11" => FacilityFunction.MeatProduction,
-            "D12" => FacilityFunction.MealService,
-            "S01" or "S02" or "S03" => FacilityFunction.RetailGeneral,
-            "S04" => FacilityFunction.RetailGeneral | FacilityFunction.Storage,
-            "S05" or "S06" => FacilityFunction.RetailWeapon,
-            "S07" => FacilityFunction.RetailWeapon | FacilityFunction.Storage,
-            "S08" => FacilityFunction.RetailWeapon | FacilityFunction.WeaponCrafting,
-            "R01" or "R02" or "R03" or "R04" => FacilityFunction.Rest,
-            "R05" => FacilityFunction.Decoration,
-            "R06" or "R09" => FacilityFunction.Storage,
-            "R07" => FacilityFunction.Administration,
-            "R08" => FacilityFunction.Administration | FacilityFunction.Seating,
-            "R10" => FacilityFunction.Research,
-            "Q01" => FacilityFunction.Research,
-            "Q02" => FacilityFunction.Research | FacilityFunction.Alchemy | FacilityFunction.ManaRitual,
-            "Q03" or "Q05" => FacilityFunction.Research | FacilityFunction.Storage,
-            "Q04" => FacilityFunction.Alchemy | FacilityFunction.Storage,
-            "Q06" => FacilityFunction.Research,
-            "M01" or "M02" => FacilityFunction.ManaStorage | FacilityFunction.Storage,
-            "M03" => FacilityFunction.ManaRitual,
-            "M04" => FacilityFunction.ManaRitual,
-            "T01" or "T04" => FacilityFunction.MeleeTraining,
-            "T02" => FacilityFunction.RangedTraining,
-            "T03" => FacilityFunction.StrengthTraining,
-            "G01" or "G03" or "G04" or "G05" or "G06" => FacilityFunction.GuardPost,
-            "G02" => FacilityFunction.Alarm,
-            "L01" => FacilityFunction.Logistics | FacilityFunction.Storage,
-            "L02" or "L03" or "L04" or "L05" or "L06" or "L07" => FacilityFunction.Storage,
-            "H01" or "H02" => FacilityFunction.Toilet | FacilityFunction.Cleaning,
-            "H03" or "H05" => FacilityFunction.Hygiene | FacilityFunction.Cleaning,
-            "H04" => FacilityFunction.Hygiene | FacilityFunction.Rest | FacilityFunction.Cleaning,
-            "H06" => FacilityFunction.Cleaning | FacilityFunction.Storage,
-            "H07" => FacilityFunction.Cleaning,
-            "E01" => FacilityFunction.Lighting,
-            "E02" => FacilityFunction.Lighting | FacilityFunction.Rest,
-            "E03" or "E07" => FacilityFunction.Lighting | FacilityFunction.Decoration,
-            "E04" or "E05" or "E06" or "E08" => FacilityFunction.Decoration,
-            "E09" => FacilityFunction.Signage,
-            _ => FacilityFunction.Support
         };
     }
 
@@ -330,13 +693,27 @@ public static class ModularFacilityAssetBuilder
         {
             "D01" => 4,
             "D02" => 6,
-            "S08" => 3,
             "Q02" => 3,
             "M01" => 2,
             "M02" => 4,
             "M04" => 5,
             _ => 0
         };
+    }
+
+    private static int GetConstructionCost(FacilityPartSpec spec)
+    {
+        return 20 + spec.Width * 15 + spec.Phase * 25 + (spec.Core ? 35 : 0);
+    }
+
+    private static StockCategory GetProductionCategory(string code)
+    {
+        if (code is "Q02" or "M01" or "M02" or "M04")
+        {
+            return StockCategory.Mana;
+        }
+
+        return StockCategory.Food;
     }
 
     private static float GetLightIntensity(string code)
@@ -379,7 +756,6 @@ public static class ModularFacilityAssetBuilder
         SaleItem shieldItem = AssetDatabase.LoadAssetAtPath<SaleItem>(SaleItemFolder + "/도란방패.asset");
         stock.id = 3000;
         stock.shopId = shopId;
-        stock.type = source != null ? source.type : Shop.Type.Item;
         stock.stocks = new[]
             {
                 new Tuple<SaleItem, int>(generalItem, 12),
@@ -469,91 +845,90 @@ public static class ModularFacilityAssetBuilder
     {
         return new[]
         {
-            Core("D01", "간이 화덕", 1, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Hearth, Traits("Cooking")),
-            Core("D02", "고기 그릴", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Grill, Traits("Cooking", "Meat")),
-            Support("D03", "조리 손질대", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Workbench, Traits("Cooking", FacilityEvolutionTerms.Service)),
-            Core("D04", "배식 카운터", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean, VisualForm.Counter, Traits(FacilityEvolutionTerms.Service), Metrics((FacilityEvolutionTerms.CounterCount, 1f))),
-            Support("D05", "소형 식탁", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Table, Traits(FacilityEvolutionTerms.Dining), Metrics((FacilityEvolutionTerms.TableCount, 1f))),
-            Support("D06", "대형 연회 식탁", 3, GridLayer.Building, BuildingCategory.Shop, VisualForm.Table, Traits(FacilityEvolutionTerms.Dining, FacilityEvolutionTerms.Luxury), Metrics((FacilityEvolutionTerms.LargeTableCount, 1f)), phase: 2),
-            Support("D07", "목제 의자", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Chair, Traits(FacilityEvolutionTerms.Dining), Metrics((FacilityEvolutionTerms.SeatCount, 1f))),
-            Support("D08", "푹신한 의자", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Chair, Traits(FacilityEvolutionTerms.Dining, FacilityEvolutionTerms.Luxury), Metrics((FacilityEvolutionTerms.SeatCount, 1f), (FacilityEvolutionTerms.PrivateSeatCount, 1f)), phase: 2),
-            Support("D09", "긴 벤치", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Bench, Traits(FacilityEvolutionTerms.Dining, FacilityEvolutionTerms.Crowd), Metrics((FacilityEvolutionTerms.SeatCount, 2f))),
-            Support("D10", "식재료 선반", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Storage, "Cooking")),
-            Support("D11", "고기 걸이", 1, GridLayer.WallFixture, BuildingCategory.Shop, VisualForm.WallRack, Traits("Meat", FacilityEvolutionTerms.Brutal), phase: 2),
-            Core("D12", "술 음료장", 1, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Service, FacilityEvolutionTerms.Luxury), phase: 2),
+            Core("D01", "간이화덕", 1, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Hearth, Traits("Cooking")),
+            Core("D02", "고기그릴", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Grill, Traits("Cooking", "Meat")),
+            Support("D03", "조리손질대", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Workbench, Traits("Cooking", FacilityEvolutionTerms.Service)),
+            Core("D04", "배식카운터", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean, VisualForm.Counter, Traits(FacilityEvolutionTerms.Service), Metrics((FacilityEvolutionTerms.CounterCount, 1f))),
+            Support("D05", "소형식탁", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Table, Traits(FacilityEvolutionTerms.Dining), Metrics((FacilityEvolutionTerms.TableCount, 1f))),
+            Support("D06", "대형연회식탁", 3, GridLayer.Building, BuildingCategory.Shop, VisualForm.Table, Traits(FacilityEvolutionTerms.Dining, FacilityEvolutionTerms.Luxury), Metrics((FacilityEvolutionTerms.LargeTableCount, 1f)), phase: 2),
+            Support("D07", "목제의자", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Chair, Traits(FacilityEvolutionTerms.Dining), Metrics((FacilityEvolutionTerms.SeatCount, 1f))),
+            Support("D08", "푹신한의자", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Chair, Traits(FacilityEvolutionTerms.Dining, FacilityEvolutionTerms.Luxury), Metrics((FacilityEvolutionTerms.SeatCount, 1f), (FacilityEvolutionTerms.PrivateSeatCount, 1f)), phase: 2),
+            Support("D09", "긴벤치", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Bench, Traits(FacilityEvolutionTerms.Dining, FacilityEvolutionTerms.Crowd), Metrics((FacilityEvolutionTerms.SeatCount, 2f))),
+            Support("D10", "식재료선반", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Storage, "Cooking")),
+            Support("D11", "고기걸이", 1, GridLayer.WallFixture, BuildingCategory.Shop, VisualForm.WallRack, Traits("Meat", FacilityEvolutionTerms.Brutal), phase: 2),
+            Core("D12", "술음료장", 1, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Meal, FacilityWorkType.Operate | FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Service, FacilityEvolutionTerms.Luxury), phase: 2),
 
-            Core("S01", "판매 카운터", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Purchase, FacilityWorkType.Operate | FacilityWorkType.Restock | FacilityWorkType.Repair, VisualForm.Counter, Traits(FacilityEvolutionTerms.Service), Metrics((FacilityEvolutionTerms.CounterCount, 1f)), runtimeType: typeof(Shop), internalStockMax: 24),
-            Support("S02", "잡화 진열 선반", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Shelf, Traits("Shop", FacilityEvolutionTerms.Service)),
-            Support("S03", "잠금 진열장", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Cabinet, Traits("Shop", FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Security), phase: 2),
-            Support("S04", "잡화 상자", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Crates, Traits(FacilityEvolutionTerms.Storage)),
-            Support("S05", "무기 거치대", 1, GridLayer.WallFixture, BuildingCategory.Shop, VisualForm.WallRack, Traits(FacilityEvolutionTerms.Combat)),
-            Support("S06", "갑옷 거치대", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.ArmorStand, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Defense)),
-            Support("S07", "무기 보관함", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Storage, FacilityEvolutionTerms.Security)),
-            Core("S08", "대장 작업대", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.None, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Workbench, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Service), phase: 2),
+            Core("S01", "판매카운터", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.Purchase, FacilityWorkType.Operate | FacilityWorkType.Restock | FacilityWorkType.Repair, VisualForm.Counter, Traits(FacilityEvolutionTerms.Service), Metrics((FacilityEvolutionTerms.CounterCount, 1f)), runtimeType: typeof(Shop), internalStockCapacity: 24),
+            Support("S02", "잡화진열선반", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Shelf, Traits("Shop", FacilityEvolutionTerms.Service)),
+            Support("S03", "잠금진열장", 2, GridLayer.Building, BuildingCategory.Shop, VisualForm.Cabinet, Traits("Shop", FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Security), phase: 2),
+            Support("S04", "잡화상자", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Crates, Traits(FacilityEvolutionTerms.Storage)),
+            Support("S05", "무기거치대", 1, GridLayer.WallFixture, BuildingCategory.Shop, VisualForm.WallRack, Traits(FacilityEvolutionTerms.Combat)),
+            Support("S06", "갑옷거치대", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.ArmorStand, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Defense)),
+            Support("S07", "무기보관함", 1, GridLayer.Building, BuildingCategory.Shop, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Storage, FacilityEvolutionTerms.Security)),
+            Core("S08", "대장작업대", 2, GridLayer.Building, BuildingCategory.Shop, FacilityRole.None, FacilityWorkType.Craft | FacilityWorkType.Repair, VisualForm.Workbench, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Service), phase: 2),
 
             Core("R01", "간이침대", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Rest, FacilityWorkType.Rest | FacilityWorkType.Repair, VisualForm.Bed, Traits(FacilityEvolutionTerms.Rest)),
-            Core("R02", "정식 침대", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Rest, FacilityWorkType.Rest | FacilityWorkType.Repair, VisualForm.Bed, Traits(FacilityEvolutionTerms.Rest, FacilityEvolutionTerms.Luxury), phase: 2),
+            Core("R02", "정식침대", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Rest, FacilityWorkType.Rest | FacilityWorkType.Repair, VisualForm.Bed, Traits(FacilityEvolutionTerms.Rest, FacilityEvolutionTerms.Luxury), phase: 2),
             Core("R03", "이층침대", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Rest, FacilityWorkType.Rest | FacilityWorkType.Repair, VisualForm.BunkBed, Traits(FacilityEvolutionTerms.Rest, FacilityEvolutionTerms.Crowd), capacity: 2, phase: 2),
-            Core("R04", "휴식용 소파", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Rest, FacilityWorkType.Rest | FacilityWorkType.Repair, VisualForm.Sofa, Traits(FacilityEvolutionTerms.Rest), capacity: 2),
+            Core("R04", "휴식용소파", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Rest, FacilityWorkType.Rest | FacilityWorkType.Repair, VisualForm.Sofa, Traits(FacilityEvolutionTerms.Rest), capacity: 2),
             Support("R05", "협탁", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Table, Traits(FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Quiet), phase: 2),
             Support("R06", "옷장", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Storage, FacilityEvolutionTerms.Luxury), phase: 2),
-            Core("R07", "영주 집무책상", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Administration, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Desk, Traits("Administration", FacilityEvolutionTerms.Service)),
-            Support("R08", "지휘 의자", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Chair, Traits("Administration", FacilityEvolutionTerms.Noble, FacilityEvolutionTerms.Luxury)),
-            Support("R09", "개인 보관함", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Storage)),
-            Support("R10", "침실용 책장", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Quiet, FacilityEvolutionTerms.Research), phase: 2),
+            Core("R07", "영주집무책상", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Administration, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Desk, Traits("Administration", FacilityEvolutionTerms.Service)),
+            Support("R08", "지휘의자", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Chair, Traits("Administration", FacilityEvolutionTerms.Noble, FacilityEvolutionTerms.Luxury)),
+            Support("R09", "개인보관함", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Storage)),
+            Support("R10", "침실용책장", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Quiet, FacilityEvolutionTerms.Research), phase: 2),
 
-            Core("Q01", "연구 책상", 2, GridLayer.Building, BuildingCategory.Crafting, FacilityRole.Research, FacilityWorkType.Research | FacilityWorkType.Repair, VisualForm.Desk, Traits(FacilityEvolutionTerms.Research)),
-            Core("Q02", "연금술 작업대", 2, GridLayer.Building, BuildingCategory.Crafting, FacilityRole.Research | FacilityRole.Mana, FacilityWorkType.Research | FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Workbench, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Ritual)),
-            Support("Q03", "연구용 책장", 1, GridLayer.Building, BuildingCategory.Crafting, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Storage)),
-            Support("Q04", "시약 선반", 1, GridLayer.Building, BuildingCategory.Crafting, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Mana)),
-            Support("Q05", "표본 보관장", 1, GridLayer.Building, BuildingCategory.Crafting, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Fear), phase: 2),
+            Core("Q01", "연구책상", 2, GridLayer.Building, BuildingCategory.Crafting, FacilityRole.Research, FacilityWorkType.Research | FacilityWorkType.Repair, VisualForm.Desk, Traits(FacilityEvolutionTerms.Research)),
+            Core("Q02", "연금술작업대", 2, GridLayer.Building, BuildingCategory.Crafting, FacilityRole.Research | FacilityRole.Mana, FacilityWorkType.Research | FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Workbench, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Ritual)),
+            Support("Q03", "연구용책장", 1, GridLayer.Building, BuildingCategory.Crafting, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Storage)),
+            Support("Q04", "시약선반", 1, GridLayer.Building, BuildingCategory.Crafting, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Mana)),
+            Support("Q05", "표본보관장", 1, GridLayer.Building, BuildingCategory.Crafting, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Fear), phase: 2),
             Support("Q06", "설계판", 1, GridLayer.WallFixture, BuildingCategory.Crafting, VisualForm.Board, Traits(FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Service), phase: 2),
 
-            Core("M01", "마력 수정 선반", 1, GridLayer.Building, BuildingCategory.Resource, FacilityRole.Mana, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Storage)),
-            Core("M02", "마력 저장조", 2, GridLayer.Building, BuildingCategory.Resource, FacilityRole.Mana, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Rune, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Storage), capacity: 2),
-            Support("M03", "룬 안정기", 1, GridLayer.Building, BuildingCategory.Resource, VisualForm.Rune, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Security)),
-            Core("M04", "의식 초점석", 1, GridLayer.Building, BuildingCategory.Resource, FacilityRole.Mana, FacilityWorkType.Operate | FacilityWorkType.Research | FacilityWorkType.Repair, VisualForm.Rune, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Ritual), phase: 2),
+            Core("M01", "마력수정선반", 1, GridLayer.Building, BuildingCategory.Resource, FacilityRole.Mana, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Storage)),
+            Core("M02", "마력저장조", 2, GridLayer.Building, BuildingCategory.Resource, FacilityRole.Mana, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Rune, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Storage), capacity: 2),
+            Support("M03", "룬안정기", 1, GridLayer.Building, BuildingCategory.Resource, VisualForm.Rune, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Security)),
+            Core("M04", "의식초점석", 1, GridLayer.Building, BuildingCategory.Resource, FacilityRole.Mana, FacilityWorkType.Operate | FacilityWorkType.Research | FacilityWorkType.Repair, VisualForm.Rune, Traits(FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Ritual), phase: 2),
 
-            Core("T01", "훈련 허수아비", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Training, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Dummy, Traits(FacilityEvolutionTerms.Training, FacilityEvolutionTerms.Combat)),
-            Core("T02", "사격 과녁", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Training, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Target, Traits(FacilityEvolutionTerms.Training, FacilityEvolutionTerms.Combat)),
-            Core("T03", "중량 훈련석", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Training, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Weight, Traits(FacilityEvolutionTerms.Training)),
-            Support("T04", "대련 매트", 2, GridLayer.FloorOverlay, BuildingCategory.Special, VisualForm.Mat, Traits(FacilityEvolutionTerms.Training, FacilityEvolutionTerms.Combat)),
+            Core("T01", "훈련허수아비", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Training, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Dummy, Traits(FacilityEvolutionTerms.Training, FacilityEvolutionTerms.Combat)),
+            Core("T02", "사격과녁", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Training, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Target, Traits(FacilityEvolutionTerms.Training, FacilityEvolutionTerms.Combat)),
+            Core("T03", "중량훈련석", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Training, FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Weight, Traits(FacilityEvolutionTerms.Training)),
+            Support("T04", "대련매트", 2, GridLayer.FloorOverlay, BuildingCategory.Special, VisualForm.Mat, Traits(FacilityEvolutionTerms.Training, FacilityEvolutionTerms.Combat)),
 
-            Core("G01", "경비 초소 책상", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Security, FacilityWorkType.Guard | FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Desk, Traits("Guard", FacilityEvolutionTerms.Defense, FacilityEvolutionTerms.Security)),
-            Core("G02", "경보 종", 1, GridLayer.WallFixture, BuildingCategory.Special, FacilityRole.Security, FacilityWorkType.Guard | FacilityWorkType.Repair, VisualForm.Bell, Traits(FacilityEvolutionTerms.Defense, FacilityEvolutionTerms.Security)),
-            Support("G03", "순찰 상황판", 1, GridLayer.WallFixture, BuildingCategory.Special, VisualForm.Board, Traits(FacilityEvolutionTerms.Security, FacilityEvolutionTerms.Service), phase: 2),
-            Support("G04", "전술 지도 탁자", 2, GridLayer.Building, BuildingCategory.Special, VisualForm.MapTable, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Defense, FacilityEvolutionTerms.Service), phase: 2),
-            Support("G05", "전투 깃발", 1, GridLayer.WallFixture, BuildingCategory.Special, VisualForm.Flag, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Brutal), phase: 2),
-            Support("G06", "전리품 거치대", 1, GridLayer.WallFixture, BuildingCategory.Special, VisualForm.WallRack, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Fear), phase: 3),
+            Core("G01", "경비초소책상", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Security, FacilityWorkType.Guard | FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.Desk, Traits("Guard", FacilityEvolutionTerms.Defense, FacilityEvolutionTerms.Security)),
+            Core("G02", "경보종", 1, GridLayer.WallFixture, BuildingCategory.Special, FacilityRole.Security, FacilityWorkType.Guard | FacilityWorkType.Repair, VisualForm.Bell, Traits(FacilityEvolutionTerms.Defense, FacilityEvolutionTerms.Security)),
+            Support("G03", "순찰상황판", 1, GridLayer.WallFixture, BuildingCategory.Special, VisualForm.Board, Traits(FacilityEvolutionTerms.Security, FacilityEvolutionTerms.Service), phase: 2),
+            Core("G04", "전술지도탁자", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Security, FacilityWorkType.Guard | FacilityWorkType.Operate | FacilityWorkType.Repair, VisualForm.MapTable, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Defense, FacilityEvolutionTerms.Service), phase: 2),
+            Support("G05", "전투깃발", 1, GridLayer.WallFixture, BuildingCategory.Special, VisualForm.Flag, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Brutal), phase: 2),
+            Support("G06", "전리품거치대", 1, GridLayer.WallFixture, BuildingCategory.Special, VisualForm.WallRack, Traits(FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Fear), phase: 3),
 
-            Core("L01", "대형 보관 선반", 2, GridLayer.Building, BuildingCategory.Production, FacilityRole.Logistics, FacilityWorkType.Restock | FacilityWorkType.Repair, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Logistics, FacilityEvolutionTerms.Storage), capacity: 1, internalStockMax: 60),
-            Support("L02", "상자 더미", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Crates, Traits(FacilityEvolutionTerms.Storage)),
-            Support("L03", "통 더미", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Barrels, Traits(FacilityEvolutionTerms.Storage)),
-            Support("L04", "자루 더미", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Sacks, Traits(FacilityEvolutionTerms.Storage)),
-            Support("L05", "식재료 저장함", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Crates, Traits(FacilityEvolutionTerms.Logistics, "Cooking"), phase: 2),
-            Support("L06", "무기 로커", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Logistics, FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Security), phase: 2),
-            Support("L07", "마력 보관함", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Logistics, FacilityEvolutionTerms.Mana), phase: 2),
+            Core("L01", "대형보관선반", 2, GridLayer.Building, BuildingCategory.Production, FacilityRole.Logistics, FacilityWorkType.Restock | FacilityWorkType.Repair, VisualForm.Shelf, Traits(FacilityEvolutionTerms.Logistics, FacilityEvolutionTerms.Storage), capacity: 1, internalStockCapacity: 60),
+            Support("L02", "상자더미", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Crates, Traits(FacilityEvolutionTerms.Storage)),
+            Support("L03", "통더미", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Barrels, Traits(FacilityEvolutionTerms.Storage)),
+            Support("L04", "자루더미", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Sacks, Traits(FacilityEvolutionTerms.Storage)),
+            Support("L05", "식재료저장함", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Crates, Traits(FacilityEvolutionTerms.Logistics, "Cooking"), phase: 2),
+            Support("L06", "무기로커", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Logistics, FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Security), phase: 2),
+            Support("L07", "마력보관함", 1, GridLayer.Building, BuildingCategory.Production, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Logistics, FacilityEvolutionTerms.Mana), phase: 2),
 
             Core("H01", "변기", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Toilet, FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Toilet, Traits("Sanitation")),
-            Support("H02", "화장실 칸막이", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Partition, Traits("Toilet", FacilityEvolutionTerms.Luxury)),
+            Support("H02", "화장실칸막이", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Partition, Traits("Toilet", FacilityEvolutionTerms.Luxury)),
             Core("H03", "세면대", 1, GridLayer.Building, BuildingCategory.Special, FacilityRole.Hygiene, FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Sink, Traits(FacilityEvolutionTerms.Hygiene)),
             Core("H04", "목욕통", 2, GridLayer.Building, BuildingCategory.Special, FacilityRole.Hygiene | FacilityRole.Rest, FacilityWorkType.Clean | FacilityWorkType.Repair, VisualForm.Bath, Traits(FacilityEvolutionTerms.Hygiene, FacilityEvolutionTerms.Rest), phase: 2),
             Support("H05", "수건걸이", 1, GridLayer.WallFixture, BuildingCategory.Special, VisualForm.WallRack, Traits(FacilityEvolutionTerms.Hygiene, FacilityEvolutionTerms.Service)),
             Support("H06", "청소도구함", 1, GridLayer.Building, BuildingCategory.Special, VisualForm.Cabinet, Traits(FacilityEvolutionTerms.Hygiene, FacilityEvolutionTerms.Storage)),
-            Support("H07", "바닥 배수구", 1, GridLayer.FloorOverlay, BuildingCategory.Special, VisualForm.Drain, Traits(FacilityEvolutionTerms.Hygiene), phase: 2),
+            Support("H07", "바닥배수구", 1, GridLayer.FloorOverlay, BuildingCategory.Special, VisualForm.Drain, Traits(FacilityEvolutionTerms.Hygiene), phase: 2),
 
-            Support("E01", "벽 횃불", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Torch, Traits("Light")),
-            Support("E02", "바닥 화로", 1, GridLayer.Building, BuildingCategory.Resource, VisualForm.Hearth, Traits("Light", FacilityEvolutionTerms.Rest), phase: 2),
+            Support("E01", "벽횃불", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Torch, Traits("Light")),
+            Support("E02", "바닥화로", 1, GridLayer.Building, BuildingCategory.Resource, VisualForm.Hearth, Traits("Light", FacilityEvolutionTerms.Rest), phase: 2),
             Support("E03", "샹들리에", 2, GridLayer.CeilingFixture, BuildingCategory.Resource, VisualForm.Chandelier, Traits("Light", FacilityEvolutionTerms.Luxury), phase: 2),
-            Support("E04", "소형 러그", 2, GridLayer.FloorOverlay, BuildingCategory.Resource, VisualForm.Rug, Traits(FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Quiet)),
-            Support("E05", "세력 깃발", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Flag, Traits(FacilityEvolutionTerms.Combat)),
-            Support("E06", "액자 초상화", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Portrait, Traits(FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Noble), phase: 2),
+            Support("E04", "소형러그", 2, GridLayer.FloorOverlay, BuildingCategory.Resource, VisualForm.Rug, Traits(FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Quiet)),
+            Support("E05", "세력깃발", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Flag, Traits(FacilityEvolutionTerms.Combat)),
+            Support("E06", "액자초상화", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Portrait, Traits(FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Noble), phase: 2),
             Support("E07", "촛대", 1, GridLayer.Building, BuildingCategory.Resource, VisualForm.Candlestick, Traits(FacilityEvolutionTerms.Quiet, FacilityEvolutionTerms.Luxury)),
-            Support("E08", "해골 피 장식", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Skull, Traits(FacilityEvolutionTerms.Brutal, FacilityEvolutionTerms.Fear), phase: 3),
-            Support("E09", "방 표지판", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Sign, Array.Empty<string>(), contributesToRoom: false, phase: 2)
+            Support("E08", "해골피장식", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Skull, Traits(FacilityEvolutionTerms.Brutal, FacilityEvolutionTerms.Fear), phase: 3),
+            Support("E09", "방표지판", 1, GridLayer.WallFixture, BuildingCategory.Resource, VisualForm.Sign, Array.Empty<string>(), contributesToRoom: false, phase: 2)
         };
     }
-
     private static FacilityPartSpec Core(
         string code,
         string displayName,
@@ -566,7 +941,7 @@ public static class ModularFacilityAssetBuilder
         string[] traits,
         FacilityEvolutionValue[] metrics = null,
         int capacity = 1,
-        int internalStockMax = 0,
+        int internalStockCapacity = 0,
         int phase = 1,
         Type runtimeType = null)
     {
@@ -584,7 +959,7 @@ public static class ModularFacilityAssetBuilder
             traits,
             metrics,
             capacity,
-            internalStockMax,
+            internalStockCapacity,
             phase,
             true);
     }
@@ -960,7 +1335,7 @@ public static class ModularFacilityAssetBuilder
             string[] traits,
             FacilityEvolutionValue[] metrics,
             int capacity,
-            int internalStockMax,
+            int internalStockCapacity,
             int phase,
             bool contributesToRoom)
         {
@@ -978,7 +1353,7 @@ public static class ModularFacilityAssetBuilder
             Traits = traits;
             Metrics = metrics;
             Capacity = capacity;
-            InternalStockMax = internalStockMax;
+            InternalStockCapacity = internalStockCapacity;
             Phase = phase;
             ContributesToRoom = contributesToRoom;
             UseDuration = core ? 1.5f : 0f;
@@ -998,7 +1373,7 @@ public static class ModularFacilityAssetBuilder
         public string[] Traits { get; }
         public FacilityEvolutionValue[] Metrics { get; }
         public int Capacity { get; }
-        public int InternalStockMax { get; }
+        public int InternalStockCapacity { get; }
         public int Phase { get; }
         public bool ContributesToRoom { get; }
         public float UseDuration { get; }

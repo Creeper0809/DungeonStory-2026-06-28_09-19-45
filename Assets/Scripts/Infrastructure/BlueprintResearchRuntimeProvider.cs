@@ -1,4 +1,5 @@
 using System;
+using VContainer;
 
 public interface IBlueprintResearchRuntimeProvider
 {
@@ -37,11 +38,21 @@ public sealed class BlueprintResearchRuntimeProvider :
 public sealed class BlueprintResearchWorkService : IBlueprintResearchWorkService
 {
     private readonly IBlueprintResearchRuntimeProvider runtimeProvider;
+    private readonly IMetaProgressionRuntimeReader metaProgressionReader;
 
     public BlueprintResearchWorkService(IBlueprintResearchRuntimeProvider runtimeProvider)
+        : this(runtimeProvider, null)
+    {
+    }
+
+    [Inject]
+    public BlueprintResearchWorkService(
+        IBlueprintResearchRuntimeProvider runtimeProvider,
+        IMetaProgressionRuntimeReader metaProgressionReader)
     {
         this.runtimeProvider = runtimeProvider
             ?? throw new ArgumentNullException(nameof(runtimeProvider));
+        this.metaProgressionReader = metaProgressionReader;
     }
 
     public bool HasResearchWorkFor(BuildableObject facility)
@@ -69,7 +80,8 @@ public sealed class BlueprintResearchWorkService : IBlueprintResearchWorkService
                 "Research runtime is not available.");
         }
 
-        return runtime.ApplyResearchWork(researcher, researchFacility, seconds);
+        float multiplier = metaProgressionReader?.GetArcaneResearchWorkMultiplier() ?? 1f;
+        return runtime.ApplyResearchWork(researcher, researchFacility, seconds * Math.Max(0.05f, multiplier));
     }
 }
 

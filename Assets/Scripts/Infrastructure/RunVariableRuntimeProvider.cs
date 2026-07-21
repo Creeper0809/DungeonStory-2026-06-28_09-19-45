@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using VContainer;
 
 public interface IRunVariableRuntimeProvider
 {
@@ -9,6 +10,7 @@ public interface IRunVariableRuntimeProvider
 public interface IRunVariableRuntimeReader
 {
     int GetInitialShopSeed();
+    IReadOnlyList<int> GetStartingBlueprintCandidateIds();
     float GetGuestDemandMultiplier(string speciesTag);
     float GetStockCostMultiplier(StockCategory category);
     float GetFacilityShopCostMultiplier(BuildingSO building);
@@ -51,11 +53,21 @@ public sealed class RunVariableRuntimeProvider :
 public sealed class RunVariableRuntimeReader : IRunVariableRuntimeReader
 {
     private readonly IRunVariableRuntimeProvider provider;
+    private readonly IMetaProgressionRuntimeReader metaProgressionReader;
 
     public RunVariableRuntimeReader(IRunVariableRuntimeProvider provider)
+        : this(provider, null)
+    {
+    }
+
+    [Inject]
+    public RunVariableRuntimeReader(
+        IRunVariableRuntimeProvider provider,
+        IMetaProgressionRuntimeReader metaProgressionReader)
     {
         this.provider = provider
             ?? throw new ArgumentNullException(nameof(provider));
+        this.metaProgressionReader = metaProgressionReader;
     }
 
     public int GetInitialShopSeed()
@@ -64,6 +76,14 @@ public sealed class RunVariableRuntimeReader : IRunVariableRuntimeReader
             && runtime.State.StartVariables != null
             ? runtime.State.StartVariables.initialShopSeed
             : 0;
+    }
+
+    public IReadOnlyList<int> GetStartingBlueprintCandidateIds()
+    {
+        return provider.TryGetRuntime(out RunVariableRuntime runtime)
+            && runtime.State.StartVariables != null
+            ? runtime.State.StartVariables.startingBlueprintCandidateIds
+            : Array.Empty<int>();
     }
 
     public float GetGuestDemandMultiplier(string speciesTag)
@@ -75,16 +95,20 @@ public sealed class RunVariableRuntimeReader : IRunVariableRuntimeReader
 
     public float GetStockCostMultiplier(StockCategory category)
     {
-        return provider.TryGetRuntime(out RunVariableRuntime runtime)
+        float runMultiplier = provider.TryGetRuntime(out RunVariableRuntime runtime)
             ? runtime.GetStockCostMultiplier(category)
             : 1f;
+        float metaMultiplier = metaProgressionReader?.GetCommerceStockCostMultiplier(category) ?? 1f;
+        return Math.Max(0.05f, runMultiplier * metaMultiplier);
     }
 
     public float GetFacilityShopCostMultiplier(BuildingSO building)
     {
-        return provider.TryGetRuntime(out RunVariableRuntime runtime)
+        float runMultiplier = provider.TryGetRuntime(out RunVariableRuntime runtime)
             ? runtime.GetFacilityShopCostMultiplier(building)
             : 1f;
+        float metaMultiplier = metaProgressionReader?.GetFortressFacilityCostMultiplier(building) ?? 1f;
+        return Math.Max(0.05f, runMultiplier * metaMultiplier);
     }
 
     public float GetBlueprintCostMultiplier(FacilityBlueprintSO blueprint)
@@ -139,7 +163,11 @@ public sealed class OwnerRunDataProvider : IOwnerRunDataProvider, IOwnerRunManag
 
     public bool TryGetManager(out OwnerRunManager manager)
     {
-        ownerRunManager ??= sceneQuery.First<OwnerRunManager>(includeInactive: true);
+        if (ownerRunManager == null)
+        {
+            ownerRunManager = sceneQuery.First<OwnerRunManager>(includeInactive: true);
+        }
+
         manager = ownerRunManager;
         return manager != null;
     }

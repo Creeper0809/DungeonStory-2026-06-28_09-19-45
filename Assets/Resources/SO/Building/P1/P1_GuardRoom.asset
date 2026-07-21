@@ -40,6 +40,11 @@ MonoBehaviour:
   objectName: "1\uC131 \uACBD\uBE44\uC2E4"
   sprite: {fileID: 21300000, guid: c28dedc883570139aa21b0a55f922f3f, type: 3}
   icon: {fileID: 21300000, guid: c28dedc883570139aa21b0a55f922f3f, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562995605602970
+    - rid: 7302563078173904441
+    - rid: 7302563078173904442
   width: 3
   height: 1
   layer: 1
@@ -48,51 +53,44 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 0
-  facility:
-    roles: 0
-    capacity: 0
-    useDuration: 0
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 1
-    supportedWorkTypes: 36
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 0
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 1
-    concept: 6
-    triggerTimings: 9
-    targetRule: 3
-    cooldownSeconds: 2
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: "1\uC131 \uACBD\uBE44\uC2E4"
-    effectAssets:
-    - {fileID: 11400000, guid: e0da7de085d5d4db1923bda6f1147635, type: 2}
-    effects:
-    - kind: 5
-      amount: 10
-      duration: 0
-      stacks: 1
-      logTag: "\uACBD\uBE44 \uAD50\uC804"
-  evolution:
-    contributesToRoomProfile: 1
-    tags: []
-    scores: []
-    metrics: []
-  unlocked: 0
+  facilityAnchors:
+    slots: []
+  unlocked: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562995605602970
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 180
+        maintenance: 6
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302563078173904441
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 0
+          capacity: 0
+          useDuration: 0
+          requiredWorkers: 1
+          supportedWorkTypes: 36
+          disabledWhenDamaged: 1
+    - rid: 7302563078173904442
+      type: {class: BuildingDefenseAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingDefenseAbility
+        settings:
+          enabled: 1
+          concept: 6
+          triggerTimings: 9
+          targetRule: 3
+          cooldownSeconds: 2
+          periodicIntervalSeconds: 0
+          range: 0
+          star: 1
+          combatLogText: "1\uC131 \uACBD\uBE44\uC2E4"
+          effectAssets:
+          - {fileID: 11400000, guid: e0da7de085d5d4db1923bda6f1147635, type: 2}

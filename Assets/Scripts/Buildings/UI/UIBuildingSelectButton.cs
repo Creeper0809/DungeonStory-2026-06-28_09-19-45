@@ -3,7 +3,9 @@ using UnityEngine;
 using UnityEngine.UI;
 using VContainer;
 
-public class UIBuildingSelectButton : MonoBehaviour
+public class UIBuildingSelectButton :
+    MonoBehaviour,
+    UtilEventListener<BlueprintResearchCompletedEvent>
 {
     private static readonly Vector2 DefaultButtonSize = new Vector2(100f, 100f);
     private static readonly Vector2 DefaultIconMaxSize = new Vector2(84f, 64f);
@@ -15,6 +17,7 @@ public class UIBuildingSelectButton : MonoBehaviour
     public int id;
     private IDungeonGridBuildingControllerProvider buildingControllerProvider;
     private IGameDataProvider gameDataProvider;
+    private IBlueprintResearchRuntimeProvider researchRuntimeProvider;
     private BuildingSO buildingData;
     private GameData observedGameData;
     private bool isDisposed;
@@ -22,12 +25,15 @@ public class UIBuildingSelectButton : MonoBehaviour
     [Inject]
     public void Construct(
         IDungeonGridBuildingControllerProvider buildingControllerProvider,
-        IGameDataProvider gameDataProvider)
+        IGameDataProvider gameDataProvider,
+        IBlueprintResearchRuntimeProvider researchRuntimeProvider)
     {
         this.buildingControllerProvider = buildingControllerProvider
             ?? throw new ArgumentNullException(nameof(buildingControllerProvider));
         this.gameDataProvider = gameDataProvider
             ?? throw new ArgumentNullException(nameof(gameDataProvider));
+        this.researchRuntimeProvider = researchRuntimeProvider
+            ?? throw new ArgumentNullException(nameof(researchRuntimeProvider));
     }
 
     public void Initialization(BuildingSO so)
@@ -51,7 +57,7 @@ public class UIBuildingSelectButton : MonoBehaviour
     {
         if (!IsAvailable())
         {
-            int phase = buildingData != null ? buildingData.Operational.unlockPhase : 1;
+            int phase = buildingData != null ? buildingData.GetUnlockPhase() : 1;
             NoticeFeedEvent.Trigger($"{phase}단계에 해금되는 시설입니다.", NoticeFeedEvent.Grade.DANGER);
             return;
         }
@@ -70,18 +76,21 @@ public class UIBuildingSelectButton : MonoBehaviour
     private void OnEnable()
     {
         isDisposed = false;
+        this.EventStartListening<BlueprintResearchCompletedEvent>();
         ObserveGameData();
         RefreshAvailability();
     }
 
     private void OnDisable()
     {
+        this.EventStopListening<BlueprintResearchCompletedEvent>();
         StopObservingGameData();
     }
 
     private void OnDestroy()
     {
         isDisposed = true;
+        this.EventStopListening<BlueprintResearchCompletedEvent>();
         StopObservingGameData();
     }
 
@@ -122,9 +131,18 @@ public class UIBuildingSelectButton : MonoBehaviour
     private bool IsAvailable()
     {
         ObserveGameData();
+        BlueprintResearchState unlockState = researchRuntimeProvider != null
+            && researchRuntimeProvider.TryGetRuntime(out BlueprintResearchRuntime runtime)
+                ? runtime.State
+                : null;
         return buildingData == null
             || observedGameData == null
-            || FacilityProgression.IsUnlocked(buildingData, observedGameData);
+            || FacilityProgression.IsUnlocked(buildingData, observedGameData, unlockState);
+    }
+
+    public void OnTriggerEvent(BlueprintResearchCompletedEvent eventType)
+    {
+        RefreshAvailability();
     }
 
     private void RefreshAvailability()

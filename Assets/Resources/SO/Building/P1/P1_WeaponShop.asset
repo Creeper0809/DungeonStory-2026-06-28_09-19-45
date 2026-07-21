@@ -40,6 +40,14 @@ MonoBehaviour:
   objectName: "\uBB34\uAE30\uC810"
   sprite: {fileID: 21300000, guid: f41ffe3f383993b02a41de863d9339fb, type: 3}
   icon: {fileID: 21300000, guid: f41ffe3f383993b02a41de863d9339fb, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562978982527679
+    - rid: 7302562985835495596
+    - rid: 7302562985835495597
+    - rid: 7302562985835495598
+    - rid: 7302562985835495599
+    - rid: 7302562987322638435
   width: 3
   height: 1
   layer: 1
@@ -48,47 +56,46 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 0
-  facility:
-    roles: 10
-    capacity: 2
-    useDuration: 1.4
-    internalStockMax: 14
-    restockRequestThreshold: 3
-    requiredWorkers: 1
-    supportedWorkTypes: 7
-    preferredSpeciesTags:
-    - Orc
-    dislikedSpeciesTags:
-    - Slime
-    disabledWhenDamaged: 1
-    requiresStock: 1
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 1
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags: []
-    scores: []
-    metrics: []
+  facilityAnchors:
+    slots: []
   unlocked: 0
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562978982527679
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 10
+          capacity: 2
+          useDuration: 1.4
+          requiredWorkers: 1
+          supportedWorkTypes: 7
+          disabledWhenDamaged: 1
+    - rid: 7302562985835495596
+      type: {class: BuildingInternalStockAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingInternalStockAbility
+        capacity: 14
+        restockRequestThreshold: 3
+    - rid: 7302562985835495597
+      type: {class: BuildingRequiresStockAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRequiresStockAbility
+    - rid: 7302562985835495598
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562985835495599
+      type: {class: BuildingSelfContainedRoomAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSelfContainedRoomAbility
+    - rid: 7302562987322638435
+      type: {class: BuildingSpeciesAffinityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingSpeciesAffinityAbility
+        preferredTags:
+        - Orc
+        dislikedTags:
+        - Slime

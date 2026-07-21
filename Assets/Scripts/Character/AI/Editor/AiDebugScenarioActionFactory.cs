@@ -21,6 +21,8 @@ public static class AiDebugScenarioActionFactory
             "SO/AI/Action/Wait",
             "SO/AI/Action/Eat",
             "SO/AI/Action/Rest",
+            "SO/AI/Action/Toilet",
+            "SO/AI/Action/Hygiene",
             "SO/AI/Action/Shopping");
     }
 

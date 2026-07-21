@@ -22,12 +22,34 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   id: 6102
-  blueprintName: "\uBC29\uC5B4 \uAE30\uCD08 \uC124\uACC4\uB3C4"
-  description: "\uAC00\uC2DC \uD568\uC815\uACFC \uACBD\uBE44\uC2E4\uC744 \uAE30\uBCF8
-    \uAD6C\uB9E4 \uD6C4\uBCF4\uB85C \uC5EC\uB294 \uC124\uACC4\uB3C4."
+  blueprintName: "\uC694\uC0C8\uD654 \uC124\uACC4\uB3C4"
+  description: "\uACBD\uBE44 \uB3D9\uC120\uACFC \uBCD1\uC601\uC744 \uAC15\uD654\uD558\uB294
+    \uC804\uC220\xB7\uBCF4\uC548 \uD30C\uCE20\uB97C \uC989\uC2DC \uD574\uAE08\uD55C\uB2E4."
   rarity: 0
   defaultCost: 140
   researchWorkRequired: 22
-  unlockBuildingIds: 
-  unlockBasicPurchaseBuildingIds: 1e00000023000000
-  unlockRecipeIds: []
+  unlocks:
+    items:
+    - rid: 7302563078173904416
+    - rid: 7302563078173904417
+    - rid: 7302563078173904418
+    - rid: 7302563078173904419
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302563078173904416
+      type: {class: BlueprintBuildingUnlock, ns: , asm: Assembly-CSharp}
+      data:
+        buildingId: 1046
+    - rid: 7302563078173904417
+      type: {class: BlueprintBuildingUnlock, ns: , asm: Assembly-CSharp}
+      data:
+        buildingId: 1047
+    - rid: 7302563078173904418
+      type: {class: BlueprintBuildingUnlock, ns: , asm: Assembly-CSharp}
+      data:
+        buildingId: 1049
+    - rid: 7302563078173904419
+      type: {class: BlueprintBuildingUnlock, ns: , asm: Assembly-CSharp}
+      data:
+        buildingId: 1055

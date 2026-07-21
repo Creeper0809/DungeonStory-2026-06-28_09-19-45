@@ -165,6 +165,12 @@ public class AbilityMove : CharacterAbility
             return;
         }
 
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out _))
+        {
+            actor.Brain?.ClearPathSearchCache();
+            return;
+        }
+
         if (enterDungeonRoutine != null)
         {
             StopCoroutine(enterDungeonRoutine);
@@ -408,7 +414,7 @@ public class AbilityMove : CharacterAbility
             yield break;
         }
 
-        if (action.pathSteps != null && action.pathSteps.Count > 0)
+        if (action.pathSteps.Count > 0)
         {
             actor?.Brain?.SetActionPhase("\uC774\uB3D9", action.destination, $"{action.planKind} / {action.pathSteps.Count}\uCE78");
             yield return MoveByPath(new Queue<GridMoveStep>(action.pathSteps), action);
@@ -434,7 +440,7 @@ public class AbilityMove : CharacterAbility
             return false;
         }
 
-        if (action.pathSteps == null || action.pathSteps.Count == 0)
+        if (action.pathSteps.Count == 0)
         {
             actor.Brain.SetActionPhase("\uB3C4\uCC29", action.destination, action.planKind.ToString());
             return false;

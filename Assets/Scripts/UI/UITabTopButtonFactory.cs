@@ -5,7 +5,7 @@ using UnityEngine.UI;
 
 public interface IUITabTopButtonFactory
 {
-    Button CreateButton(Button template, Transform parent, int id, string title);
+    Button CreateButton(Button template, Transform parent, TabId id, string title);
     HorizontalLayoutGroup EnsureSingleRowLayout(Transform root, float barHeight, params string[] rowNames);
 }
 
@@ -19,7 +19,7 @@ public sealed class UITabTopButtonFactory : IUITabTopButtonFactory
             ?? throw new ArgumentNullException(nameof(tmpKoreanFontService));
     }
 
-    public Button CreateButton(Button template, Transform parent, int id, string title)
+    public Button CreateButton(Button template, Transform parent, TabId id, string title)
     {
         if (template == null)
         {
@@ -34,6 +34,13 @@ public sealed class UITabTopButtonFactory : IUITabTopButtonFactory
         Button button = UnityEngine.Object.Instantiate(template, parent);
         button.name = $"TopTabButton_{id}_{SanitizeName(title)}";
         button.onClick = new Button.ButtonClickedEvent();
+        UITabButtonBinding binding = button.GetComponent<UITabButtonBinding>();
+        if (binding == null)
+        {
+            binding = button.gameObject.AddComponent<UITabButtonBinding>();
+        }
+
+        binding.Set(id);
         SetLabel(button, title);
         return button;
     }
@@ -79,6 +86,28 @@ public sealed class UITabTopButtonFactory : IUITabTopButtonFactory
         horizontal.childControlHeight = true;
         horizontal.childForceExpandWidth = true;
         horizontal.childForceExpandHeight = true;
+
+        foreach (Button button in root.GetComponentsInChildren<Button>(true))
+        {
+            if (button.transform.parent != root)
+            {
+                continue;
+            }
+
+            LayoutElement layoutElement = button.GetComponent<LayoutElement>();
+            if (layoutElement == null)
+            {
+                layoutElement = button.gameObject.AddComponent<LayoutElement>();
+            }
+
+            layoutElement.minWidth = 0f;
+            layoutElement.preferredWidth = 0f;
+            layoutElement.flexibleWidth = 1f;
+            layoutElement.minHeight = 0f;
+            layoutElement.preferredHeight = 0f;
+            layoutElement.flexibleHeight = 1f;
+        }
+
         return horizontal;
     }
 

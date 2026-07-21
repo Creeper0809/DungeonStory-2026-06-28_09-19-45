@@ -35,9 +35,14 @@ public sealed class DungeonGridBuildingControllerProvider : IDungeonGridBuilding
     {
         get
         {
-            controller ??= sceneQuery.First<DungeonStoryGridBuildingController>(includeInactive: true);
-            return controller
-                ?? throw new InvalidOperationException($"{nameof(IDungeonGridBuildingControllerProvider)} requires a loaded {nameof(DungeonStoryGridBuildingController)}.");
+            if (controller == null)
+            {
+                controller = sceneQuery.First<DungeonStoryGridBuildingController>(includeInactive: true);
+            }
+
+            return controller != null
+                ? controller
+                : throw new InvalidOperationException($"{nameof(IDungeonGridBuildingControllerProvider)} requires a loaded {nameof(DungeonStoryGridBuildingController)}.");
         }
     }
 }
@@ -56,9 +61,14 @@ public sealed class GridTextureProvider : IGridTextureProvider
     {
         get
         {
-            texture ??= sceneQuery.First<GridTexture>(includeInactive: true);
-            return texture
-                ?? throw new InvalidOperationException($"{nameof(IGridTextureProvider)} requires a loaded {nameof(GridTexture)}.");
+            if (texture == null)
+            {
+                texture = sceneQuery.First<GridTexture>(includeInactive: true);
+            }
+
+            return texture != null
+                ? texture
+                : throw new InvalidOperationException($"{nameof(IGridTextureProvider)} requires a loaded {nameof(GridTexture)}.");
         }
     }
 }
@@ -104,9 +114,14 @@ public sealed class SceneMainCameraProvider : IMainCameraProvider
     {
         get
         {
-            camera ??= sceneQuery.First<Camera>(includeInactive: true);
-            return camera
-                ?? throw new InvalidOperationException($"{nameof(IMainCameraProvider)} requires a loaded {nameof(Camera)}.");
+            if (camera == null)
+            {
+                camera = sceneQuery.First<Camera>(includeInactive: true);
+            }
+
+            return camera != null
+                ? camera
+                : throw new InvalidOperationException($"{nameof(IMainCameraProvider)} requires a loaded {nameof(Camera)}.");
         }
     }
 }

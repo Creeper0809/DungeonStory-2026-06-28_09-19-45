@@ -9,10 +9,9 @@ public struct InvasionSpawnedEvent
         this.threatSnapshot = threatSnapshot;
     }
 
-    private static InvasionSpawnedEvent e;
-
     public static void Trigger(CharacterActor intruder, InvasionThreatSnapshot threatSnapshot)
     {
+        InvasionSpawnedEvent e = new InvasionSpawnedEvent();
         e.intruderActor = intruder;
         e.threatSnapshot = threatSnapshot;
         EventObserver.TriggerEvent(e);
@@ -30,10 +29,9 @@ public struct InvasionFacilityDamagedEvent
         this.facility = facility;
     }
 
-    private static InvasionFacilityDamagedEvent e;
-
     public static void Trigger(CharacterActor intruder, BuildableObject facility)
     {
+        InvasionFacilityDamagedEvent e = new InvasionFacilityDamagedEvent();
         e.intruderActor = intruder;
         e.facility = facility;
         EventObserver.TriggerEvent(e);
@@ -51,10 +49,9 @@ public struct InvasionFinalCombatStartedEvent
         ownerActor = owner;
     }
 
-    private static InvasionFinalCombatStartedEvent e;
-
     public static void Trigger(CharacterActor intruder, CharacterActor owner)
     {
+        InvasionFinalCombatStartedEvent e = new InvasionFinalCombatStartedEvent();
         e.intruderActor = intruder;
         e.ownerActor = owner;
         EventObserver.TriggerEvent(e);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using UnityEngine;
 
@@ -28,14 +29,14 @@ public readonly struct FacilityEvolutionProposal
         IReadOnlyDictionary<string, string> rejectedHintTexts = null)
     {
         FacilityIdentitySummary = facilityIdentitySummary ?? string.Empty;
-        ProposalIds = proposalIds ?? Array.Empty<string>();
-        ProposalReasons = proposalReasons ?? new Dictionary<string, string>();
-        MutationTagSuggestions = mutationTagSuggestions ?? Array.Empty<string>();
+        ProposalIds = EventPayloadSnapshot.Copy(proposalIds);
+        ProposalReasons = SnapshotDictionary(proposalReasons);
+        MutationTagSuggestions = EventPayloadSnapshot.Copy(mutationTagSuggestions);
         FlavorText = flavorText ?? string.Empty;
         Confidence = Mathf.Clamp01(confidence);
         Source = source ?? string.Empty;
         StatusMessage = statusMessage ?? string.Empty;
-        RejectedHintTexts = rejectedHintTexts ?? new Dictionary<string, string>();
+        RejectedHintTexts = SnapshotDictionary(rejectedHintTexts);
     }
 
     public string FacilityIdentitySummary { get; }
@@ -48,6 +49,24 @@ public readonly struct FacilityEvolutionProposal
     public string StatusMessage { get; }
     public IReadOnlyDictionary<string, string> RejectedHintTexts { get; }
     public bool IsLlmBacked => string.Equals(Source, FacilityEvolutionProposalSources.LocalLlm, StringComparison.Ordinal);
+
+    private static IReadOnlyDictionary<string, string> SnapshotDictionary(
+        IReadOnlyDictionary<string, string> source)
+    {
+        Dictionary<string, string> copy = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (source != null)
+        {
+            foreach (KeyValuePair<string, string> pair in source)
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key))
+                {
+                    copy[pair.Key] = pair.Value ?? string.Empty;
+                }
+            }
+        }
+
+        return new ReadOnlyDictionary<string, string>(copy);
+    }
 }
 
 public static class FacilityEvolutionProposalSources
@@ -299,7 +318,7 @@ public sealed class FacilityEvolutionContext
         Facility = facility;
         State = state;
         Profile = profile;
-        CandidateRecipes = candidateRecipes ?? Array.Empty<FacilityEvolutionRecipeSO>();
+        CandidateRecipes = EventPayloadSnapshot.Copy(candidateRecipes);
     }
 
     public BuildableObject Facility { get; }
@@ -312,10 +331,18 @@ public sealed class FacilityEvolutionValidationResult
 {
     private readonly List<string> reasons = new List<string>();
     private readonly List<FacilityEvolutionValidationCheck> checks = new List<FacilityEvolutionValidationCheck>();
+    private readonly IReadOnlyList<string> reasonsView;
+    private readonly IReadOnlyList<FacilityEvolutionValidationCheck> checksView;
+
+    public FacilityEvolutionValidationResult()
+    {
+        reasonsView = ReadOnlyView.List(reasons);
+        checksView = ReadOnlyView.List(checks);
+    }
 
     public bool Approved => reasons.Count == 0;
-    public IReadOnlyList<string> RejectionReasons => reasons;
-    public IReadOnlyList<FacilityEvolutionValidationCheck> Checks => checks;
+    public IReadOnlyList<string> RejectionReasons => reasonsView;
+    public IReadOnlyList<FacilityEvolutionValidationCheck> Checks => checksView;
 
     public void Reject(string reason)
     {
@@ -710,7 +737,8 @@ public static class FacilityEvolutionService
             return;
         }
 
-        IFacilityEvolutionResourceProvider provider = resources ?? new EmptyFacilityEvolutionResourceProvider();
+        IFacilityEvolutionResourceProvider provider = resources
+            ?? throw new ArgumentNullException(nameof(resources));
         foreach (FacilityEvolutionMaterialRequirement requirement in requirements)
         {
             int amount = Mathf.Max(1, requirement.amount);

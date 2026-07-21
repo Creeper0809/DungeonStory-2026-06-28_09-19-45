@@ -15,7 +15,7 @@ namespace BehaviorDesigner.Runtime
         [SerializeField] private string dungeonStoryTask;
         [SerializeField] private string dungeonStoryStatus;
         [SerializeField] private int dungeonStoryTickCount;
-        private static readonly System.Collections.Generic.Dictionary<Task, GameObject> dungeonStoryBoundTaskGameObjects =
+        private readonly System.Collections.Generic.Dictionary<Task, GameObject> dungeonStoryBoundTaskGameObjects =
             new System.Collections.Generic.Dictionary<Task, GameObject>();
         private Task dungeonStoryRuntimeRoot;
         private bool dungeonStoryRuntimeTreeAwake;
@@ -26,6 +26,21 @@ namespace BehaviorDesigner.Runtime
         public string DungeonStoryStatus => dungeonStoryStatus;
         public int DungeonStoryTickCount => dungeonStoryTickCount;
 
+        public void DungeonStoryEnsureBehaviorSourceOwnership()
+        {
+            BehaviorSource source = GetBehaviorSource();
+            if (source == null)
+            {
+                SetBehaviorSource(new BehaviorSource(this));
+                return;
+            }
+
+            if (!ReferenceEquals(source.Owner, this))
+            {
+                source.Owner = this;
+            }
+        }
+
         public void DungeonStoryReloadExternalBehaviorForRuntime()
         {
             if (Application.isPlaying && ExecutionStatus == TaskStatus.Running)
@@ -35,6 +50,7 @@ namespace BehaviorDesigner.Runtime
 
             dungeonStoryRuntimeRoot = null;
             dungeonStoryRuntimeTreeAwake = false;
+            dungeonStoryBoundTaskGameObjects.Clear();
             dungeonStoryBranch = global::CharacterAiBranch.None.ToString();
             dungeonStoryTask = string.Empty;
             dungeonStoryStatus = "Runtime graph reloaded.";
@@ -112,7 +128,6 @@ namespace BehaviorDesigner.Runtime
                 dungeonStoryStatus = status.ToString();
             }
 
-            RefreshDungeonStoryVisualPath(actor, rootTask);
             return status == TaskStatus.Success || status == TaskStatus.Running;
         }
 
@@ -355,10 +370,31 @@ namespace BehaviorDesigner.Runtime
                 return false;
             }
 
+            // BehaviorSource.Owner is not serialized. CharacterActor.OnEnable can ask the
+            // scheduler to prepare this tree before Behavior Designer has restored ownership.
+            DungeonStoryEnsureBehaviorSourceOwnership();
             BehaviorSource source = GetBehaviorSource();
-            bool needsRuntimeLoad = source == null || source.RootTask == null;
-            CheckForSerialization(needsRuntimeLoad, true);
+
+            bool needsRuntimeLoad = source.RootTask == null;
+            try
+            {
+                CheckForSerialization(needsRuntimeLoad, true);
+            }
+            catch (System.Exception exception)
+            {
+                string actorName = actor != null ? actor.name : "<missing actor>";
+                string behaviorName = ExternalBehavior != null ? ExternalBehavior.name : "<missing external behavior>";
+                throw new System.InvalidOperationException(
+                    $"Failed to prepare Behavior Designer tree '{behaviorName}' for '{actorName}'.",
+                    exception);
+            }
+
             source = GetBehaviorSource();
+            if (source != null && !ReferenceEquals(source.Owner, this))
+            {
+                source.Owner = this;
+            }
+
             rootTask = source != null ? source.RootTask : null;
             if (rootTask == null)
             {

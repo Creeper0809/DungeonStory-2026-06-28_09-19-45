@@ -499,13 +499,36 @@ public static class CharacterAiBehaviorDesignerGraphBuilder
         }
         else
         {
-            source.behaviorName = "Character AI";
-            source.behaviorDescription = string.Empty;
+            if (source.behaviorName != "Character AI")
+            {
+                source.behaviorName = "Character AI";
+                changed = true;
+            }
+
+            if (!string.IsNullOrEmpty(source.behaviorDescription))
+            {
+                source.behaviorDescription = string.Empty;
+                changed = true;
+            }
+
+            if (!ReferenceEquals(source.Owner, tree))
+            {
+                source.Owner = tree;
+            }
         }
 
-        tree.StartWhenEnabled = false;
-        EditorUtility.SetDirty(tree);
-        return true;
+        if (tree.StartWhenEnabled)
+        {
+            tree.StartWhenEnabled = false;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            EditorUtility.SetDirty(tree);
+        }
+
+        return changed;
     }
 
     private static int BuildPrefabGraphs(ExternalBehaviorTree externalBehavior)

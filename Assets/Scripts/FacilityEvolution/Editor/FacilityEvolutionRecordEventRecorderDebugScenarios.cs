@@ -16,7 +16,7 @@ public static class FacilityEvolutionRecordEventRecorderDebugScenarios
             return false;
         }
 
-        LifetimeScope scope = Object.FindObjectOfType<LifetimeScope>();
+        LifetimeScope scope = Object.FindFirstObjectByType<LifetimeScope>(FindObjectsInactive.Include);
         if (scope == null || scope.Container == null)
         {
             report = "No active LifetimeScope/container.";

@@ -1,0 +1,86 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 177cfc3b70256b84ca2f4f0975a0db84, type: 3}
+  m_Name: Customer_Orc
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterSO
+  characterType: 1
+  role: 0
+  id: 2
+  characterName: "\uADF8\uB86C"
+  speciesTag: Orc
+  species: {fileID: 11400000, guid: c7f6b6a35919a8091a84822b06288975, type: 2}
+  baseStats:
+    entries:
+    - statId: stat:attack
+      value: 8
+    - statId: stat:sales
+      value: 4
+    - statId: stat:research
+      value: 3
+    - statId: stat:move-speed
+      value: 4
+    - statId: stat:strength
+      value: 8
+    - statId: stat:toughness
+      value: 8
+    - statId: stat:dexterity
+      value: 5
+    - statId: stat:cleaning
+      value: 3
+    - statId: stat:endurance
+      value: 7
+  traits:
+  - {fileID: 11400000, guid: 95fa850a1a682706faa160ba49bb26cf, type: 2}
+  defaultWorkPriorities:
+    schemaVersion: 1
+    priorities:
+    - workTypeId: work:operate
+      priority: 1
+    - workTypeId: work:restock
+      priority: 2
+    - workTypeId: work:repair
+      priority: 2
+    - workTypeId: work:clean
+      priority: 3
+    - workTypeId: work:research
+      priority: 2
+    - workTypeId: work:guard
+      priority: 3
+    - workTypeId: work:rescue
+      priority: 2
+    - workTypeId: work:rest
+      priority: 3
+    legacyOperate: 1
+    legacyRestock: 2
+    legacyRepair: 2
+    legacyClean: 3
+    legacyResearch: 2
+    legacyGuard: 3
+    legacyRescue: 2
+    legacyRest: 3
+  aiPersonality:
+    diligence: 1
+    curiosity: 0.8
+    selfCare: 0.9
+    patience: 0.8
+    shoppingInterest: 0.9
+  ownerSummary:
+  ownerPreferredWorkTypes: 0
+  characterSprite: {fileID: 21300000, guid: bbf2e2af9c80d2a4c9b9d9bfd9cbc907, type: 3}
+  favoriteStore: []
+  frequencyVisitMax: 3
+  frequencyVisitMin: 1
+  maxHoldingMoney: 350
+  minHoldingMoney: 120
+  speedType: 4
+  respawnSpeedType: 13
+  basicBehaviorPatterns: {fileID: 0}

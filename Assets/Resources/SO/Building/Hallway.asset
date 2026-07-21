@@ -16,65 +16,15 @@ MonoBehaviour:
     SerializedFormat: 2
     SerializedBytes: 
     ReferencedUnityObjects:
-    - {fileID: 1878171585, guid: 2fb3ab25e50d145418738cd340acb8a2, type: 3}
     - {fileID: 11400000, guid: 1fabc1135bd2c3e4fbd37f188f947dee, type: 2}
     SerializedBytesString: 
     Prefab: {fileID: 0}
     PrefabModificationsReferencedUnityObjects: []
     PrefabModifications: []
     SerializationNodes:
-    - Name: id
-      Entry: 3
-      Data: 0
-    - Name: objectName
-      Entry: 1
-      Data: "\uBCF5\uB3C4"
-    - Name: width
-      Entry: 3
-      Data: 1
-    - Name: height
-      Entry: 3
-      Data: 1
-    - Name: maintenance
-      Entry: 3
-      Data: 0
-    - Name: sprite
-      Entry: 10
-      Data: 0
-    - Name: icon
-      Entry: 10
-      Data: 0
-    - Name: layer
-      Entry: 3
-      Data: 0
-    - Name: category
-      Entry: 3
-      Data: 1
-    - Name: horizontalDraggable
-      Entry: 5
-      Data: true
-    - Name: verticalDraggable
-      Entry: 5
-      Data: true
-    - Name: OnBuildCondition
-      Entry: 7
-      Data: 0|System.Collections.Generic.List`1[[IBuildingCondition, Assembly-CSharp]],
-        mscorlib
-    - Name: 
-      Entry: 12
-      Data: 0
-    - Name: 
-      Entry: 13
-      Data: 
-    - Name: 
-      Entry: 8
-      Data: 
-    - Name: unlocked
-      Entry: 5
-      Data: true
     - Name: type
       Entry: 7
-      Data: 1|System.RuntimeType, mscorlib
+      Data: 0|System.RuntimeType, mscorlib
     - Name: 
       Entry: 1
       Data: Hallway, Assembly-CSharp
@@ -83,12 +33,12 @@ MonoBehaviour:
       Data: 
     - Name: tiles
       Entry: 7
-      Data: 2|System.Collections.Generic.Dictionary`2[[GridTexture+TilemapLayer,
+      Data: 1|System.Collections.Generic.Dictionary`2[[GridTexture+TilemapLayer,
         Assembly-CSharp],[UnityEngine.Tilemaps.Tile, UnityEngine.TilemapModule]],
         mscorlib
     - Name: comparer
       Entry: 7
-      Data: 3|System.Collections.Generic.EnumEqualityComparer`1[[GridTexture+TilemapLayer,
+      Data: 2|System.Collections.Generic.EnumEqualityComparer`1[[GridTexture+TilemapLayer,
         Assembly-CSharp]], mscorlib
     - Name: 
       Entry: 12
@@ -110,7 +60,7 @@ MonoBehaviour:
       Data: 0
     - Name: $v
       Entry: 10
-      Data: 1
+      Data: 0
     - Name: 
       Entry: 8
       Data: 
@@ -120,3 +70,36 @@ MonoBehaviour:
     - Name: 
       Entry: 8
       Data: 
+    - Name: OnBuildCondition
+      Entry: 7
+      Data: 3|System.Collections.Generic.List`1[[IBuildingCondition, Assembly-CSharp]],
+        mscorlib
+    - Name: 
+      Entry: 12
+      Data: 0
+    - Name: 
+      Entry: 13
+      Data: 
+    - Name: 
+      Entry: 8
+      Data: 
+  id: 0
+  objectName: "\uBCF5\uB3C4"
+  sprite: {fileID: 1878171585, guid: 2fb3ab25e50d145418738cd340acb8a2, type: 3}
+  icon: {fileID: 1878171585, guid: 2fb3ab25e50d145418738cd340acb8a2, type: 3}
+  abilityModules:
+    items: []
+  width: 1
+  height: 1
+  layer: 0
+  category: 1
+  horizontalDraggable: 1
+  verticalDraggable: 1
+  movementAnchorOffset: {x: 0, y: 0}
+  movementTravelTime: 2
+  facilityAnchors:
+    slots: []
+  unlocked: 1
+  references:
+    version: 2
+    RefIds: []

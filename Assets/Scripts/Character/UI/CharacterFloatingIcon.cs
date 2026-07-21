@@ -60,9 +60,14 @@ public sealed class GameManagerFloatingIconFeedbackService : IFloatingIconFeedba
 
     private GameManager ResolveGameManager()
     {
-        gameManager ??= sceneQuery.First<GameManager>(includeInactive: true);
-        return gameManager
-            ?? throw new InvalidOperationException($"{nameof(IFloatingIconFeedbackService)} requires a loaded {nameof(GameManager)}.");
+        if (gameManager == null)
+        {
+            gameManager = sceneQuery.First<GameManager>(includeInactive: true);
+        }
+
+        return gameManager != null
+            ? gameManager
+            : throw new InvalidOperationException($"{nameof(IFloatingIconFeedbackService)} requires a loaded {nameof(GameManager)}.");
     }
 
     private static void FitIcon(SpriteRenderer iconRenderer, float maxWorldSize)

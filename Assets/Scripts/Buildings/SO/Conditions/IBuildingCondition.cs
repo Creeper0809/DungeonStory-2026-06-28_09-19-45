@@ -17,9 +17,16 @@ public readonly struct BuildingConditionContext
     public static readonly BuildingConditionContext Empty = new BuildingConditionContext(null);
 
     public BuildingConditionContext(GameData gameData)
+        : this(gameData, null)
+    {
+    }
+
+    public BuildingConditionContext(GameData gameData, IBuildingUnlockStateView buildingUnlockState)
     {
         GameData = gameData;
+        BuildingUnlockState = buildingUnlockState;
     }
 
     public GameData GameData { get; }
+    public IBuildingUnlockStateView BuildingUnlockState { get; }
 }

@@ -28,42 +28,66 @@ public class FacilityEvolutionRecordRuntime :
 
     public void OnTriggerEvent(FacilityVisitEvent eventType)
     {
-        ResolveRecordEventRecorder().RecordVisit(eventType, highTurnoverVisitStep);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.RecordVisit(eventType, highTurnoverVisitStep);
+        }
     }
 
     public void OnTriggerEvent(FacilityRevenueEvent eventType)
     {
-        ResolveRecordEventRecorder().RecordRevenue(eventType, highValueRevenueThreshold);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.RecordRevenue(eventType, highValueRevenueThreshold);
+        }
     }
 
     public void OnTriggerEvent(FacilityStockConsumedEvent eventType)
     {
-        ResolveRecordEventRecorder().RecordStockConsumed(eventType);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.RecordStockConsumed(eventType);
+        }
     }
 
     public void OnTriggerEvent(FacilityCrimeEvent eventType)
     {
-        ResolveRecordEventRecorder().RecordCrime(eventType);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.RecordCrime(eventType);
+        }
     }
 
     public void OnTriggerEvent(FacilityRestockEvent eventType)
     {
-        ResolveRecordEventRecorder().RecordRestock(eventType);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.RecordRestock(eventType);
+        }
     }
 
     public void OnTriggerEvent(DefenseFacilityTriggeredEvent eventType)
     {
-        ResolveRecordEventRecorder().RecordDefenseTriggered(eventType);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.RecordDefenseTriggered(eventType);
+        }
     }
 
     public void OnTriggerEvent(InvasionFacilityDamagedEvent eventType)
     {
-        ResolveRecordEventRecorder().RecordInvasionDamage(eventType);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.RecordInvasionDamage(eventType);
+        }
     }
 
     public void OnTriggerEvent(OperatingDayEndedEvent eventType)
     {
-        ResolveRecordEventRecorder().CompleteOperatingDay(cleanServiceMinVisits);
+        if (TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder))
+        {
+            recorder.CompleteOperatingDay(cleanServiceMinVisits);
+        }
     }
 
     private void OnEnable()
@@ -90,9 +114,9 @@ public class FacilityEvolutionRecordRuntime :
         this.EventStopListening<OperatingDayEndedEvent>();
     }
 
-    private IFacilityEvolutionRecordEventRecorder ResolveRecordEventRecorder()
+    private bool TryResolveRecordEventRecorder(out IFacilityEvolutionRecordEventRecorder recorder)
     {
-        return recordEventRecorder
-            ?? throw new InvalidOperationException($"{nameof(FacilityEvolutionRecordRuntime)} requires {nameof(IFacilityEvolutionRecordEventRecorder)} injection.");
+        recorder = recordEventRecorder;
+        return recorder != null;
     }
 }

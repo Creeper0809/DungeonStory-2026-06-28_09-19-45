@@ -23,23 +23,24 @@ public interface IModularFacilityWorldSaveService
 
 public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveService
 {
-    private const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     private readonly Func<int, BuildingSO> findBuildingData;
-    private readonly IGridBuildingFactory buildingFactory;
+    private readonly IGridBuildingObjectFactory objectFactory;
+    private readonly IObjectResolver objectResolver;
+    private readonly IGridTextureProvider gridTextureProvider;
+    private IGridBuildingFactory buildingFactory;
 
     public ModularFacilityWorldSaveService(
         IBuildingDefinitionLookup buildingLookup,
         IGridBuildingObjectFactory objectFactory,
         IObjectResolver objectResolver,
         IGridTextureProvider gridTextureProvider)
-        : this(
-            id => buildingLookup != null ? buildingLookup.GetBuilding(id) : null,
-            new GridBuildingFactory(
-                gridTextureProvider != null ? gridTextureProvider.Texture : null,
-                building => objectResolver?.Inject(building),
-                objectFactory ?? new GridBuildingObjectFactory()))
     {
+        findBuildingData = CreateBuildingLookup(buildingLookup);
+        this.objectFactory = objectFactory ?? throw new ArgumentNullException(nameof(objectFactory));
+        this.objectResolver = objectResolver ?? throw new ArgumentNullException(nameof(objectResolver));
+        this.gridTextureProvider = gridTextureProvider ?? throw new ArgumentNullException(nameof(gridTextureProvider));
     }
 
     public ModularFacilityWorldSaveService(
@@ -50,6 +51,42 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
             ?? throw new ArgumentNullException(nameof(findBuildingData));
         this.buildingFactory = buildingFactory
             ?? throw new ArgumentNullException(nameof(buildingFactory));
+    }
+
+    private static Func<int, BuildingSO> CreateBuildingLookup(IBuildingDefinitionLookup buildingLookup)
+    {
+        if (buildingLookup == null)
+        {
+            throw new ArgumentNullException(nameof(buildingLookup));
+        }
+
+        return buildingLookup.GetBuilding;
+    }
+
+    private static IGridBuildingFactory CreateBuildingFactory(
+        IGridBuildingObjectFactory objectFactory,
+        IObjectResolver objectResolver,
+        IGridTextureProvider gridTextureProvider)
+    {
+        if (objectFactory == null)
+        {
+            throw new ArgumentNullException(nameof(objectFactory));
+        }
+
+        if (objectResolver == null)
+        {
+            throw new ArgumentNullException(nameof(objectResolver));
+        }
+
+        if (gridTextureProvider == null)
+        {
+            throw new ArgumentNullException(nameof(gridTextureProvider));
+        }
+
+        return new GridBuildingFactory(
+            gridTextureProvider.Texture,
+            objectResolver.Inject,
+            objectFactory);
     }
 
     public ModularFacilityWorldSaveData CreateSnapshot(Grid grid, GameData gameData)
@@ -89,6 +126,13 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
             return new ModularFacilityWorldSaveData();
         }
 
+        ModularFacilitySaveVersionHeader header = JsonUtility.FromJson<ModularFacilitySaveVersionHeader>(json);
+        if (header == null || header.version <= 1)
+        {
+            ModularFacilityWorldSaveDataV1 legacy = JsonUtility.FromJson<ModularFacilityWorldSaveDataV1>(json);
+            return ModularFacilityWorldSaveMigrator.FromV1(legacy);
+        }
+
         return JsonUtility.FromJson<ModularFacilityWorldSaveData>(json)
             ?? new ModularFacilityWorldSaveData();
     }
@@ -121,9 +165,21 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
             return false;
         }
 
+        foreach (string migrationWarning in snapshot.migrationWarnings ?? Enumerable.Empty<string>())
+        {
+            report.AddWarning(migrationWarning);
+        }
+
         if (snapshot.version > CurrentVersion)
         {
             report.AddError($"Unsupported save version {snapshot.version}.");
+            return false;
+        }
+
+        if (snapshot.version < CurrentVersion)
+        {
+            report.AddError(
+                $"Save version {snapshot.version} must be migrated through {nameof(FromJson)} before restore.");
             return false;
         }
 
@@ -153,14 +209,18 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
         foreach (BuildableObject building in existing)
         {
             BuildingSO data = building.BuildingData;
-            bool removed = grid.RemoveOccupant(data.Placement.Layer, building.buildPoses, data.Placement.IsMovement);
+            bool removed = grid.RemoveOccupant(
+                building,
+                data.Placement.Layer,
+                building.buildPoses,
+                data.Placement.IsMovement);
             if (!removed)
             {
                 report.AddError($"Failed to remove existing building id={building.id} at {building.centerPos}.");
                 continue;
             }
 
-            buildingFactory.DeleteVisual(data, building.centerPos);
+            ResolveBuildingFactory().DeleteVisual(data, building.centerPos);
             building.DestroySelf();
             report.clearedCount++;
         }
@@ -208,7 +268,7 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
             return;
         }
 
-        BuildableObject building = buildingFactory.Create(grid, data, center);
+        BuildableObject building = ResolveBuildingFactory().Create(grid, data, center);
         if (building == null)
         {
             report.AddError($"Building id={entry.buildingId} object creation failed at {center}.");
@@ -224,7 +284,7 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
             data.Placement.IsMovement);
         if (!registered)
         {
-            buildingFactory.DeleteVisual(data, center);
+            ResolveBuildingFactory().DeleteVisual(data, center);
             building.DestroySelf();
             report.AddError($"Building id={entry.buildingId} grid registration failed at {center}.");
             return;
@@ -232,22 +292,26 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
 
         building.SetDamaged(entry.isDamaged);
         building.SetFacilityLevel(entry.facilityLevel);
-        building.RestoreOperationalState(entry.operationalState);
-
-        if (entry.hasWarehouseSnapshot
-            && building is IWarehouseFacility warehouse
-            && warehouse.HasWarehouseInventory
-            && warehouse.Inventory != null)
+        BuildingStateModuleRestoreResult stateResult = BuildingStateModulePersistence.Restore(
+            building,
+            entry.stateModules);
+        foreach (string warning in stateResult.warnings)
         {
-            warehouse.Inventory.ApplySnapshot(entry.warehouseSnapshot);
+            report.AddWarning(warning);
         }
 
-        if (entry.hasShopStockSnapshot && building is Shop shop)
+        foreach (string error in stateResult.errors)
         {
-            shop.ApplyStockSnapshot(entry.shopStockSnapshot);
+            report.AddError(error);
         }
 
         report.restoredBuildings.Add(entry);
+    }
+
+    private IGridBuildingFactory ResolveBuildingFactory()
+    {
+        buildingFactory ??= CreateBuildingFactory(objectFactory, objectResolver, gridTextureProvider);
+        return buildingFactory;
     }
 
     private static bool CanRegister(
@@ -333,11 +397,13 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
 [Serializable]
 public sealed class ModularFacilityWorldSaveData
 {
-    public int version = 1;
+    public int version = ModularFacilityWorldSaveService.CurrentVersion;
     public int gridWidth;
     public int gridHeight;
     public ModularFacilityGameDataSaveData gameData = new ModularFacilityGameDataSaveData();
     public List<ModularFacilityBuildingSaveData> buildings = new List<ModularFacilityBuildingSaveData>();
+    [NonSerialized] public int migratedFromVersion;
+    [NonSerialized] public List<string> migrationWarnings = new List<string>();
 }
 
 [Serializable]
@@ -394,11 +460,7 @@ public sealed class ModularFacilityBuildingSaveData
     public int height;
     public bool isDamaged;
     public int facilityLevel = 1;
-    public FacilityOperationalState operationalState = new FacilityOperationalState();
-    public bool hasWarehouseSnapshot;
-    public WarehouseInventorySnapshot warehouseSnapshot;
-    public bool hasShopStockSnapshot;
-    public ShopStockStateSnapshot shopStockSnapshot;
+    public List<BuildingStateModuleSaveData> stateModules = new List<BuildingStateModuleSaveData>();
 
     public static ModularFacilityBuildingSaveData From(BuildableObject building)
     {
@@ -406,7 +468,7 @@ public sealed class ModularFacilityBuildingSaveData
         ModularFacilityBuildingSaveData result = new ModularFacilityBuildingSaveData
         {
             buildingId = data.id,
-            code = data.Operational != null ? data.Operational.code : string.Empty,
+            code = data.GetFacilityCode(),
             objectName = data.objectName,
             layer = data.Placement.Layer,
             centerX = building.centerPos.x,
@@ -415,24 +477,118 @@ public sealed class ModularFacilityBuildingSaveData
             height = data.Placement.Height,
             isDamaged = building.IsDamaged,
             facilityLevel = building.FacilityLevel,
-            operationalState = building.OperationalState.Clone()
+            stateModules = BuildingStateModulePersistence.Capture(building)
         };
 
-        if (building is IWarehouseFacility warehouse
-            && warehouse.HasWarehouseInventory
-            && warehouse.Inventory != null)
-        {
-            result.hasWarehouseSnapshot = true;
-            result.warehouseSnapshot = warehouse.Inventory.CreateSnapshot();
-        }
-
-        if (building is Shop shop)
-        {
-            result.hasShopStockSnapshot = true;
-            result.shopStockSnapshot = shop.CreateStockSnapshot();
-        }
-
         return result;
+    }
+}
+
+[Serializable]
+internal sealed class ModularFacilitySaveVersionHeader
+{
+    public int version;
+}
+
+[Serializable]
+internal sealed class ModularFacilityWorldSaveDataV1
+{
+    public int version = 1;
+    public int gridWidth;
+    public int gridHeight;
+    public ModularFacilityGameDataSaveData gameData = new ModularFacilityGameDataSaveData();
+    public List<ModularFacilityBuildingSaveDataV1> buildings = new List<ModularFacilityBuildingSaveDataV1>();
+}
+
+[Serializable]
+internal sealed class ModularFacilityBuildingSaveDataV1
+{
+    public int buildingId;
+    public string code;
+    public string objectName;
+    public GridLayer layer;
+    public int centerX;
+    public int centerY;
+    public int width;
+    public int height;
+    public bool isDamaged;
+    public int facilityLevel = 1;
+    public LegacyFacilityOperationalStateV1 operationalState = new LegacyFacilityOperationalStateV1();
+    public bool hasWarehouseSnapshot;
+    public WarehouseInventorySnapshotV1 warehouseSnapshot;
+    public bool hasShopStockSnapshot;
+    public ShopStockStateSnapshot shopStockSnapshot;
+}
+
+internal static class ModularFacilityWorldSaveMigrator
+{
+    public static ModularFacilityWorldSaveData FromV1(ModularFacilityWorldSaveDataV1 legacy)
+    {
+        legacy ??= new ModularFacilityWorldSaveDataV1();
+        ModularFacilityWorldSaveData migrated = new ModularFacilityWorldSaveData
+        {
+            version = ModularFacilityWorldSaveService.CurrentVersion,
+            gridWidth = legacy.gridWidth,
+            gridHeight = legacy.gridHeight,
+            gameData = legacy.gameData ?? new ModularFacilityGameDataSaveData(),
+            migratedFromVersion = 1,
+            buildings = (legacy.buildings ?? new List<ModularFacilityBuildingSaveDataV1>())
+                .Where(entry => entry != null)
+                .Select(MigrateBuilding)
+                .ToList()
+        };
+        migrated.migrationWarnings.Add(
+            $"Migrated modular facility save from version 1 to {ModularFacilityWorldSaveService.CurrentVersion}.");
+        return migrated;
+    }
+
+    private static ModularFacilityBuildingSaveData MigrateBuilding(ModularFacilityBuildingSaveDataV1 legacy)
+    {
+        ModularFacilityBuildingSaveData migrated = new ModularFacilityBuildingSaveData
+        {
+            buildingId = legacy.buildingId,
+            code = legacy.code,
+            objectName = legacy.objectName,
+            layer = legacy.layer,
+            centerX = legacy.centerX,
+            centerY = legacy.centerY,
+            width = legacy.width,
+            height = legacy.height,
+            isDamaged = legacy.isDamaged,
+            facilityLevel = legacy.facilityLevel,
+            stateModules = new List<BuildingStateModuleSaveData>
+            {
+                new BuildingStateModuleSaveData
+                {
+                    moduleId = BuildingStateModuleIds.FacilityOperation,
+                    version = 1,
+                    payload = JsonUtility.ToJson(legacy.operationalState ?? new LegacyFacilityOperationalStateV1())
+                }
+            }
+        };
+
+        if (legacy.hasWarehouseSnapshot)
+        {
+            WarehouseInventorySnapshot warehouse = WarehouseInventorySnapshot.FromLegacy(legacy.warehouseSnapshot);
+            migrated.stateModules.Add(new BuildingStateModuleSaveData
+            {
+                moduleId = BuildingStateModuleIds.WarehouseInventory,
+                version = WarehouseInventorySnapshot.CurrentVersion,
+                payload = JsonUtility.ToJson(warehouse)
+            });
+        }
+
+        if (legacy.hasShopStockSnapshot)
+        {
+            migrated.stateModules.Add(new BuildingStateModuleSaveData
+            {
+                moduleId = BuildingStateModuleIds.ShopStock,
+                version = 1,
+                payload = JsonUtility.ToJson(legacy.shopStockSnapshot ?? new ShopStockStateSnapshot())
+            });
+        }
+
+        return migrated;
     }
 }
 

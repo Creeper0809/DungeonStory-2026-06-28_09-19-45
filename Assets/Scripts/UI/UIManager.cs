@@ -26,7 +26,12 @@ public class UIManager : SerializedMonoBehaviour
 
     public void Update()
     {
-        if (RequireInputReader().GetKeyDown(KeyCode.Escape))
+        if (inputReader == null)
+        {
+            return;
+        }
+
+        if (inputReader.GetKeyDown(KeyCode.Escape))
         {
             ClosePopupPeek();
         }

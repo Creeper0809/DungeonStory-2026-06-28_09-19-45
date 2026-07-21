@@ -37,9 +37,18 @@ MonoBehaviour:
       Entry: 6
       Data: 
   id: 1000
-  objectName: "\uAC04\uC774 \uD654\uB355"
+  objectName: "\uAC04\uC774\uD654\uB355"
   sprite: {fileID: 21300000, guid: 54cea29c0ca705a42954cf271a95be83, type: 3}
   icon: {fileID: 21300000, guid: 54cea29c0ca705a42954cf271a95be83, type: 3}
+  abilityModules:
+    items:
+    - rid: 7302562995605602327
+    - rid: 7302562995605602328
+    - rid: 7302562995605602329
+    - rid: 7302562995605602330
+    - rid: 7302562995605602331
+    - rid: 7302562995605602332
+    - rid: 7302562995605602333
   width: 1
   height: 1
   layer: 1
@@ -48,69 +57,66 @@ MonoBehaviour:
   verticalDraggable: 0
   movementAnchorOffset: {x: 0, y: 0}
   movementTravelTime: 2
-  maintenance: 3
-  facility:
-    roles: 1
-    capacity: 1
-    useDuration: 1.5
-    internalStockMax: 0
-    restockRequestThreshold: 0
-    requiredWorkers: 1
-    supportedWorkTypes: 13
-    preferredSpeciesTags: []
-    dislikedSpeciesTags: []
-    disabledWhenDamaged: 1
-    requiresStock: 0
-    requiresRoomRole: 1
-    requiresStaffedService: 0
-    selfContainedRoom: 0
-    baseCrimePressure: 0.01
-    unstaffedSupervisionRisk: 0.07
-    staffedSupervisionReduction: 0.03
-    lowMoodCrimeRiskWeight: 0.08
-    unmetNeedCrimeRiskWeight: 0.05
-    crowdCrimeRiskWeight: 0.04
-    highValueCrimeRiskWeight: 0.05
-    damagedFacilityCrimeRiskWeight: 0.05
-  defense:
-    enabled: 0
-    concept: 0
-    triggerTimings: 0
-    targetRule: 0
-    cooldownSeconds: 0
-    periodicIntervalSeconds: 0
-    range: 0
-    star: 1
-    combatLogText: 
-    effectAssets: []
-    effects: []
-  evolution:
-    contributesToRoomProfile: 1
-    tags:
-    - Cooking
-    scores:
-    - key: Cooking
-      value: 2
-    metrics: []
-  operational:
-    code: D01
-    functions: 2
-    recovery:
-      sleep: 0
-      mood: 4
-      fun: 0
-      hunger: 35
-      excretion: 0
-      hygiene: 0
-    storageCategory: 1
-    storageCapacity: 0
-    seatCapacity: 0
-    tableCapacity: 0
-    serviceCapacity: 0
-    workOutputAmount: 4
-    constructionCost: 95
-    unlockPhase: 1
-    demolitionRefundRate: 0.5
-    lightIntensity: 0
-    lightRadius: 0
+  facilityAnchors:
+    slots: []
   unlocked: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 7302562995605602327
+      type: {class: BuildingFacilityPartAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityPartAbility
+        code: D01
+    - rid: 7302562995605602328
+      type: {class: BuildingEconomyAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEconomyAbility
+        constructionCost: 95
+        maintenance: 3
+        unlockPhase: 1
+        demolitionRefundRate: 0.5
+    - rid: 7302562995605602329
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 1
+          capacity: 1
+          useDuration: 1.5
+          requiredWorkers: 1
+          supportedWorkTypes: 13
+          disabledWhenDamaged: 1
+    - rid: 7302562995605602330
+      type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingRoomRequirementAbility
+    - rid: 7302562995605602331
+      type: {class: BuildingEvolutionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingEvolutionAbility
+        settings:
+          contributesToRoomProfile: 1
+          tags:
+          - Cooking
+          scores:
+          - key: Cooking
+            value: 2
+          metrics: []
+    - rid: 7302562995605602332
+      type: {class: BuildingNeedRecoveryAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingNeedRecoveryAbility
+        recovery:
+          sleep: 0
+          mood: 4
+          fun: 0
+          hunger: 35
+          excretion: 0
+          hygiene: 0
+    - rid: 7302562995605602333
+      type: {class: BuildingProductionAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingProductionAbility
+        outputCategory: 0
+        amount: 4

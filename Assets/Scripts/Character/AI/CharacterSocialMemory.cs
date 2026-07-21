@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Sirenix.OdinInspector;
 using UnityEngine;
 
@@ -24,11 +25,11 @@ public sealed class SocialRumor
 {
     public SocialRumorType type;
     public SocialRumorTargetType targetType;
-    public int sourceActorId = -1;
+    public string sourceActorId = string.Empty;
     public string sourceActorName;
     public int targetFacilityId = -1;
     public string targetFacilityTag;
-    public int targetCharacterId = -1;
+    public string targetCharacterId = string.Empty;
     public string targetCharacterName;
     [Range(-1f, 1f)] public float sentiment;
     [Range(0f, 1f)] public float spreadChance;
@@ -46,6 +47,105 @@ public sealed class SocialRumor
     public SocialRumor Clone()
     {
         return (SocialRumor)MemberwiseClone();
+    }
+}
+
+[Serializable]
+public sealed class SocialRumorSnapshot
+{
+    public SocialRumorType type;
+    public SocialRumorTargetType targetType;
+    public string sourceActorId = string.Empty;
+    public string sourceActorName = string.Empty;
+    public int targetFacilityId = -1;
+    public string targetFacilityTag = string.Empty;
+    public string targetCharacterId = string.Empty;
+    public string targetCharacterName = string.Empty;
+    public float sentiment;
+    public float spreadChance;
+    public float trustImpact;
+    public float remainingSeconds;
+    public string summary = string.Empty;
+    public string source = string.Empty;
+
+    public static SocialRumorSnapshot Capture(SocialRumor rumor)
+    {
+        if (rumor == null)
+        {
+            return null;
+        }
+
+        return new SocialRumorSnapshot
+        {
+            type = rumor.type,
+            targetType = rumor.targetType,
+            sourceActorId = rumor.sourceActorId,
+            sourceActorName = rumor.sourceActorName,
+            targetFacilityId = rumor.targetFacilityId,
+            targetFacilityTag = rumor.targetFacilityTag,
+            targetCharacterId = rumor.targetCharacterId,
+            targetCharacterName = rumor.targetCharacterName,
+            sentiment = rumor.sentiment,
+            spreadChance = rumor.spreadChance,
+            trustImpact = rumor.trustImpact,
+            remainingSeconds = rumor.validUntil > 0f ? Mathf.Max(0f, rumor.validUntil - Time.time) : 0f,
+            summary = rumor.summary,
+            source = rumor.source
+        };
+    }
+
+    public SocialRumor Restore()
+    {
+        return new SocialRumor
+        {
+            type = type,
+            targetType = targetType,
+            sourceActorId = sourceActorId,
+            sourceActorName = sourceActorName,
+            targetFacilityId = targetFacilityId,
+            targetFacilityTag = targetFacilityTag,
+            targetCharacterId = targetCharacterId,
+            targetCharacterName = targetCharacterName,
+            sentiment = sentiment,
+            spreadChance = spreadChance,
+            trustImpact = trustImpact,
+            validUntil = remainingSeconds > 0f ? Time.time + remainingSeconds : 0f,
+            summary = summary,
+            source = source
+        };
+    }
+
+    public SocialRumorSnapshot Clone()
+    {
+        return (SocialRumorSnapshot)MemberwiseClone();
+    }
+}
+
+[Serializable]
+public sealed class CharacterSocialMemorySnapshot
+{
+    public List<SocialRumorSnapshot> recentRumors = new List<SocialRumorSnapshot>();
+    public List<SocialMemoryFloat> facilitySentiments = new List<SocialMemoryFloat>();
+    public List<SocialMemoryFloat> characterSentiments = new List<SocialMemoryFloat>();
+    public List<SocialMemoryFloat> sourceTrust = new List<SocialMemoryFloat>();
+
+    public CharacterSocialMemorySnapshot Clone()
+    {
+        return new CharacterSocialMemorySnapshot
+        {
+            recentRumors = recentRumors?.Where(item => item != null).Select(item => item.Clone()).ToList()
+                ?? new List<SocialRumorSnapshot>(),
+            facilitySentiments = CloneValues(facilitySentiments),
+            characterSentiments = CloneValues(characterSentiments),
+            sourceTrust = CloneValues(sourceTrust)
+        };
+    }
+
+    private static List<SocialMemoryFloat> CloneValues(IEnumerable<SocialMemoryFloat> source)
+    {
+        return source?.Where(item => item != null)
+            .Select(item => new SocialMemoryFloat(item.key, item.value))
+            .ToList() ?? new List<SocialMemoryFloat>();
     }
 }
 
@@ -78,7 +178,11 @@ public sealed class CharacterSocialMemory : SerializedMonoBehaviour
     private readonly Dictionary<string, float> characterSentimentByKey = new Dictionary<string, float>();
     private readonly Dictionary<string, float> sourceTrustByKey = new Dictionary<string, float>();
 
-    public IReadOnlyList<SocialRumor> RecentRumors => recentRumors;
+    public IReadOnlyList<SocialRumor> RecentRumors => Array.AsReadOnly(
+        (recentRumors ?? new List<SocialRumor>())
+            .Where((rumor) => rumor != null)
+            .Select((rumor) => rumor.Clone())
+            .ToArray());
 
     private void Awake()
     {
@@ -196,6 +300,45 @@ public sealed class CharacterSocialMemory : SerializedMonoBehaviour
         return Mathf.Clamp(GetDictionaryValue(sourceTrustByKey, key, 1f), 0.25f, 1.5f);
     }
 
+    public CharacterSocialMemorySnapshot CaptureSnapshot()
+    {
+        PruneExpiredRumors();
+        return new CharacterSocialMemorySnapshot
+        {
+            recentRumors = recentRumors
+                .Where(rumor => rumor != null && !rumor.IsExpired)
+                .Select(SocialRumorSnapshot.Capture)
+                .Where(snapshot => snapshot != null)
+                .ToList(),
+            facilitySentiments = facilitySentimentByKey
+                .Select(entry => new SocialMemoryFloat(entry.Key, entry.Value)).ToList(),
+            characterSentiments = characterSentimentByKey
+                .Select(entry => new SocialMemoryFloat(entry.Key, entry.Value)).ToList(),
+            sourceTrust = sourceTrustByKey
+                .Select(entry => new SocialMemoryFloat(entry.Key, entry.Value)).ToList()
+        };
+    }
+
+    public void RestoreSnapshot(CharacterSocialMemorySnapshot snapshot)
+    {
+        recentRumors.Clear();
+        facilitySentimentByKey.Clear();
+        characterSentimentByKey.Clear();
+        sourceTrustByKey.Clear();
+        if (snapshot != null)
+        {
+            recentRumors.AddRange(snapshot.recentRumors?
+                .Where(item => item != null && item.remainingSeconds > 0f)
+                .Select(item => item.Restore())
+                .Where(rumor => rumor != null) ?? Enumerable.Empty<SocialRumor>());
+            RestoreValues(snapshot.facilitySentiments, facilitySentimentByKey);
+            RestoreValues(snapshot.characterSentiments, characterSentimentByKey);
+            RestoreValues(snapshot.sourceTrust, sourceTrustByKey);
+        }
+
+        SyncDebugLists();
+    }
+
     private float GetSourceTrustScore(CharacterActor speaker, SocialRumor rumor)
     {
         if (speaker == null)
@@ -214,7 +357,8 @@ public sealed class CharacterSocialMemory : SerializedMonoBehaviour
             trust += 0.1f;
         }
 
-        if (speaker.Identity != null && rumor.sourceActorId == speaker.Identity.StableId)
+        if (speaker.Identity != null
+            && string.Equals(rumor.sourceActorId, speaker.Identity.PersistentId, StringComparison.Ordinal))
         {
             trust += 0.05f;
         }
@@ -313,6 +457,19 @@ public sealed class CharacterSocialMemory : SerializedMonoBehaviour
             target.Add(new SocialMemoryFloat(entry.Key, entry.Value));
         }
     }
+
+    private static void RestoreValues(
+        IEnumerable<SocialMemoryFloat> source,
+        Dictionary<string, float> target)
+    {
+        foreach (SocialMemoryFloat entry in source ?? Enumerable.Empty<SocialMemoryFloat>())
+        {
+            if (entry != null && !string.IsNullOrWhiteSpace(entry.key))
+            {
+                target[entry.key] = entry.value;
+            }
+        }
+    }
 }
 
 public static class SocialRumorUtility
@@ -342,7 +499,7 @@ public static class SocialRumorUtility
             yield break;
         }
 
-        if (rumor.targetCharacterId >= 0)
+        if (!string.IsNullOrWhiteSpace(rumor.targetCharacterId))
         {
             yield return $"actor:{rumor.targetCharacterId}";
         }
@@ -360,8 +517,8 @@ public static class SocialRumorUtility
             return string.Empty;
         }
 
-        int id = actor.Identity != null ? actor.Identity.StableId : actor.GetInstanceID();
-        return $"actor:{id}";
+        string id = actor.Identity != null ? actor.Identity.PersistentId : string.Empty;
+        return string.IsNullOrWhiteSpace(id) ? string.Empty : $"actor:{id}";
     }
 
     public static string GetActorNameKey(CharacterActor actor)
@@ -402,13 +559,7 @@ public static class SocialRumorUtility
             return false;
         }
 
-        string normalizedTag = Normalize(tag);
-        string objectName = building.BuildingData != null ? building.BuildingData.objectName : string.Empty;
-        string roleName = building.Facility != null ? building.Facility.roles.ToString() : string.Empty;
-        string objectRuntimeName = building.name ?? string.Empty;
-        return ContainsNormalized(objectName, normalizedTag)
-            || ContainsNormalized(roleName, normalizedTag)
-            || ContainsNormalized(objectRuntimeName, normalizedTag);
+        return building.HasSemanticTag(tag);
     }
 
     public static string GetActorLabel(CharacterActor actor)
@@ -443,18 +594,7 @@ public static class SocialRumorUtility
             return string.Empty;
         }
 
-        if (building.Facility != null && building.Facility.roles != FacilityRole.None)
-        {
-            return building.Facility.roles.ToString();
-        }
-
-        return building.BuildingData != null ? building.BuildingData.objectName : building.name;
-    }
-
-    private static bool ContainsNormalized(string source, string normalizedNeedle)
-    {
-        return !string.IsNullOrWhiteSpace(source)
-            && Normalize(source).IndexOf(normalizedNeedle, StringComparison.Ordinal) >= 0;
+        return building.BuildingData.GetPrimarySemanticTag();
     }
 
     private static string Normalize(string value)

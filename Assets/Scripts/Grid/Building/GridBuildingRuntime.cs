@@ -87,6 +87,7 @@ public class GridBuildingPlacementService
             List<Vector2Int> doorPositions = buildingData.GetGridPosList(position);
             if (!GridDoorPlacementRules.TryGetTargetWall(grid, doorPositions, out replacedWall)
                 || !grid.RemoveOccupant(
+                    replacedWall,
                     replacedWall.BuildingData.Placement.Layer,
                     replacedWall.buildPoses,
                     replacedWall.BuildingData.Placement.IsMovement))
@@ -152,7 +153,11 @@ public class GridBuildingPlacementService
             return false;
         }
 
-        grid.RemoveOccupant(buildingData.Placement.Layer, building.buildPoses, buildingData.Placement.IsMovement);
+        grid.RemoveOccupant(
+            building,
+            buildingData.Placement.Layer,
+            building.buildPoses,
+            buildingData.Placement.IsMovement);
         buildingFactory.DeleteVisual(buildingData, building.centerPos);
         building.DestroySelf();
         placementValidator.ApplyDestroySuccess(buildingData);
@@ -393,7 +398,9 @@ public class GridBuildingPlacementService
         foreach (Vector2Int gridPos in buildingData.GetGridPosList(position))
         {
             GridCell cell = grid.GetGridCell(gridPos);
-            if (cell == null || !cell.CanOccupy(buildingData.Placement.Layer))
+            if (cell == null
+                || !cell.CanBuildInArea(buildingData)
+                || !cell.CanOccupy(buildingData.Placement.Layer))
             {
                 return false;
             }
@@ -539,14 +546,17 @@ public class BuildingPlacementValidator
         }
 
         BuildingConditionContext context = CreateConditionContext();
-        if (!FacilityProgression.IsUnlocked(buildingData, context.GameData))
+        if (!FacilityProgression.IsUnlocked(
+                buildingData,
+                context.GameData,
+                context.BuildingUnlockState))
         {
-            int phase = Mathf.Clamp(buildingData.Operational.unlockPhase, 1, 3);
-            errorMessage = $"{phase}단계 시설입니다. 운영일을 더 진행해야 합니다.";
+            int phase = buildingData.GetUnlockPhase();
+            errorMessage = $"{phase}단계 시설입니다. 운영일을 진행하거나 관련 설계도를 연구해야 합니다.";
             return false;
         }
 
-        int constructionCost = Mathf.Max(0, buildingData.Operational.constructionCost);
+        int constructionCost = buildingData.GetConstructionCost();
         if (context.GameData != null
             && context.GameData.holdingMoney != null
             && constructionCost > context.GameData.holdingMoney.Value)
@@ -566,6 +576,12 @@ public class BuildingPlacementValidator
             && !GridDoorPlacementRules.TryGetTargetWall(grid, totalBuildPos, out _))
         {
             errorMessage = "문은 설치된 내벽 한 칸에만 설치할 수 있습니다.";
+            return false;
+        }
+
+        if (!gridPlacementValidator.CanBuildInArea(grid, buildingData, totalBuildPos))
+        {
+            errorMessage = "이 구역에는 설치할 수 없습니다.";
             return false;
         }
 
@@ -625,7 +641,7 @@ public class BuildingPlacementValidator
         if (buildingData == null) return;
 
         BuildingConditionContext context = CreateConditionContext();
-        int constructionCost = Mathf.Max(0, buildingData.Operational.constructionCost);
+        int constructionCost = buildingData.GetConstructionCost();
         if (context.GameData != null && context.GameData.holdingMoney != null && constructionCost > 0)
         {
             context.GameData.holdingMoney.Value -= constructionCost;
@@ -662,7 +678,7 @@ public class BuildingPlacementValidator
     private static bool ShouldApplyBuildCondition(BuildingSO buildingData, IBuildingCondition condition)
     {
         return condition != null
-            && !(buildingData?.Operational.IsModular == true && condition is ConditionNeedMoney);
+            && !(buildingData.IsModularFacility() && condition is ConditionNeedMoney);
     }
 }
 
@@ -690,7 +706,33 @@ public static class GridBuildingExtensions
 
     public static BuildableObject GetBuilding(this GridCell cell)
     {
-        return cell?.GetTopOccupant() as BuildableObject;
+        if (cell == null)
+        {
+            return null;
+        }
+
+        return cell.GetAllOccupants()
+            .OfType<BuildableObject>()
+            .OrderByDescending(GetBuildingSelectionOrder)
+            .FirstOrDefault();
+    }
+
+    private static int GetBuildingSelectionOrder(BuildableObject building)
+    {
+        if (building == null || building.BuildingData == null)
+        {
+            return 0;
+        }
+
+        return building.BuildingData.Placement.Layer switch
+        {
+            GridLayer.Building => 60,
+            GridLayer.WallFixture => 50,
+            GridLayer.CeilingFixture => 40,
+            GridLayer.FloorOverlay => 30,
+            GridLayer.Hallway => 10,
+            _ => 0
+        };
     }
 
     public static List<BuildableObject> GetAllBuilding(this GridCell cell)

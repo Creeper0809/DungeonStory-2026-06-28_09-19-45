@@ -146,9 +146,10 @@ public sealed class GridConstructButtonFactory : IGridConstructButtonFactory
 
         TMP_Text label = labelObject.GetComponent<TMP_Text>();
         tmpKoreanFontService.Apply(label);
-        FacilityOperationalData operational = buildingData.Operational;
-        label.text = operational.IsModular
-            ? $"{buildingData.objectName}\n{operational.constructionCost}G · P{operational.unlockPhase}"
+        int unlockPhase = buildingData.GetUnlockPhase();
+        string unlockText = unlockPhase > 1 ? $"P{unlockPhase} / 연구" : "P1";
+        label.text = buildingData.GetAbility<BuildingEconomyAbility>() != null
+            ? $"{buildingData.objectName}\n{buildingData.GetConstructionCost()}G - {unlockText}"
             : buildingData.objectName;
         label.color = Color.white;
         label.fontStyle = FontStyles.Bold;

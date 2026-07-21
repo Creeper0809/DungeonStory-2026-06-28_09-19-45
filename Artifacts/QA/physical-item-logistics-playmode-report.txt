@@ -1,0 +1,38 @@
+[PASS] SCOPE_READY gameplay LifetimeScope resolved
+[PASS] ITEM_RUNTIME_READY world item runtime resolved
+[PASS] EQUIPMENT_RUNTIME_READY expedition equipment runtime resolved
+[PASS] PREPARATION_RUNTIME_READY offense preparation service resolved
+[PASS] GRID_READY grid resolved
+[PASS] RUN_READY owner=이안
+[PASS] HAULER_READY 다온
+[PASS] REACHABLE_TEST_CELLS count=8; actor=(3, 0)
+[PASS] TEMP_WAREHOUSE_READY QA_Physical_Logistics_Warehouse
+[PASS] TEMP_CRAFT_BENCH_READY QA_Physical_Logistics_Bench
+[PASS] TEMP_WAREHOUSE_SEEDED food=5; general=20; weapon=20
+[PASS] LOOSE_STACK_SPAWNED pos=(1, 0); amount=3
+[PASS] AI_HAUL_CAN_START_WAREHOUSE actor=다온; pos=(3, 0); carry=0/20.75/31.13kg ; stacks=stack:00000001:stock-item:0x3:Loose:dest=:pos=(1, 0)
+[PASS] AI_HAUL_COMPLETED elapsed=0.5s
+[PASS] AI_HAUL_DEPOSITED_TO_WAREHOUSE totalFood=24->27; testWarehouseFood=0->3; carry=0/20.75/31.13kg 
+[PASS] FACILITY_DELIVERY_REQUESTED requested=2; reason=; general=20->18
+[PASS] AI_HAUL_CAN_START_FACILITY actor=다온; pos=(7, 0); carry=0/20.75/31.13kg ; stacks=stack:00000002:stock-item:0x3:Stored:dest=warehouse:1050:pos=(2, 0) | stack:00000003:stock-item:1x2:Loose:dest=facility-input:qa-logistics-input:pos=(2, 0)
+[PASS] AI_HAUL_COMPLETED elapsed=0.7s
+[PASS] AI_HAUL_DEPOSITED_TO_FACILITY_BUFFER stack:00000002:stock-item:0x3:Stored:dest=warehouse:1050:pos=(2, 0) | stack:00000004:stock-item:1x2:FacilityBuffer:dest=facility-input:qa-logistics-input:pos=(4, 0)
+[PASS] FACILITY_BUFFER_CONSUMED 
+[PASS] CRAFT_QUEUE_REQUESTED_PHYSICAL_MATERIALS 
+[PASS] CRAFT_MATERIAL_STACK_CREATED destination=facility-input:7775c1d3b9a5450bb4f1fddd6fb02c11
+[PASS] AI_HAUL_CAN_START_CRAFT_MATERIALS actor=다온; pos=(7, 0); carry=0/20.75/31.13kg ; stacks=stack:00000002:stock-item:0x3:Stored:dest=warehouse:1050:pos=(2, 0) | stack:00000005:stock-item:2x2:Loose:dest=facility-input:7775c1d3b9a5450bb4f1fddd6fb02c11:pos=(2, 0)
+[PASS] AI_HAUL_COMPLETED elapsed=0.7s
+[PASS] CRAFT_MATERIALS_READY_AFTER_HAUL ready=True
+[PASS] CRAFT_OUTPUT_WORLD_STACK_CREATED stack=stack:00000007; pos=(4, 0)
+[PASS] AI_HAUL_CAN_START_CRAFT_OUTPUT actor=다온; pos=(7, 0); carry=0/20.75/31.13kg ; stacks=stack:00000002:stock-item:0x3:Stored:dest=warehouse:1050:pos=(2, 0) | stack:00000007:equipment-item:weapon:attack-ironx1:FacilityBuffer:dest=craft:-274460:pos=(4, 0)
+[PASS] AI_HAUL_COMPLETED elapsed=0.7s
+[PASS] AI_HAUL_DEPOSITED_EQUIPMENT_TO_INVENTORY IronEdge=0->1; warehouseWeapon=18
+[PASS] EXPEDITION_SUPPLIES_PACKED message=던전 창고에서 원정 보급품을 실었습니다.; stacks=stack:00000002:stock-item:0x3:Stored:dest=warehouse:1050:pos=(2, 0) | stack:00000008:stock-item:0x2:ExpeditionPacked:dest=qa-package-0ccfdf4d2c7244258725240e7af8b76e:pos=(4, 0)
+[PASS] EXPEDITION_PACKED_STACK_VISIBLE packed=2; package=qa-package-0ccfdf4d2c7244258725240e7af8b76e
+[PASS] EXPEDITION_PACKED_STACK_CONSUMED stack:00000002:stock-item:0x3:Stored:dest=warehouse:1050:pos=(2, 0)
+[PASS] CARRY_UI_ITEM_SEEDED failure=; 4.5/20.75/31.13kg stock-item:2x2
+[PASS] CARRY_UI_WEIGHT_VISIBLE 런 시작 변수 || 소지 무게 4.5kg / 기본 20.8kg / 최대 31.1kg  과적 없음 · 이동 속도 100%  무기 x2 || 90 || 위생 || 80 || 배변 || 55 || 휴식 || 100 || 재미 || 75 || 포만감 || 욕구 || 120/120 || 체력 || 상태
+[PASS] SCREEN_CAPTURE_NONBLANK Artifacts/QA/physical-item-carry-ui.png; bytes=210755
+capturedErrors=0; <none>
+capturedWarnings=0; <none>
+RESULT=PASS; failures=0; <none>

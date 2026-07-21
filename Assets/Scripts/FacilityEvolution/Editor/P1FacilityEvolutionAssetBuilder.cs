@@ -7,7 +7,7 @@ using UnityEngine;
 
 public static class P1FacilityEvolutionAssetBuilder
 {
-    private const string BuildingFolder = "Assets/Resources/SO/Building/P1";
+    private const string BuildingFolder = "Assets/Resources/SO/Building/Modular";
     private const string RecipeFolder = "Assets/Resources/SO/FacilityEvolution/P1";
     private const string TokenDefinitionFolder = "Assets/Resources/SO/FacilityEvolution/RecordTokens/P1";
 
@@ -23,10 +23,11 @@ public static class P1FacilityEvolutionAssetBuilder
         P1FacilitySynthesisAssetBuilder.EnsureP1SynthesisAssets();
         EnsureFolder(RecipeFolder);
         EnsureFolder(TokenDefinitionFolder);
-        ApplyFacilityContributions();
         EnsureRecordTokenDefinitionAssets();
 
-        foreach (EvolutionRecipeSpec spec in CreateRecipeSpecs())
+        EvolutionRecipeSpec[] specs = CreateRecipeSpecs();
+        PruneStaleRecipeAssets(specs);
+        foreach (EvolutionRecipeSpec spec in specs)
         {
             EnsureRecipeAsset(spec);
         }
@@ -181,7 +182,7 @@ public static class P1FacilityEvolutionAssetBuilder
             return;
         }
 
-        building.evolution = new FacilityEvolutionContributionData
+        building.Evolution = new FacilityEvolutionContributionData
         {
             contributesToRoomProfile = true,
             tags = tags ?? Array.Empty<string>(),
@@ -259,151 +260,199 @@ public static class P1FacilityEvolutionAssetBuilder
         EditorUtility.SetDirty(recipe);
     }
 
+    private static void PruneStaleRecipeAssets(IEnumerable<EvolutionRecipeSpec> specs)
+    {
+        HashSet<string> allowedPaths = specs
+            .Select(spec => $"{RecipeFolder}/{spec.assetName}.asset")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string guid in AssetDatabase.FindAssets("t:FacilityEvolutionRecipeSO", new[] { RecipeFolder }))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (!allowedPaths.Contains(path))
+            {
+                AssetDatabase.DeleteAsset(path);
+            }
+        }
+    }
+
     private static EvolutionRecipeSpec[] CreateRecipeSpecs()
     {
         return new[]
         {
             new EvolutionRecipeSpec(
                 9101,
-                "EV_BattleDining",
-                "evolve_meat_restaurant_to_battle_dining",
-                "전투 식당 진화",
-                "고기 식당이 훈련/전투 맥락과 용병 이용 기록을 받아 전투 식당 계보로 진화한다.",
-                "P1_BattleDining",
-                new[] { "P1_MeatRestaurant" },
+                "EV_CommercialGrill",
+                "evolve_commercial_hearth_to_grill",
+                "상업 화덕 진화",
+                "조리 지원과 손님 회전이 갖춰진 방에서 간이화덕을 고기그릴로 진화시킨다.",
+                "D02_고기그릴",
+                new[] { "D01_간이화덕" },
                 requiredStarGrade: 1,
                 resultStarGrade: 2,
                 publicByDefault: true,
                 requiredResearchRecipeId: string.Empty,
                 requiredRoomScores: new[]
                 {
-                    Min(FacilityEvolutionTerms.Dining, 40f),
-                    Min(FacilityEvolutionTerms.Training, 15f)
+                    Min(FacilityEvolutionTerms.Dining, 20f),
+                    Min(FacilityEvolutionTerms.Cooking, 14f)
                 },
-                requiredRoomMetrics: new[]
-                {
-                    Min(FacilityEvolutionTerms.SeatDensity, 0.25f),
-                    Max(FacilityEvolutionTerms.SeatDensity, 1.4f)
-                },
-                requiredRecordTokens: new[]
-                {
-                    Token(FacilityEvolutionTerms.MercenaryHangout, 1)
-                },
-                allowedMutationTags: new[] { FacilityEvolutionTerms.Brutal, FacilityEvolutionTerms.Combat },
+                requiredRoomMetrics: Array.Empty<FacilityEvolutionMetricRequirement>(),
+                requiredRecordTokens: Array.Empty<FacilityEvolutionTokenRequirement>(),
+                allowedMutationTags: new[] { FacilityEvolutionTerms.Service, FacilityEvolutionTerms.Logistics },
+                requiredUniqueFixtureAssetNames: new[] { "D03_조리손질대" },
                 identityPressureWeights: new[]
                 {
-                    Value(FacilityEvolutionTerms.Combat, 0.6f),
-                    Value(FacilityEvolutionTerms.Crowd, 0.15f),
-                    Value(FacilityEvolutionTerms.Service, 0.1f),
-                    Value(FacilityEvolutionTerms.Luxury, -0.2f)
+                    Value(FacilityEvolutionTerms.Service, 0.6f),
+                    Value(FacilityEvolutionTerms.Logistics, 0.4f)
                 },
-                minimumIdentityScore: 0.35f),
+                minimumIdentityScore: 0.1f),
 
             new EvolutionRecipeSpec(
                 9102,
-                "EV_PremiumMeatRestaurant",
-                "evolve_meat_restaurant_to_premium_meat_restaurant",
-                "고급 고기 식당 진화",
-                "고기 식당이 여유로운 좌석, 휴식/서비스 맥락, 귀족 이용 기록을 받아 고급 식당 계보로 진화한다.",
-                "P1_PremiumMeatRestaurant",
-                new[] { "P1_MeatRestaurant" },
+                "EV_SecureDisplay",
+                "evolve_shop_display_to_secure_display",
+                "상점 진열장 진화",
+                "판매 서비스와 조명이 갖춰진 상점에서 잡화진열선반을 잠금진열장으로 진화시킨다.",
+                "S03_잠금진열장",
+                new[] { "S02_잡화진열선반" },
                 requiredStarGrade: 1,
                 resultStarGrade: 2,
                 publicByDefault: true,
                 requiredResearchRecipeId: string.Empty,
                 requiredRoomScores: new[]
                 {
-                    Min(FacilityEvolutionTerms.Dining, 35f),
-                    Min(FacilityEvolutionTerms.Luxury, 12f)
+                    Min("Shop", 22f),
+                    Min(FacilityEvolutionTerms.Service, 5f),
+                    Min(FacilityEvolutionTerms.Luxury, 3f)
                 },
-                requiredRoomMetrics: new[]
-                {
-                    Max(FacilityEvolutionTerms.SeatDensity, 0.75f),
-                    Min(FacilityEvolutionTerms.LuxuryPerSeat, 1.2f)
-                },
-                requiredRecordTokens: new[]
-                {
-                    Token(FacilityEvolutionTerms.NoblePatronage, 1)
-                },
-                allowedMutationTags: new[] { FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Noble },
+                requiredRoomMetrics: Array.Empty<FacilityEvolutionMetricRequirement>(),
+                requiredRecordTokens: Array.Empty<FacilityEvolutionTokenRequirement>(),
+                allowedMutationTags: new[] { FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Service },
+                requiredUniqueFixtureAssetNames: new[] { "S01_판매카운터", "E07_촛대" },
                 identityPressureWeights: new[]
                 {
-                    Value(FacilityEvolutionTerms.Luxury, 0.55f),
-                    Value(FacilityEvolutionTerms.Service, 0.2f),
-                    Value(FacilityEvolutionTerms.Rest, 0.15f),
-                    Value(FacilityEvolutionTerms.Crowd, -0.2f),
-                    Value(FacilityEvolutionTerms.Outlaw, -0.2f)
+                    Value(FacilityEvolutionTerms.Luxury, 0.45f),
+                    Value(FacilityEvolutionTerms.Service, 0.35f),
+                    Value(FacilityEvolutionTerms.Security, 0.2f)
                 },
-                minimumIdentityScore: 0.35f),
+                minimumIdentityScore: 0.1f),
 
             new EvolutionRecipeSpec(
                 9103,
-                "EV_BattlefieldDining",
-                "evolve_battle_dining_to_battlefield_dining",
-                "전장의 식당 진화",
-                "전투 식당이 경비 집결과 침입 방어 기록을 쌓아 전장의 식당 계보로 진화한다.",
-                "P1_BattlefieldDining",
-                new[] { "P1_BattleDining" },
-                requiredStarGrade: 2,
-                resultStarGrade: 3,
+                "EV_TacticalTable",
+                "evolve_guard_desk_to_tactical_table",
+                "경비 지휘 진화",
+                "훈련 시설과 함께 운영된 경비초소책상을 전술지도탁자로 진화시킨다.",
+                "G04_전술지도탁자",
+                new[] { "G01_경비초소책상" },
+                requiredStarGrade: 1,
+                resultStarGrade: 2,
                 publicByDefault: true,
                 requiredResearchRecipeId: string.Empty,
                 requiredRoomScores: new[]
                 {
-                    Min(FacilityEvolutionTerms.Combat, 34f),
-                    Min(FacilityEvolutionTerms.Defense, 12f)
+                    Min(FacilityEvolutionTerms.Training, 22f),
+                    Min(FacilityEvolutionTerms.Combat, 10f),
+                    Min(FacilityEvolutionTerms.Defense, 2f)
                 },
                 requiredRoomMetrics: Array.Empty<FacilityEvolutionMetricRequirement>(),
-                requiredRecordTokens: new[]
-                {
-                    Token(FacilityEvolutionTerms.GuardRallyPoint, 1),
-                    Token(FacilityEvolutionTerms.IntruderBloodied, 1)
-                },
+                requiredRecordTokens: Array.Empty<FacilityEvolutionTokenRequirement>(),
                 allowedMutationTags: new[] { FacilityEvolutionTerms.Brutal, FacilityEvolutionTerms.Security },
+                requiredUniqueFixtureAssetNames: new[] { "T01_훈련허수아비" },
                 identityPressureWeights: new[]
                 {
-                    Value(FacilityEvolutionTerms.Combat, 0.4f),
-                    Value(FacilityEvolutionTerms.Security, 0.45f),
-                    Value(FacilityEvolutionTerms.Service, 0.1f)
+                    Value(FacilityEvolutionTerms.Combat, 0.6f),
+                    Value(FacilityEvolutionTerms.Security, 0.4f)
                 },
-                minimumIdentityScore: 0.4f),
+                minimumIdentityScore: 0.2f),
 
             new EvolutionRecipeSpec(
                 9104,
-                "EV_NobleDining",
-                "evolve_premium_meat_restaurant_to_noble_dining",
-                "귀족의 식당 진화",
-                "고급 고기 식당이 마력/서비스/귀족 후원 기록을 받아 귀족의 식당 계보로 진화한다.",
-                "P1_NobleDining",
-                new[] { "P1_PremiumMeatRestaurant" },
-                requiredStarGrade: 2,
-                resultStarGrade: 3,
+                "EV_ArcheryTarget",
+                "evolve_training_dummy_to_archery_target",
+                "요새 훈련 진화",
+                "경비 체계가 갖춰진 훈련실에서 허수아비를 정밀 사격과녁으로 진화시킨다.",
+                "T02_사격과녁",
+                new[] { "T01_훈련허수아비" },
+                requiredStarGrade: 1,
+                resultStarGrade: 2,
                 publicByDefault: true,
                 requiredResearchRecipeId: string.Empty,
                 requiredRoomScores: new[]
                 {
-                    Min(FacilityEvolutionTerms.Luxury, 32f),
-                    Min(FacilityEvolutionTerms.Mana, 12f)
+                    Min(FacilityEvolutionTerms.Combat, 10f),
+                    Min(FacilityEvolutionTerms.Defense, 4f),
+                    Min(FacilityEvolutionTerms.Security, 5f)
                 },
-                requiredRoomMetrics: new[]
-                {
-                    Min(FacilityEvolutionTerms.LuxuryPerSeat, 2f)
-                },
-                requiredRecordTokens: new[]
-                {
-                    Token(FacilityEvolutionTerms.NoblePatronage, 2),
-                    Token(FacilityEvolutionTerms.CleanServiceStreak, 1)
-                },
-                allowedMutationTags: new[] { FacilityEvolutionTerms.Luxury, FacilityEvolutionTerms.Noble },
+                requiredRoomMetrics: Array.Empty<FacilityEvolutionMetricRequirement>(),
+                requiredRecordTokens: Array.Empty<FacilityEvolutionTokenRequirement>(),
+                allowedMutationTags: new[] { FacilityEvolutionTerms.Combat, FacilityEvolutionTerms.Security },
+                requiredUniqueFixtureAssetNames: new[] { "G01_경비초소책상", "G02_경보종" },
                 identityPressureWeights: new[]
                 {
-                    Value(FacilityEvolutionTerms.Luxury, 0.5f),
-                    Value(FacilityEvolutionTerms.Service, 0.2f),
-                    Value(FacilityEvolutionTerms.Rest, 0.15f),
-                    Value(FacilityEvolutionTerms.Ritual, 0.1f),
-                    Value(FacilityEvolutionTerms.Outlaw, -0.25f)
+                    Value(FacilityEvolutionTerms.Combat, 0.55f),
+                    Value(FacilityEvolutionTerms.Security, 0.45f)
                 },
-                minimumIdentityScore: 0.42f)
+                minimumIdentityScore: 0.2f),
+
+            new EvolutionRecipeSpec(
+                9105,
+                "EV_AlchemyBench",
+                "evolve_research_desk_to_alchemy_bench",
+                "비전 연구 진화",
+                "마력 안정 장치가 있는 연구실에서 연구책상을 연금술작업대로 진화시킨다.",
+                "Q02_연금술작업대",
+                new[] { "Q01_연구책상" },
+                requiredStarGrade: 1,
+                resultStarGrade: 2,
+                publicByDefault: true,
+                requiredResearchRecipeId: string.Empty,
+                requiredRoomScores: new[]
+                {
+                    Min(FacilityEvolutionTerms.Research, 24f),
+                    Min(FacilityEvolutionTerms.Mana, 2f),
+                    Min(FacilityEvolutionTerms.Security, 2.5f)
+                },
+                requiredRoomMetrics: Array.Empty<FacilityEvolutionMetricRequirement>(),
+                requiredRecordTokens: Array.Empty<FacilityEvolutionTokenRequirement>(),
+                allowedMutationTags: new[] { FacilityEvolutionTerms.Research, FacilityEvolutionTerms.Ritual },
+                requiredUniqueFixtureAssetNames: new[] { "Q03_연구용책장", "M03_룬안정기" },
+                identityPressureWeights: new[]
+                {
+                    Value(FacilityEvolutionTerms.Ritual, 0.8f),
+                    Value(FacilityEvolutionTerms.Security, 0.2f)
+                },
+                minimumIdentityScore: 0.2f),
+
+            new EvolutionRecipeSpec(
+                9106,
+                "EV_RitualFocus",
+                "evolve_mana_shelf_to_ritual_focus",
+                "마력 의식 진화",
+                "시약과 의식 조명을 갖춘 마력실에서 수정선반을 의식초점석으로 진화시킨다.",
+                "M04_의식초점석",
+                new[] { "M01_마력수정선반" },
+                requiredStarGrade: 1,
+                resultStarGrade: 2,
+                publicByDefault: true,
+                requiredResearchRecipeId: string.Empty,
+                requiredRoomScores: new[]
+                {
+                    Min(FacilityEvolutionTerms.Mana, 24f),
+                    Min(FacilityEvolutionTerms.Research, 2f),
+                    Min(FacilityEvolutionTerms.Luxury, 3f)
+                },
+                requiredRoomMetrics: Array.Empty<FacilityEvolutionMetricRequirement>(),
+                requiredRecordTokens: Array.Empty<FacilityEvolutionTokenRequirement>(),
+                allowedMutationTags: new[] { FacilityEvolutionTerms.Mana, FacilityEvolutionTerms.Ritual },
+                requiredUniqueFixtureAssetNames: new[] { "Q04_시약선반", "E07_촛대" },
+                identityPressureWeights: new[]
+                {
+                    Value(FacilityEvolutionTerms.Ritual, 0.8f),
+                    Value(FacilityEvolutionTerms.Luxury, 0.2f)
+                },
+                minimumIdentityScore: 0.2f)
         };
     }
 

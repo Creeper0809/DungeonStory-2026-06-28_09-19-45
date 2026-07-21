@@ -32,44 +32,12 @@ public enum DefenseTargetRule
     GuardTarget
 }
 
-public enum DefenseEffectKind
-{
-    Damage,
-    Corrosion,
-    Burn,
-    Charge,
-    Slow,
-    GuardAttack
-}
-
 public enum DefenseStatusKind
 {
     Corrosion,
     Burn,
     Charge,
     Slow
-}
-
-[Serializable]
-public class DefenseEffectData
-{
-    public DefenseEffectKind kind;
-    [Min(0f)] public float amount;
-    [Min(0f)] public float duration;
-    [Min(1)] public int stacks = 1;
-    public string logTag;
-
-    public DefenseEffectData Clone()
-    {
-        return new DefenseEffectData
-        {
-            kind = kind,
-            amount = amount,
-            duration = duration,
-            stacks = stacks,
-            logTag = logTag
-        };
-    }
 }
 
 [Serializable]
@@ -85,7 +53,6 @@ public class DefenseFacilityData
     [Min(1)] public int star = 1;
     public string combatLogText;
     public DefenseEffectSO[] effectAssets = Array.Empty<DefenseEffectSO>();
-    public DefenseEffectData[] effects = Array.Empty<DefenseEffectData>();
 
     public bool IsDefenseFacility => enabled && concept != DefenseAttackConcept.None;
 
@@ -98,9 +65,11 @@ public class DefenseFacilityData
 public class DefenseActivationReport
 {
     private readonly List<string> effectTags = new List<string>();
+    private readonly IReadOnlyList<string> effectTagsView;
 
     public DefenseActivationReport(DefenseFacility facility, CharacterActor target, DefenseTriggerTiming timing)
     {
+        effectTagsView = effectTags.AsReadOnly();
         Facility = facility;
         TargetActor = target;
         Timing = timing;
@@ -115,7 +84,7 @@ public class DefenseActivationReport
     public DefenseAttackConcept Concept { get; }
     public float TotalDamage { get; private set; }
     public float MovementDelaySeconds { get; private set; }
-    public IReadOnlyList<string> EffectTags => effectTags;
+    public IReadOnlyList<string> EffectTags => effectTagsView;
     public bool Triggered => Facility != null && TargetActor != null;
 
     public void AddDamage(float amount)
@@ -145,23 +114,67 @@ public class DefenseActivationReport
         string tags = effectTags.Count > 0 ? $" [{string.Join(", ", effectTags)}]" : string.Empty;
         return $"{facilityName} 발동{damageText}{tags}";
     }
+
+    public DefenseActivationSnapshot CreateSnapshot()
+    {
+        return new DefenseActivationSnapshot(this);
+    }
 }
 
-public struct DefenseFacilityTriggeredEvent
+public sealed class DefenseActivationSnapshot
 {
-    public DefenseActivationReport report;
+    internal DefenseActivationSnapshot(DefenseActivationReport report)
+    {
+        SourceFacility = report?.Facility;
+        Facility = report?.Facility != null ? report.Facility.BuildingData : null;
+        FacilityRuntimeId = report?.Facility != null ? report.Facility.GetInstanceID() : 0;
+        FacilityName = report?.Facility != null && report.Facility.BuildingData != null
+            ? report.Facility.BuildingData.objectName
+            : "방어 시설";
+        TargetName = report?.TargetActor != null ? report.TargetActor.name : string.Empty;
+        Timing = report?.Timing ?? DefenseTriggerTiming.None;
+        Concept = report?.Concept ?? DefenseAttackConcept.None;
+        TotalDamage = report?.TotalDamage ?? 0f;
+        MovementDelaySeconds = report?.MovementDelaySeconds ?? 0f;
+        EffectTags = EventPayloadSnapshot.Copy(report?.EffectTags);
+        Summary = report?.FormatSummary() ?? string.Empty;
+    }
+
+    public DefenseFacility SourceFacility { get; }
+    public BuildingSO Facility { get; }
+    public int FacilityRuntimeId { get; }
+    public string FacilityName { get; }
+    public string TargetName { get; }
+    public DefenseTriggerTiming Timing { get; }
+    public DefenseAttackConcept Concept { get; }
+    public float TotalDamage { get; }
+    public float MovementDelaySeconds { get; }
+    public IReadOnlyList<string> EffectTags { get; }
+    public string Summary { get; }
+
+    public string FormatSummary()
+    {
+        return Summary;
+    }
+}
+
+public readonly struct DefenseFacilityTriggeredEvent
+{
+    public DefenseActivationSnapshot report { get; }
 
     public DefenseFacilityTriggeredEvent(DefenseActivationReport report)
+    {
+        this.report = report?.CreateSnapshot();
+    }
+
+    public DefenseFacilityTriggeredEvent(DefenseActivationSnapshot report)
     {
         this.report = report;
     }
 
-    private static DefenseFacilityTriggeredEvent e;
-
     public static void Trigger(DefenseActivationReport report)
     {
-        e.report = report;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new DefenseFacilityTriggeredEvent(report));
     }
 }
 
@@ -222,7 +235,16 @@ public class DefenseFacility : Facility
         DefenseActivationReport report = new DefenseActivationReport(this, intruder, timing);
         nextTriggerTime = Time.time + Mathf.Max(0f, Defense.cooldownSeconds);
         DefenseEffectResolver.ApplyEffects(this, intruder, report, statusRuntimeService);
-        intruder.AddLog(report.FormatSummary());
+        intruder.AddActivity(CharacterActivityEvent.Facility(
+            CharacterActivityKinds.Combat,
+            CharacterActivityOutcomes.Damaged,
+            report.FormatSummary(),
+            this,
+            actionId: $"defense:{Defense.concept}",
+            reasonCode: timing.ToString(),
+            value: report.TotalDamage,
+            quantity: report.EffectTags.Count,
+            bubbleEligible: true));
         DefenseFacilityTriggeredEvent.Trigger(report);
         return report;
     }
@@ -274,8 +296,6 @@ public static class DefenseFacilityResolver
 
 public static class DefenseEffectResolver
 {
-    private const int ChargeDischargeThreshold = 3;
-
     public static void ApplyEffects(
         DefenseFacility facility,
         CharacterActor target,
@@ -295,77 +315,13 @@ public static class DefenseEffectResolver
         DefenseFacilityData defense = facility.Defense;
         DefenseStatusRuntime statusRuntime = statusRuntimeService.GetOrAdd(target)
             ?? throw new InvalidOperationException($"{nameof(IDefenseStatusRuntimeService)} could not provide {nameof(DefenseStatusRuntime)}.");
-        DefenseEffectSO[] effectAssets = defense.effectAssets ?? Array.Empty<DefenseEffectSO>();
-        if (effectAssets.Length > 0)
+        DefenseEffectContext context = new DefenseEffectContext(target, statusRuntime, report, defense);
+        foreach (DefenseEffectSO effectAsset in defense.effectAssets ?? Array.Empty<DefenseEffectSO>())
         {
-            foreach (DefenseEffectSO effectAsset in effectAssets)
+            if (effectAsset != null)
             {
-                if (effectAsset == null)
-                {
-                    continue;
-                }
-
-                effectAsset.Apply(target, statusRuntime, report, defense);
+                effectAsset.Apply(context);
             }
-
-            return;
-        }
-
-        foreach (DefenseEffectData effect in defense.effects ?? Array.Empty<DefenseEffectData>())
-        {
-            if (effect == null)
-            {
-                continue;
-            }
-
-            ApplyEffect(effect, target, statusRuntime, report, defense);
-        }
-    }
-
-    public static void ApplyEffect(
-        DefenseEffectData effect,
-        CharacterActor target,
-        DefenseStatusRuntime statusRuntime,
-        DefenseActivationReport report,
-        DefenseFacilityData defense)
-    {
-        string logTag = !string.IsNullOrWhiteSpace(effect.logTag)
-            ? effect.logTag
-            : effect.kind.ToString();
-
-        switch (effect.kind)
-        {
-            case DefenseEffectKind.Damage:
-                ApplyDamage(target, statusRuntime, report, effect.amount, defense.combatLogText);
-                report.AddEffectTag(logTag);
-                break;
-            case DefenseEffectKind.Corrosion:
-                statusRuntime.ApplyStatus(DefenseStatusKind.Corrosion, effect.amount, effect.duration, effect.stacks);
-                report.AddEffectTag(logTag);
-                break;
-            case DefenseEffectKind.Burn:
-                statusRuntime.ApplyStatus(DefenseStatusKind.Burn, effect.amount, effect.duration, effect.stacks);
-                report.AddEffectTag(logTag);
-                break;
-            case DefenseEffectKind.Charge:
-                int chargeStacks = statusRuntime.ApplyStatus(DefenseStatusKind.Charge, effect.amount, effect.duration, effect.stacks);
-                report.AddEffectTag($"{logTag} {chargeStacks}");
-                if (chargeStacks >= ChargeDischargeThreshold)
-                {
-                    statusRuntime.ClearStatus(DefenseStatusKind.Charge);
-                    ApplyDamage(target, statusRuntime, report, effect.amount, "축전 방전");
-                    report.AddEffectTag("축전 방전");
-                }
-                break;
-            case DefenseEffectKind.Slow:
-                statusRuntime.ApplyStatus(DefenseStatusKind.Slow, effect.amount, effect.duration, effect.stacks);
-                report.AddMovementDelay(effect.amount);
-                report.AddEffectTag(logTag);
-                break;
-            case DefenseEffectKind.GuardAttack:
-                ApplyDamage(target, statusRuntime, report, effect.amount, "경비실 교전");
-                report.AddEffectTag(logTag);
-                break;
         }
     }
 
@@ -385,23 +341,6 @@ public static class DefenseEffectResolver
         }
 
         return statusRuntimeService.TickStatuses(target, deltaSeconds);
-    }
-
-    private static void ApplyDamage(
-        CharacterActor target,
-        DefenseStatusRuntime statusRuntime,
-        DefenseActivationReport report,
-        float amount,
-        string reason)
-    {
-        if (amount <= 0f || target == null || target.IsDead)
-        {
-            return;
-        }
-
-        float finalDamage = amount * statusRuntime.GetIncomingDamageMultiplier();
-        target.ApplyDamage(finalDamage, reason);
-        report.AddDamage(finalDamage);
     }
 }
 

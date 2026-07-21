@@ -1,17 +1,14 @@
-public struct RunResultReadyEvent
+public readonly struct RunResultReadyEvent
 {
-    public RunResultSnapshot result;
+    public RunResultSnapshot result { get; }
 
     public RunResultReadyEvent(RunResultSnapshot result)
     {
         this.result = result;
     }
 
-    private static RunResultReadyEvent e;
-
     public static void Trigger(RunResultSnapshot result)
     {
-        e.result = result;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new RunResultReadyEvent(result));
     }
 }

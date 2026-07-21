@@ -13,6 +13,7 @@ public interface IFacilitySynthesisRuntimeProvider
 public interface ICodexRuntimeProvider
 {
     CodexRuntime Runtime { get; }
+    bool TryGetRuntime(out CodexRuntime runtime);
 }
 
 public sealed class FacilityEvolutionRuntimeProvider :
@@ -66,5 +67,10 @@ public sealed class CodexRuntimeProvider :
         {
             return GetRequiredRuntimeComponent(nameof(ICodexRuntimeProvider));
         }
+    }
+
+    public bool TryGetRuntime(out CodexRuntime runtime)
+    {
+        return TryGetRuntimeComponent(out runtime);
     }
 }

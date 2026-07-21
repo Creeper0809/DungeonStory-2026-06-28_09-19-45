@@ -23,7 +23,7 @@ public static class DungeonEntranceGridResolver
             .Select(cell => cell?.GetBuildingInlayer(GridLayer.Building))
             .OfType<Door>()
             .Where(door => door != null
-                && door.GetType() == typeof(Door)
+                && door.IsDungeonEntrance
                 && !door.isDestroy
                 && door.BuildingData != null
                 && !door.BuildingData.IsInteriorDoor)
@@ -44,7 +44,7 @@ public class CharacterSpawner : BuildableObject,IInteractable
     [SerializeField] private Vector2Int entryGridPosition = new Vector2Int(4, 0);
 
     private float timer;
-    private Dictionary<int, CharacterRespawnData> respawnDict = new Dictionary<int, CharacterRespawnData>();
+    private Dictionary<string, CharacterRespawnData> respawnDict = new Dictionary<string, CharacterRespawnData>();
     private Dictionary<int, CharacterSO> charactersById = new Dictionary<int, CharacterSO>();
     public IObjectPool<GameObject> characterPool;
     private WaitForSeconds spawnDelay = new WaitForSeconds(0.3f);
@@ -53,13 +53,20 @@ public class CharacterSpawner : BuildableObject,IInteractable
     private IGridSystemProvider gridSystemProvider;
     private IRunVariableRuntimeReader runVariableReader;
     private ICharacterSpawnObjectFactory characterObjectFactory;
+    private IRunCharacterCatalog characterCatalog;
+    private ICharacterPopulationService characterPopulationService;
+    private IOwnerRunManagerProvider ownerRunManagerProvider;
+    private bool catalogCustomersMerged;
 
     [Inject]
     public void Construct(
         IRegularCustomerRuntimeProvider regularCustomerRuntimeProvider,
         IGridSystemProvider gridSystemProvider,
         IRunVariableRuntimeReader runVariableReader,
-        ICharacterSpawnObjectFactory characterObjectFactory)
+        ICharacterSpawnObjectFactory characterObjectFactory,
+        IRunCharacterCatalog characterCatalog,
+        ICharacterPopulationService characterPopulationService,
+        IOwnerRunManagerProvider ownerRunManagerProvider)
     {
         this.regularCustomerRuntimeProvider = regularCustomerRuntimeProvider
             ?? throw new ArgumentNullException(nameof(regularCustomerRuntimeProvider));
@@ -69,6 +76,13 @@ public class CharacterSpawner : BuildableObject,IInteractable
             ?? throw new ArgumentNullException(nameof(runVariableReader));
         this.characterObjectFactory = characterObjectFactory
             ?? throw new ArgumentNullException(nameof(characterObjectFactory));
+        this.characterCatalog = characterCatalog
+            ?? throw new ArgumentNullException(nameof(characterCatalog));
+        this.characterPopulationService = characterPopulationService
+            ?? throw new ArgumentNullException(nameof(characterPopulationService));
+        this.ownerRunManagerProvider = ownerRunManagerProvider
+            ?? throw new ArgumentNullException(nameof(ownerRunManagerProvider));
+        catalogCustomersMerged = false;
     }
 
     private void Awake()
@@ -96,9 +110,22 @@ public class CharacterSpawner : BuildableObject,IInteractable
             characters = new CharacterSO[0];
         }
 
+        if (!catalogCustomersMerged && characterCatalog != null)
+        {
+            IEnumerable<CharacterSO> catalogCustomers = characterCatalog.Characters
+                .Where(data => data != null && data.characterType == CharacterType.Customer);
+            characters = characters
+                .Concat(catalogCustomers)
+                .Where(data => data != null)
+                .GroupBy(data => data.id)
+                .Select(group => group.First())
+                .ToArray();
+            catalogCustomersMerged = true;
+        }
+
         characters = characters.Where((x) => x != null).OrderBy((x) => x.id).ToArray();
         charactersById = characters.GroupBy((x) => x.id).ToDictionary((x) => x.Key, (x) => x.First());
-        respawnDict ??= new Dictionary<int, CharacterRespawnData>();
+        respawnDict ??= new Dictionary<string, CharacterRespawnData>();
         spawnDelay ??= new WaitForSeconds(0.3f);
 
         if (characterPool == null && characterPrefab != null)
@@ -129,7 +156,7 @@ public class CharacterSpawner : BuildableObject,IInteractable
         if (respawnDict == null) return;
 
         timer += Time.deltaTime;
-        int? respawnedId = null;
+        string respawnedId = null;
         foreach(var item in respawnDict)
         {
             if (item.Value.CheckResapwn(timer))
@@ -138,21 +165,26 @@ public class CharacterSpawner : BuildableObject,IInteractable
                 break;
             }
         }
-        if (respawnedId.HasValue)
+        if (!string.IsNullOrWhiteSpace(respawnedId))
         {
-            respawnDict.Remove(respawnedId.Value);
+            respawnDict.Remove(respawnedId);
         }
     }
     public bool TrySpawnCharacter(int id)
     {
         EnsureRuntimeState();
+        if (ownerRunManagerProvider == null
+            || !ownerRunManagerProvider.TryGetManager(out OwnerRunManager ownerManager)
+            || ownerManager.CurrentOwnerActor == null)
+        {
+            return false;
+        }
+
         if (characterPool == null)
         {
             Debug.LogWarning("캐릭터 프리팹이 없어 캐릭터를 스폰할 수 없습니다.");
             return false;
         }
-
-        if (respawnDict.ContainsKey(id)) return false;
 
         if (!charactersById.TryGetValue(id, out CharacterSO characterData))
         {
@@ -166,8 +198,17 @@ public class CharacterSpawner : BuildableObject,IInteractable
             return false;
         }
 
+        WorldCharacterProfile worldProfile = characterPopulationService.AcquireVisitor(
+            characterData,
+            respawnDict.Keys);
+        if (worldProfile == null)
+        {
+            return false;
+        }
+
         if (!TryGetEntryGridPosition(out Vector2Int resolvedEntryGridPosition))
         {
+            worldProfile.isVisiting = false;
             return false;
         }
 
@@ -179,12 +220,47 @@ public class CharacterSpawner : BuildableObject,IInteractable
         {
             Debug.LogWarning("캐릭터 프리팹에 CharacterActor 컴포넌트가 없습니다.");
             characterPool.Release(spawnedCharacterGameobject);
+            worldProfile.isVisiting = false;
             return false;
         }
 
         spawnedCharacter.SetLifecycleState(CharacterLifecycleState.SpawningOutside);
         spawnedCharacter.Initialize(characterData);
-        if (spawnedCharacter.TryGetAbility(out AbilityMove move))
+        characterPopulationService.BindActor(worldProfile, spawnedCharacter);
+        StartCoroutine(EnterWhenPrepared(spawnedCharacter, resolvedEntryGridPosition));
+
+        float demandMultiplier = ResolveRunVariableReader().GetGuestDemandMultiplier(characterData.SpeciesTag);
+        float respawnTime = characterData.respawnSpeed / Mathf.Max(0.1f, demandMultiplier);
+        respawnDict[worldProfile.persistentId] = new CharacterRespawnData(
+            worldProfile.persistentId,
+            id,
+            respawnTime);
+        return true;
+    }
+
+    private IEnumerator EnterWhenPrepared(
+        CharacterActor actor,
+        Vector2Int resolvedEntryGridPosition)
+    {
+        CharacterVisual characterVisual = actor != null ? actor.GetComponent<CharacterVisual>() : null;
+        characterVisual?.SetRenderersVisible(false);
+        while (actor != null
+            && actor.gameObject.activeInHierarchy
+            && (actor.Progression == null
+                || actor.Progression.ActiveSkills.Count == 0
+                || actor.Progression.PassiveSkills.Count == 0))
+        {
+            yield return null;
+        }
+
+        if (actor == null || !actor.gameObject.activeInHierarchy)
+        {
+            yield break;
+        }
+
+        characterPopulationService.RefreshProfile(actor);
+        characterVisual?.SetRenderersVisible(true);
+        if (actor.TryGetAbility(out AbilityMove move))
         {
             move.StartEnterDungeon(GetEntryDoorWorldPosition(), resolvedEntryGridPosition);
         }
@@ -192,16 +268,11 @@ public class CharacterSpawner : BuildableObject,IInteractable
         {
             if (TryGetGrid(out Grid grid))
             {
-                spawnedCharacter.transform.position = grid.GetWorldPos(resolvedEntryGridPosition);
+                actor.transform.position = grid.GetWorldPos(resolvedEntryGridPosition);
             }
 
-            spawnedCharacter.SetLifecycleState(CharacterLifecycleState.Active);
+            actor.SetLifecycleState(CharacterLifecycleState.Active);
         }
-
-        float demandMultiplier = ResolveRunVariableReader().GetGuestDemandMultiplier(characterData.SpeciesTag);
-        float respawnTime = characterData.respawnSpeed / Mathf.Max(0.1f, demandMultiplier);
-        respawnDict.Add(id, new CharacterRespawnData(id, respawnTime));
-        return true;
     }
 
     public Vector3 GetOutsideSpawnWorldPosition()
@@ -255,6 +326,19 @@ public class CharacterSpawner : BuildableObject,IInteractable
         if (grid.IsValidGridPos(entryGridPosition) && grid.IsWalkable(entryGridPosition))
         {
             resolvedEntryGridPosition = entryGridPosition;
+            return true;
+        }
+
+        GridCell entranceCell = grid.GetCells()
+            .Where(cell => cell != null
+                && cell.AreaType == GridCellAreaType.Entrance
+                && grid.IsWalkable(cell.Position))
+            .OrderBy(cell => cell.Position.y)
+            .ThenBy(cell => cell.Position.x)
+            .FirstOrDefault();
+        if (entranceCell != null)
+        {
+            resolvedEntryGridPosition = entranceCell.Position;
             return true;
         }
 
@@ -331,10 +415,33 @@ public class CharacterSpawner : BuildableObject,IInteractable
         if (identity == null || identity.Data == null) yield break;
 
         EnsureRuntimeState();
-        if (respawnDict.TryGetValue(identity.Data.id, out CharacterRespawnData respawnData))
+        bool isStaffProfile = characterPopulationService != null
+            && characterPopulationService.TryGetProfile(actor, out WorldCharacterProfile profile)
+            && profile != null
+            && profile.isStaff;
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out _)
+            || identity.CharacterType == CharacterType.NPC
+            || isStaffProfile)
+        {
+            if (isStaffProfile)
+            {
+                actor.characterType = CharacterType.NPC;
+                actor.Identity?.SetCharacterType(CharacterType.NPC);
+            }
+
+            actor.SetLifecycleState(CharacterLifecycleState.Active);
+            actor.gameObject.SetActive(true);
+            characterPopulationService?.RefreshProfile(actor);
+            yield break;
+        }
+
+        string profileId = identity.PersistentId;
+        if (respawnDict.TryGetValue(profileId, out CharacterRespawnData respawnData))
         {
             respawnData.StartCheckRespawn(timer);
         }
+
+        characterPopulationService?.ReleaseVisitor(actor);
 
         if (characterPool != null)
         {
@@ -351,14 +458,16 @@ public class CharacterSpawner : BuildableObject,IInteractable
 }
 public class CharacterRespawnData
 {
-    public int id;
+    public string id;
+    public int characterDataId;
     public float lastDisabledTime;
     public float respawnTime;
     public bool isDiabled;
-    public CharacterRespawnData(int id, float respawnTime)
+    public CharacterRespawnData(string id, int characterDataId, float respawnTime)
     {
         this.respawnTime = respawnTime;
         this.id = id;
+        this.characterDataId = characterDataId;
         isDiabled = false;
     }
     public void StartCheckRespawn(float lastDisabledTime)

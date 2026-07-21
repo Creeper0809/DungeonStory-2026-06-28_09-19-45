@@ -38,7 +38,10 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         ConfigurePanelBounds(uiRoot);
 
         Transform generated = uiRoot.transform.Find(RuntimeViewName);
-        if (generated != null && generated.Find("TabBar/MoodTab") == null)
+        if (generated != null
+            && (generated.Find("TabBar/GrowthTab") == null
+                || generated.Find("Content/GrowthContent/GrowthList") == null
+                || generated.Find("Content/StatusContent/CarrySummaryText") == null))
         {
             UnityEngine.Object.DestroyImmediate(generated.gameObject);
             generated = null;
@@ -84,14 +87,14 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         nameText.fontSizeMin = 18f;
         nameText.fontSizeMax = 28f;
         nameText.textWrappingMode = TextWrappingModes.NoWrap;
-        nameText.overflowMode = TextOverflowModes.Ellipsis;
+        nameText.overflowMode = TextOverflowModes.Truncate;
         SetStretch(nameText.rectTransform, new Vector2(18f, 32f), new Vector2(-92f, -8f));
 
         TMP_Text profileText = CreateText("CharacterProfile", header, 15f, FontStyles.Normal);
         profileText.alignment = TextAlignmentOptions.TopLeft;
         profileText.color = DungeonUiTheme.TextSecondary;
         profileText.textWrappingMode = TextWrappingModes.NoWrap;
-        profileText.overflowMode = TextOverflowModes.Ellipsis;
+        profileText.overflowMode = TextOverflowModes.Truncate;
         SetStretch(profileText.rectTransform, new Vector2(18f, 8f), new Vector2(-92f, -44f));
 
         Button closeButton = CreateButton("CloseButton", header, "닫기");
@@ -120,11 +123,14 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
 
         Button statusTabButton = CreateButton("StatusTab", tabBar, "상태");
         statusTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        Button growthTabButton = CreateButton("GrowthTab", tabBar, "성장");
+        growthTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
         Button moodTabButton = CreateButton("MoodTab", tabBar, "기분");
         moodTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
         Button recordsTabButton = CreateButton("RecordsTab", tabBar, "기록");
         recordsTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
         statusTabButton.onClick.AddListener(owner.ShowStatusTab);
+        growthTabButton.onClick.AddListener(owner.ShowGrowthTab);
         moodTabButton.onClick.AddListener(owner.ShowMoodTab);
         recordsTabButton.onClick.AddListener(owner.ShowRecordsTab);
 
@@ -150,6 +156,84 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         Slider sleep = CreateMeterRow(statusContent, "Sleep", "휴식", 40f);
         Slider excretion = CreateMeterRow(statusContent, "Excretion", "배변", 40f);
         Slider hygiene = CreateMeterRow(statusContent, "Hygiene", "위생", 40f);
+
+        TMP_Text carrySummary = CreateText("CarrySummaryText", statusContent, 14f, FontStyles.Normal);
+        carrySummary.text = "소지 아이템 없음";
+        carrySummary.color = DungeonUiTheme.TextSecondary;
+        carrySummary.alignment = TextAlignmentOptions.TopLeft;
+        carrySummary.textWrappingMode = TextWrappingModes.Normal;
+        carrySummary.overflowMode = TextOverflowModes.Ellipsis;
+        carrySummary.margin = new Vector4(8f, 4f, 8f, 4f);
+        LayoutElement carrySummaryLayout = carrySummary.gameObject.AddComponent<LayoutElement>();
+        carrySummaryLayout.minHeight = 72f;
+        carrySummaryLayout.preferredHeight = 86f;
+
+        RectTransform growthContent = CreateRect("GrowthContent", content);
+        SetStretch(growthContent, Vector2.zero, Vector2.zero);
+        growthContent.gameObject.AddComponent<Image>().color = DungeonUiTheme.Panel;
+        growthContent.gameObject.AddComponent<RectMask2D>();
+        ScrollRect growthScroll = growthContent.gameObject.AddComponent<ScrollRect>();
+        growthScroll.viewport = growthContent;
+        growthScroll.horizontal = false;
+        growthScroll.vertical = true;
+        growthScroll.movementType = ScrollRect.MovementType.Clamped;
+        growthScroll.scrollSensitivity = 28f;
+
+        RectTransform growthList = CreateRect("GrowthList", growthContent);
+        growthList.anchorMin = new Vector2(0f, 1f);
+        growthList.anchorMax = new Vector2(1f, 1f);
+        growthList.pivot = new Vector2(0.5f, 1f);
+        growthList.anchoredPosition = Vector2.zero;
+        growthList.sizeDelta = Vector2.zero;
+        VerticalLayoutGroup growthVertical = growthList.gameObject.AddComponent<VerticalLayoutGroup>();
+        growthVertical.spacing = 6f;
+        growthVertical.childAlignment = TextAnchor.UpperLeft;
+        growthVertical.childControlWidth = true;
+        growthVertical.childControlHeight = true;
+        growthVertical.childForceExpandWidth = true;
+        growthVertical.childForceExpandHeight = false;
+        ContentSizeFitter growthFitter = growthList.gameObject.AddComponent<ContentSizeFitter>();
+        growthFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        growthFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        growthScroll.content = growthList;
+
+        CreateSectionLabel(growthList, "레벨");
+        Slider experience = CreateMeterRow(growthList, "Experience", "경험치", 48f);
+        TMP_Text progressionSummary = CreateText(
+            "ProgressionSummaryText",
+            growthList,
+            15f,
+            FontStyles.Normal);
+        progressionSummary.color = DungeonUiTheme.TextSecondary;
+        progressionSummary.alignment = TextAlignmentOptions.TopLeft;
+        progressionSummary.textWrappingMode = TextWrappingModes.Normal;
+        progressionSummary.overflowMode = TextOverflowModes.Overflow;
+        progressionSummary.lineSpacing = 5f;
+        progressionSummary.margin = new Vector4(6f, 0f, 6f, 0f);
+        LayoutElement progressionLayout = progressionSummary.gameObject.AddComponent<LayoutElement>();
+        progressionLayout.minHeight = 178f;
+        progressionLayout.preferredHeight = 214f;
+        CreateSectionLabel(growthList, "기술 슬롯과 후보");
+
+        Button[] skillButtons = new Button[10];
+        for (int i = 0; i < skillButtons.Length; i++)
+        {
+            int capturedIndex = i;
+            Button skillButton = CreateButton($"Skill_{i}", growthList, string.Empty);
+            LayoutElement skillLayout = skillButton.gameObject.AddComponent<LayoutElement>();
+            skillLayout.minHeight = 42f;
+            skillLayout.preferredHeight = 42f;
+            TMP_Text skillLabel = skillButton.transform.Find("Label")?.GetComponent<TMP_Text>();
+            if (skillLabel != null)
+            {
+                skillLabel.fontSize = 14f;
+                skillLabel.alignment = TextAlignmentOptions.MidlineLeft;
+                skillLabel.textWrappingMode = TextWrappingModes.Normal;
+            }
+            skillButton.onClick.AddListener(() => owner.ToggleSkillAt(capturedIndex));
+            skillButtons[i] = skillButton;
+        }
+        growthContent.gameObject.SetActive(false);
 
         RectTransform moodContent = CreateRect("MoodContent", content);
         SetStretch(moodContent, Vector2.zero, Vector2.zero);
@@ -244,12 +328,16 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
             hygiene,
             moodSummaryText,
             moodFactorsText,
+            carrySummary,
             logText);
+        owner.BindGeneratedGrowth(experience, progressionSummary, skillButtons);
         owner.BindGeneratedTabs(
             statusContent.gameObject,
+            growthContent.gameObject,
             moodContent.gameObject,
             recordsContent.gameObject,
             statusTabButton,
+            growthTabButton,
             moodTabButton,
             recordsTabButton);
         return view;
@@ -271,12 +359,24 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
             FindSlider(generated, "Hygiene"),
             generated.Find("Content/MoodContent/MoodSummaryText")?.GetComponent<TMP_Text>(),
             generated.Find("Content/MoodContent/MoodFactorsViewport/MoodFactorsText")?.GetComponent<TMP_Text>(),
+            generated.Find("Content/StatusContent/CarrySummaryText")?.GetComponent<TMP_Text>(),
             generated.Find("Content/RecordsContent/CharacterLogText")?.GetComponent<TMP_Text>());
+        Button[] skillButtons = new Button[10];
+        for (int i = 0; i < skillButtons.Length; i++)
+        {
+            skillButtons[i] = generated.Find($"Content/GrowthContent/GrowthList/Skill_{i}")?.GetComponent<Button>();
+        }
+        owner.BindGeneratedGrowth(
+            FindSlider(generated, "Experience", "GrowthContent/GrowthList"),
+            generated.Find("Content/GrowthContent/GrowthList/ProgressionSummaryText")?.GetComponent<TMP_Text>(),
+            skillButtons);
         owner.BindGeneratedTabs(
             generated.Find("Content/StatusContent")?.gameObject,
+            generated.Find("Content/GrowthContent")?.gameObject,
             generated.Find("Content/MoodContent")?.gameObject,
             generated.Find("Content/RecordsContent")?.gameObject,
             generated.Find("TabBar/StatusTab")?.GetComponent<Button>(),
+            generated.Find("TabBar/GrowthTab")?.GetComponent<Button>(),
             generated.Find("TabBar/MoodTab")?.GetComponent<Button>(),
             generated.Find("TabBar/RecordsTab")?.GetComponent<Button>());
     }
@@ -355,7 +455,11 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         value.color = DungeonUiTheme.TextSecondary;
         value.alignment = TextAlignmentOptions.MidlineRight;
         LayoutElement valueLayout = value.gameObject.AddComponent<LayoutElement>();
-        float valueWidth = name == "Health" ? 142f : 48f;
+        float valueWidth = name == "Health"
+            ? 142f
+            : name == "Experience"
+                ? 92f
+                : 48f;
         valueLayout.minWidth = valueWidth;
         valueLayout.preferredWidth = valueWidth;
         return slider;

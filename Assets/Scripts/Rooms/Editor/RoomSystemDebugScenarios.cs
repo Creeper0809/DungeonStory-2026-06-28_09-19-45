@@ -76,7 +76,7 @@ public static class RoomSystemDebugScenarios
             && room.IsUsable
             && room.HasDoor
             && room.ContainsPart(world.Toilet)
-            && (room.Roles & RoomRole.Toilet) != 0;
+            && (room.Roles & FacilityRole.Toilet) != 0;
     }
 
     private static bool VerifyOpenHallwayIsNotUsableRoom()
@@ -91,7 +91,7 @@ public static class RoomSystemDebugScenarios
     private static bool VerifyFormalRoomSupersedesSelfContainedFallback()
     {
         using RoomScenarioWorld world = RoomScenarioWorld.CreateClosedToiletRoom();
-        world.Toilet.BuildingData.Facility.selfContainedRoom = true;
+        world.Toilet.BuildingData.AbilityModules.Add(new BuildingSelfContainedRoomAbility());
 
         RoomLayout layout = RoomDetector.Build(world.Grid);
         return layout.TryGetRoom(world.Toilet, out RoomInstance room)
@@ -416,6 +416,7 @@ public static class RoomSystemDebugScenarios
         private BuildableObject PlaceDoor(Vector2Int position)
         {
             BuildingSO data = CreateBuildingData("문", 901, BuildingCategory.None, FacilityRole.None, false);
+            data.type = typeof(Door);
             return Place(data, position);
         }
 
@@ -480,14 +481,17 @@ public static class RoomSystemDebugScenarios
             data.category = category;
             data.type = typeof(BuildableObject);
             data.unlocked = true;
-            data.facility = new FacilityData
+            data.Facility = new FacilityData
             {
                 roles = roles,
                 capacity = roles == FacilityRole.None ? 0 : 1,
                 useDuration = roles == FacilityRole.None ? 0f : 1f,
-                disabledWhenDamaged = true,
-                requiresRoomRole = requiresRoom
+                disabledWhenDamaged = true
             };
+            if (requiresRoom)
+            {
+                data.AbilityModules.Add(new BuildingRoomRequirementAbility());
+            }
             return data;
         }
     }

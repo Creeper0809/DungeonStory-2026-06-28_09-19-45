@@ -15,7 +15,11 @@ public static class DoorVisualMaterial
             return;
         }
 
-        material ??= Resources.Load<Material>(ResourcePath);
+        if (material == null)
+        {
+            material = Resources.Load<Material>(ResourcePath);
+        }
+
         if (material != null)
         {
             renderer.sharedMaterial = material;
@@ -54,13 +58,14 @@ public static class DungeonDoorVisualLayout
 public class Door : BuildableObject
 {
     public SpriteRenderer VisualRenderer { get; protected set; }
+    public virtual bool IsDungeonEntrance => true;
     protected virtual bool ChangesCharacterLayerDuringTraversal => true;
 
     private readonly HashSet<CharacterActor> traversalActors = new HashSet<CharacterActor>();
 
     private void OnEnable()
     {
-        if (GetType() != typeof(Door))
+        if (!IsDungeonEntrance)
         {
             return;
         }
@@ -82,7 +87,7 @@ public class Door : BuildableObject
     public override void Initialization(BuildingSO buildingSO, Vector2Int buildPos)
     {
         base.Initialization(buildingSO, buildPos);
-        if (GetType() == typeof(Door))
+        if (IsDungeonEntrance)
         {
             ConfigureDungeonVisual(buildingSO);
             ConfigureTraversalCollider();

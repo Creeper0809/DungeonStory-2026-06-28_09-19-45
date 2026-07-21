@@ -7,6 +7,25 @@ using Sirenix.OdinInspector;
 using UnityEngine;
 using VContainer;
 
+[Serializable]
+public sealed class GlobalFacilityReputationSnapshot
+{
+    public List<SocialRumorSnapshot> rumors = new List<SocialRumorSnapshot>();
+    public List<SocialMemoryFloat> reputation = new List<SocialMemoryFloat>();
+
+    public GlobalFacilityReputationSnapshot Clone()
+    {
+        return new GlobalFacilityReputationSnapshot
+        {
+            rumors = rumors?.Where(item => item != null).Select(item => item.Clone()).ToList()
+                ?? new List<SocialRumorSnapshot>(),
+            reputation = reputation?.Where(item => item != null)
+                .Select(item => new SocialMemoryFloat(item.key, item.value)).ToList()
+                ?? new List<SocialMemoryFloat>()
+        };
+    }
+}
+
 [DisallowMultipleComponent]
 [DrawWithUnity]
 public sealed class SocialReputationRuntime : SerializedMonoBehaviour
@@ -50,8 +69,46 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
     public int ActorLogEventCountForDebug => actorLogEventCountForDebug;
     public string LastActorLogDebug => lastActorLogDebug;
     public string LastRequestSkipDebug => lastRequestSkipDebug;
+    public static SocialReputationRuntime Current => instance;
 
     private float nextActorScanTime;
+
+    public GlobalFacilityReputationSnapshot CaptureSnapshot()
+    {
+        PruneExpiredGlobalRumors();
+        return new GlobalFacilityReputationSnapshot
+        {
+            rumors = globalFacilityRumors.Where(rumor => rumor != null && !rumor.IsExpired)
+                .Select(SocialRumorSnapshot.Capture)
+                .Where(snapshot => snapshot != null)
+                .ToList(),
+            reputation = facilityReputationByKey
+                .Select(entry => new SocialMemoryFloat(entry.Key, entry.Value))
+                .ToList()
+        };
+    }
+
+    public void RestoreSnapshot(GlobalFacilityReputationSnapshot snapshot)
+    {
+        globalFacilityRumors.Clear();
+        facilityReputationByKey.Clear();
+        if (snapshot != null)
+        {
+            globalFacilityRumors.AddRange(snapshot.rumors?
+                .Where(item => item != null && item.remainingSeconds > 0f)
+                .Select(item => item.Restore())
+                .Where(rumor => rumor != null) ?? Enumerable.Empty<SocialRumor>());
+            foreach (SocialMemoryFloat entry in snapshot.reputation ?? new List<SocialMemoryFloat>())
+            {
+                if (entry != null && !string.IsNullOrWhiteSpace(entry.key))
+                {
+                    facilityReputationByKey[entry.key] = Mathf.Clamp(entry.value, -1f, 1f);
+                }
+            }
+        }
+
+        SyncDebugList();
+    }
 
     [Inject]
     public void ConstructSocialReputationRuntime(
@@ -91,7 +148,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
 
     private void Start()
     {
-        RegisterExistingActors();
+        RegisterExistingActorsIfInjected();
     }
 
     private void OnDisable()
@@ -105,6 +162,11 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
 
     private void Update()
     {
+        if (sceneQuery == null)
+        {
+            return;
+        }
+
         if (Time.time < nextActorScanTime)
         {
             return;
@@ -170,7 +232,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         {
             lastError = "Social rumor request was not accepted by LocalLlmRequestQueue.";
             lastRequestSkipDebug = lastError;
-            LogWarningIfAllowed(lastError);
+            nextRequestTimeByActor[speaker] = Time.time + Mathf.Max(0.1f, minSecondsBetweenActorRequests);
             return false;
         }
 
@@ -187,6 +249,12 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
     {
         if (speaker == null || facility == null)
         {
+            return false;
+        }
+
+        if (Time.time < GetNextRequestTime(speaker))
+        {
+            lastRequestSkipDebug = "cooldown";
             return false;
         }
 
@@ -208,10 +276,13 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
                 (result) => OnSocialRumorResult(speaker, result, facility, true, expectedSentiment, true)))
         {
             lastError = "Social rumor request was not accepted by LocalLlmRequestQueue.";
-            LogWarningIfAllowed(lastError);
+            lastRequestSkipDebug = lastError;
+            nextRequestTimeByActor[speaker] = Time.time + Mathf.Max(0.1f, minSecondsBetweenActorRequests);
             return false;
         }
 
+        nextRequestTimeByActor[speaker] = Time.time + Mathf.Max(0.1f, minSecondsBetweenActorRequests);
+        lastRequestSkipDebug = string.Empty;
         return true;
     }
 
@@ -223,6 +294,9 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         }
 
         FillSourceIfMissing(rumor, speaker);
+        rumor.sentiment = CharacterSkillRuntimeEffects.ApplyPositiveRelationshipBonus(
+            speaker,
+            rumor.sentiment);
         if (rumor.targetType == SocialRumorTargetType.Facility)
         {
             ApplyGlobalFacilityReputation(rumor);
@@ -408,6 +482,12 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         float expectedSentiment,
         bool logWarnings)
     {
+        if (result.IsCancelled)
+        {
+            lastError = string.Empty;
+            return;
+        }
+
         if (!result.IsSuccess)
         {
             lastError = $"{result.Status}: {result.Error}";
@@ -474,7 +554,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
             return;
         }
 
-        Debug.LogWarning($"{name}: {message}", this);
+        Debug.Log($"{name}: {message}", this);
     }
 
     private string BuildSocialRumorPrompt(
@@ -490,7 +570,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         builder.AppendLine("Allowed rumorType values: None, Complaint, Recommendation, Warning, Praise.");
         builder.AppendLine("Allowed targetType values: None, Facility, Character.");
         builder.AppendLine("All numeric fields must be raw JSON numbers, never strings, words, or null.");
-        builder.AppendLine("targetFacilityId and targetCharacterId must be integers. Use -1 when not used. Never output null.");
+        builder.AppendLine("targetFacilityId must be an integer. targetCharacterId must be a persistent-ID string. Use -1 and an empty string when not used. Never output null.");
         builder.AppendLine("sentiment and trustImpact must be numbers between -1 and 1. spreadChance must be a number between 0 and 1.");
         builder.AppendLine("validSeconds must be a number between 0 and 1800. Use 600 for normal rumors. Never output 3600 or higher.");
         builder.AppendLine("Actionable Complaint, Recommendation, Warning, and Praise rumors must use spreadChance between 0.35 and 1.0.");
@@ -504,7 +584,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
             builder.AppendLine("Because this event is a facility experience, output targetType Facility unless rumorType is None.");
             builder.AppendLine("Do not output targetType Character for facility experiences.");
             builder.AppendLine("If you output targetType Facility, targetFacilityId must equal that id. Any other facility target is invalid.");
-            builder.AppendLine($"Required target fields for this event: \"targetType\":\"Facility\", \"targetFacilityId\":{explicitFacility.id}, \"targetCharacterId\":-1, \"targetCharacterName\":\"\".");
+            builder.AppendLine($"Required target fields for this event: \"targetType\":\"Facility\", \"targetFacilityId\":{explicitFacility.id}, \"targetCharacterId\":\"\", \"targetCharacterName\":\"\".");
             if (hasExplicitSentiment)
             {
                 builder.AppendLine($"Reported experience sentiment is {explicitSentiment:0.00}; output sentiment must keep the same sign.");
@@ -524,7 +604,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         builder.AppendLine($"message: {entry.OriginalMessage}");
         builder.AppendLine("candidateFacilities:");
         AppendCandidateFacilities(builder, speaker, explicitFacility);
-        builder.AppendLine("Example: {\"rumorType\":\"Recommendation\",\"targetType\":\"Facility\",\"targetFacilityId\":12,\"targetFacilityTag\":\"Rest\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":0.6,\"summary\":\"rest facility visit was good\",\"spreadChance\":0.55,\"trustImpact\":0.05,\"validSeconds\":600}");
+        builder.AppendLine("Example: {\"rumorType\":\"Recommendation\",\"targetType\":\"Facility\",\"targetFacilityId\":12,\"targetFacilityTag\":\"Rest\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":0.6,\"summary\":\"rest facility visit was good\",\"spreadChance\":0.55,\"trustImpact\":0.05,\"validSeconds\":600}");
 
         string prompt = builder.ToString();
         return prompt.Length > maxPromptCharacters
@@ -550,7 +630,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         builder.AppendLine("targetType must be Facility.");
         builder.AppendLine($"targetFacilityId must be {facility.id}.");
         builder.AppendLine($"targetFacilityTag must be \"{facilityTag}\".");
-        builder.AppendLine("targetCharacterId must be -1 and targetCharacterName must be \"\".");
+        builder.AppendLine("targetCharacterId and targetCharacterName must both be empty strings.");
         builder.AppendLine(sentiment >= 0f
             ? "sentiment must be a positive number between 0.35 and 1."
             : "sentiment must be a negative number between -1 and -0.35.");
@@ -559,7 +639,7 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         builder.AppendLine("validSeconds must be 600.");
         builder.AppendLine("Required JSON shape:");
         builder.AppendLine(
-            $"{{\"rumorType\":\"{rumorTypeHint}\",\"targetType\":\"Facility\",\"targetFacilityId\":{facility.id},\"targetFacilityTag\":\"{facilityTag}\",\"targetCharacterId\":-1,\"targetCharacterName\":\"\",\"sentiment\":{(sentiment >= 0f ? "0.75" : "-0.75")},\"summary\":\"short text\",\"spreadChance\":1.0,\"trustImpact\":0.1,\"validSeconds\":600}}");
+            $"{{\"rumorType\":\"{rumorTypeHint}\",\"targetType\":\"Facility\",\"targetFacilityId\":{facility.id},\"targetFacilityTag\":\"{facilityTag}\",\"targetCharacterId\":\"\",\"targetCharacterName\":\"\",\"sentiment\":{(sentiment >= 0f ? "0.75" : "-0.75")},\"summary\":\"short text\",\"spreadChance\":1.0,\"trustImpact\":0.1,\"validSeconds\":600}}");
         builder.AppendLine("Speaker:");
         builder.AppendLine($"name: {SocialRumorUtility.GetActorLabel(speaker)}");
         builder.AppendLine($"species: {(speaker != null ? speaker.SpeciesTag : string.Empty)}");
@@ -632,8 +712,8 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
 
     private BuildableObject ResolveFacilityFromLog(CharacterLogEntry entry)
     {
-        string value = $"{entry.Tag} {entry.OriginalMessage}";
-        if (!TryExtractFacilityId(value, out int facilityId))
+        int facilityId = entry.Activity != null ? entry.Activity.FacilityId : -1;
+        if (facilityId < 0)
         {
             return null;
         }
@@ -661,73 +741,17 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
 
     private static float InferSocialEventSentiment(CharacterLogEntry entry)
     {
-        string value = $"{entry.Tag} {entry.OriginalMessage}";
-        if (ContainsAny(
-                value,
-                "NoPath",
-                "NoDestination",
-                "DestinationOccupied",
-                "blocked",
-                "failure",
-                "failed",
-                "anger",
-                "stock",
-                "money",
-                "damage",
-                "cooldown",
-                "불만",
-                "재고",
-                "경로",
-                "분노"))
-        {
-            return -0.7f;
-        }
-
-        if (ContainsAny(value, "recommend", "praise", "satisfied", "추천", "만족"))
-        {
-            return 0.7f;
-        }
-
-        return 0f;
+        return entry.Activity != null ? entry.Activity.Sentiment : 0f;
     }
 
     private static bool ShouldInterpretSocialEvent(CharacterLogEntry entry)
     {
-        string value = $"{entry.Tag} {entry.OriginalMessage}";
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return ContainsAny(
-            value,
-            "AI failure",
-            "NoPath",
-            "NoDestination",
-            "DestinationOccupied",
-            "macro",
-            "complain",
-            "vandal",
-            "exit",
-            "blocked",
-            "stock",
-            "money",
-            "path",
-            "damage",
-            "cooldown",
-            "failure",
-            "anger",
-            "recommend",
-            "rumor",
-            "reputation",
-            "불만",
-            "추천",
-            "소문",
-            "평판",
-            "재고",
-            "경로",
-            "분노",
-            "만족");
+        CharacterActivityEvent activity = entry.Activity;
+        return activity != null
+            && activity.VisibleToPlayer
+            && (Mathf.Abs(activity.Sentiment) > 0.01f
+                || string.Equals(activity.KindId, CharacterActivityKinds.Social, StringComparison.Ordinal)
+                || string.Equals(activity.KindId, CharacterActivityKinds.Combat, StringComparison.Ordinal));
     }
 
     private int SpreadRumor(SocialRumor rumor, CharacterActor speaker)
@@ -860,9 +884,9 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
             return;
         }
 
-        if (rumor.sourceActorId < 0 && speaker.Identity != null)
+        if (string.IsNullOrWhiteSpace(rumor.sourceActorId) && speaker.Identity != null)
         {
-            rumor.sourceActorId = speaker.Identity.StableId;
+            rumor.sourceActorId = speaker.Identity.PersistentId;
         }
 
         if (string.IsNullOrWhiteSpace(rumor.sourceActorName))
@@ -986,16 +1010,4 @@ public sealed class SocialReputationRuntime : SerializedMonoBehaviour
         }
     }
 
-    private static bool ContainsAny(string value, params string[] patterns)
-    {
-        foreach (string pattern in patterns)
-        {
-            if (value.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

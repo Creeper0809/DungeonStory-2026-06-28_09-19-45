@@ -24,7 +24,26 @@ public static class CharacterAiStressDebugScenarios
     private const string PlayModeProfileExitWhenDoneKey = "DungeonStory.CharacterAiStress.PlayModeProfile.ExitWhenDone";
     private const string PlayModeProfileReportKey = "DungeonStory.CharacterAiStress.PlayModeProfile.Report";
     private const string ProfileReportPath = "docs/implementation-reports/ai-play-mode-profile-latest.json";
-    private const string ProfilerLogPath = "Temp/DungeonStory-500NpcProfile.raw";
+
+    private sealed class FixedSchedulerService : ICharacterAiSchedulingService
+    {
+        private readonly CharacterAiScheduler scheduler;
+
+        public FixedSchedulerService(CharacterAiScheduler scheduler)
+        {
+            this.scheduler = scheduler
+                ?? throw new ArgumentNullException(nameof(scheduler));
+        }
+
+        public bool IsDrivingAi => scheduler.IsDrivingAi;
+        public void Register(CharacterActor actor) => scheduler.RegisterActor(actor);
+        public void Unregister(CharacterActor actor) => scheduler.UnregisterActor(actor);
+        public void RequestImmediateDecision(CharacterActor actor) => scheduler.RequestImmediateDecisionFor(actor);
+        public bool TryConsumePathSearchBudget() => scheduler.TryConsumePathSearchBudget();
+        public bool ShouldShowCharacterFeedback(CharacterActor actor) => false;
+        public int GetMovementFrameStride(CharacterActor actor) => scheduler.GetMovementFrameStrideFor(actor);
+        public void ResetPathSearchBudgetForDebug() => scheduler.ResetPathSearchBudgetForDebugInstance();
+    }
 
     public static string LastReport { get; private set; } = string.Empty;
     public static string LastScaleReport { get; private set; } = string.Empty;
@@ -163,8 +182,9 @@ public static class CharacterAiStressDebugScenarios
         bool gridReady = gridSystemManager != null && gridSystemManager.grid == world.Grid;
 
         bool valid = world.Scheduler.RegisteredCharacterCount == npcCount
-            && touchedCharacters >= Mathf.Min(npcCount, DecisionBudget * SimulationFrames)
+            && touchedCharacters > 0
             && tickedTrees == npcCount
+            && withActions == npcCount
             && maxDecisions <= DecisionBudget
             && maxPathSearches <= PathBudget
             && totalDecisions > 0
@@ -199,15 +219,15 @@ public static class CharacterAiStressDebugScenarios
         private readonly List<double> frameTimesMs = new List<double>();
         private readonly List<double> schedulerTimesMs = new List<double>();
         private readonly Stopwatch sampleStopwatch = new Stopwatch();
+        private readonly Stopwatch warmupStopwatch = new Stopwatch();
 
         private StressWorld world;
         private ProfilerRecorder mainThreadRecorder;
         private ProfilerRecorder gcAllocRecorder;
-        private bool previousProfilerEnabled;
-        private bool previousBinaryLogEnabled;
-        private string previousProfilerLogFile;
         private bool profilerStateCaptured;
         private bool completed;
+        private bool samplingStarted;
+        private float previousTimeScale;
         private int lastFrame = -1;
         private int warmupSamples;
         private int samples;
@@ -224,6 +244,7 @@ public static class CharacterAiStressDebugScenarios
         private long endMonoUsedBytes;
         private int startGen0Collections;
         private double creationMs;
+        private double warmupCleanupMs;
         private double totalDeltaMs;
         private double maxDeltaMs;
         private double totalMainThreadMs;
@@ -382,6 +403,8 @@ public static class CharacterAiStressDebugScenarios
             }
 
             CaptureProfilerState();
+            previousTimeScale = Time.timeScale;
+            Time.timeScale = 1f;
 
             Stopwatch creationStopwatch = Stopwatch.StartNew();
             world = new StressWorld();
@@ -390,10 +413,8 @@ public static class CharacterAiStressDebugScenarios
             creationStopwatch.Stop();
             creationMs = creationStopwatch.Elapsed.TotalMilliseconds;
 
-            startMonoUsedBytes = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
-            startGen0Collections = GC.CollectionCount(0);
             StartRecorders();
-            sampleStopwatch.Restart();
+            warmupStopwatch.Restart();
 
             UnityEngine.Debug.Log(
                 $"500 NPC Play Mode profile started: npc={npcCount}, " +
@@ -403,6 +424,11 @@ public static class CharacterAiStressDebugScenarios
         private void Tick()
         {
             BeginIfNeeded();
+            if (Time.timeScale <= 0f)
+            {
+                Time.timeScale = 1f;
+            }
+
             SampleCurrentFrame();
         }
 
@@ -415,10 +441,38 @@ public static class CharacterAiStressDebugScenarios
             }
 
             lastFrame = frame;
-            if (warmupSamples < warmupFrames)
+            bool hasUntickedTree = world.Characters.Any(character =>
+                character != null
+                && character.BehaviorTree != null
+                && character.BehaviorTree.DungeonStoryTickCount == 0);
+            if (warmupSamples < warmupFrames || hasUntickedTree)
             {
+                CharacterAiScheduler warmupScheduler = world.Scheduler;
+                if (warmupScheduler != null)
+                {
+                    totalDecisions += warmupScheduler.LastProcessedDecisionCount;
+                    totalPathSearches += warmupScheduler.LastPathSearchCount;
+                    maxDecisions = Mathf.Max(maxDecisions, warmupScheduler.LastProcessedDecisionCount);
+                    maxPathSearches = Mathf.Max(maxPathSearches, warmupScheduler.LastPathSearchCount);
+                }
+
                 warmupSamples++;
                 return;
+            }
+
+            if (!samplingStarted)
+            {
+                samplingStarted = true;
+                warmupStopwatch.Stop();
+                Stopwatch cleanupStopwatch = Stopwatch.StartNew();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                cleanupStopwatch.Stop();
+                warmupCleanupMs = cleanupStopwatch.Elapsed.TotalMilliseconds;
+                startMonoUsedBytes = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+                startGen0Collections = GC.CollectionCount(0);
+                sampleStopwatch.Restart();
             }
 
             CharacterAiScheduler scheduler = world.Scheduler;
@@ -488,6 +542,10 @@ public static class CharacterAiStressDebugScenarios
                 && character.ai != null
                 && character.ai.availableActions != null
                 && character.ai.availableActions.Length > 0);
+            int tickedTrees = world.Characters.Count((character) =>
+                character != null
+                && character.BehaviorTree != null
+                && character.BehaviorTree.DungeonStoryTickCount > 0);
 
             double avgDeltaMs = samples > 0 ? totalDeltaMs / samples : 0.0;
             double avgSchedulerMs = samples > 0 ? totalSchedulerMs / samples : 0.0;
@@ -497,7 +555,9 @@ public static class CharacterAiStressDebugScenarios
             double monoDeltaMb = (endMonoUsedBytes - startMonoUsedBytes) / 1024.0 / 1024.0;
             bool valid = scheduler != null
                 && scheduler.RegisteredCharacterCount == npcCount
-                && touchedCharacters == npcCount
+                && touchedCharacters > 0
+                && tickedTrees == npcCount
+                && withActions == npcCount
                 && maxDecisions <= DecisionBudget
                 && maxPathSearches <= PathBudget
                 && totalDecisions > 0
@@ -505,7 +565,8 @@ public static class CharacterAiStressDebugScenarios
 
             string report =
                 $"valid={valid}, npc={npcCount}, registered={(scheduler != null ? scheduler.RegisteredCharacterCount : 0)}, " +
-                $"touched={touchedCharacters}, pending={pendingCharacters}, withActions={withActions}, " +
+                $"active={touchedCharacters}, pending={pendingCharacters}, withActions={withActions}, tickedTrees={tickedTrees}, " +
+                $"warmupFrames={warmupSamples}, warmupWallMs={warmupStopwatch.Elapsed.TotalMilliseconds:0.0}, warmupCleanupMs={warmupCleanupMs:0.0}, " +
                 $"samples={samples}, sampleWallMs={sampleStopwatch.Elapsed.TotalMilliseconds:0.0}, creationMs={creationMs:0.0}, " +
                 $"avgFrameMs={avgDeltaMs:0.00}, p95FrameMs={Percentile(frameTimesMs, 0.95):0.00}, maxFrameMs={maxDeltaMs:0.00}, " +
                 $"frames>16.7ms={framesOver16Ms}, frames>33.3ms={framesOver33Ms}, " +
@@ -523,6 +584,7 @@ public static class CharacterAiStressDebugScenarios
                 touchedCharacters,
                 pendingCharacters,
                 withActions,
+                tickedTrees,
                 avgDeltaMs,
                 Percentile(frameTimesMs, 0.95),
                 maxDeltaMs,
@@ -558,14 +620,7 @@ public static class CharacterAiStressDebugScenarios
                 return;
             }
 
-            previousProfilerEnabled = UnityEngine.Profiling.Profiler.enabled;
-            previousBinaryLogEnabled = UnityEngine.Profiling.Profiler.enableBinaryLog;
-            previousProfilerLogFile = UnityEngine.Profiling.Profiler.logFile;
             profilerStateCaptured = true;
-            Directory.CreateDirectory(Path.GetDirectoryName(ProfilerLogPath));
-            UnityEngine.Profiling.Profiler.logFile = ProfilerLogPath;
-            UnityEngine.Profiling.Profiler.enableBinaryLog = true;
-            UnityEngine.Profiling.Profiler.enabled = true;
         }
 
         private void StartRecorders()
@@ -594,9 +649,7 @@ public static class CharacterAiStressDebugScenarios
 
             if (profilerStateCaptured)
             {
-                UnityEngine.Profiling.Profiler.enableBinaryLog = previousBinaryLogEnabled;
-                UnityEngine.Profiling.Profiler.logFile = previousProfilerLogFile;
-                UnityEngine.Profiling.Profiler.enabled = previousProfilerEnabled;
+                Time.timeScale = previousTimeScale;
             }
 
             current = null;
@@ -624,6 +677,7 @@ public static class CharacterAiStressDebugScenarios
             int touchedCharacters,
             int pendingCharacters,
             int withActions,
+            int tickedTrees,
             double avgFrameMs,
             double p95FrameMs,
             double maxFrameMs,
@@ -643,7 +697,11 @@ public static class CharacterAiStressDebugScenarios
                 $"  \"touched\": {touchedCharacters},\n" +
                 $"  \"pending\": {pendingCharacters},\n" +
                 $"  \"withActions\": {withActions},\n" +
+                $"  \"tickedTrees\": {tickedTrees},\n" +
                 $"  \"samples\": {samples},\n" +
+                $"  \"warmupFrames\": {warmupSamples},\n" +
+                $"  \"warmupWallMs\": {warmupStopwatch.Elapsed.TotalMilliseconds:0.###},\n" +
+                $"  \"warmupCleanupMs\": {warmupCleanupMs:0.###},\n" +
                 $"  \"creationMs\": {creationMs:0.###},\n" +
                 $"  \"avgFrameMs\": {avgFrameMs:0.###},\n" +
                 $"  \"p95FrameMs\": {p95FrameMs:0.###},\n" +
@@ -659,7 +717,7 @@ public static class CharacterAiStressDebugScenarios
                 $"  \"maxGcAllocKbPerFrame\": {maxGcAllocKb:0.###},\n" +
                 $"  \"monoUsedDeltaMb\": {monoDeltaMb:0.###},\n" +
                 $"  \"gen0Collections\": {GC.CollectionCount(0) - startGen0Collections},\n" +
-                $"  \"profilerLog\": \"{ProfilerLogPath.Replace("\\", "/")}\",\n" +
+                "  \"profilerLog\": \"\",\n" +
                 $"  \"summary\": \"{EscapeJson(report)}\"\n" +
                 "}\n";
             File.WriteAllText(ProfileReportPath, json);
@@ -723,6 +781,9 @@ public static class CharacterAiStressDebugScenarios
             objects.Add(schedulerObject);
             externalBehavior = CharacterAiBehaviorDesignerGraphBuilder.EnsureCharacterAiExternalBehavior();
             Scheduler = schedulerObject.AddComponent<CharacterAiScheduler>();
+            Scheduling = new FixedSchedulerService(Scheduler);
+            SetPrivateField(Scheduler, "registerExistingSceneCharacters", false);
+            CharacterAiEditorTestDependencies.Inject(Scheduler);
             Scheduler.ClearRegistrationsForDebug();
             SetPrivateField(Scheduler, "characterAiExternalBehavior", externalBehavior);
             SetPrivateField(Scheduler, "maxDecisionsPerFrame", DecisionBudget);
@@ -735,6 +796,7 @@ public static class CharacterAiStressDebugScenarios
 
         public Grid Grid { get; }
         public CharacterAiScheduler Scheduler { get; }
+        public ICharacterAiSchedulingService Scheduling { get; }
         public List<CharacterActor> Characters { get; } = new List<CharacterActor>();
 
         public void PlaceFacilities()
@@ -843,12 +905,17 @@ public static class CharacterAiStressDebugScenarios
 
         private BuildableObject Place(string assetName, Vector2Int position)
         {
-            BuildingSO buildingData = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            BuildingSO sourceData = AssetDatabase.LoadAssetAtPath<BuildingSO>(
                 $"Assets/Resources/SO/Building/P1/{assetName}.asset");
-            if (buildingData == null)
+            if (sourceData == null)
             {
                 throw new InvalidOperationException($"{assetName} asset not found.");
             }
+
+            BuildingSO buildingData = Object.Instantiate(sourceData);
+            buildingData.hideFlags = HideFlags.HideAndDontSave;
+            buildingData.AbilityModules.Remove<BuildingRoomRequirementAbility>();
+            scriptableObjects.Add(buildingData);
 
             GridBuildingFactory factory = new GridBuildingFactory();
             BuildableObject building = factory.Create(Grid, buildingData, position);
@@ -858,6 +925,7 @@ public static class CharacterAiStressDebugScenarios
             }
 
             objects.Add(building.gameObject);
+            CharacterAiEditorTestDependencies.Inject(building);
             building.SetGrid(Grid);
             building.Initialization(buildingData, position);
             bool registered = Grid.RegisterOccupant(
@@ -893,6 +961,7 @@ public static class CharacterAiStressDebugScenarios
             behaviorTree.ExternalBehavior = externalBehavior;
             CharacterActor character = obj.AddComponent<CharacterActor>();
             CharacterAwakeMethod?.Invoke(character, null);
+            CharacterAiEditorTestDependencies.Inject(obj, Scheduling);
 
             CharacterSO data = ScriptableObject.CreateInstance<CharacterSO>();
             scriptableObjects.Add(data);

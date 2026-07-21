@@ -5,6 +5,12 @@ using UnityEngine;
 
 public static class OffenseExpeditionService
 {
+    public static IReadOnlyList<CharacterActor> GetDistinctMembers(
+        IEnumerable<CharacterActor> actors)
+    {
+        return CharacterActorCollection.DistinctByGameObject(actors);
+    }
+
     public static bool CanJoinExpedition(CharacterActor actor, out string reason)
     {
         if (actor == null)
@@ -43,6 +49,11 @@ public static class OffenseExpeditionService
             return false;
         }
 
+        if (!lifecycle.CanStartExpedition(out reason))
+        {
+            return false;
+        }
+
         if (identity == null || identity.CharacterType != CharacterType.NPC)
         {
             reason = "직원이나 방어 몬스터만 원정에 보낼 수 있습니다";
@@ -74,7 +85,7 @@ public static class OffenseExpeditionService
             + stats.GetCharacterStat(CharacterStatType.Toughness) * 0.6f
             + stats.GetCharacterStat(CharacterStatType.Endurance) * 0.4f
             + stats.GetCharacterStat(CharacterStatType.MoveSpeed) * 0.25f;
-        return Mathf.Max(0f, basePower * stats.GetCombatPowerMultiplier());
+        return Mathf.Max(0f, basePower * actor.GetCombatPowerMultiplier());
     }
 
     public static float CalculatePartyPower(IEnumerable<CharacterActor> members)
@@ -82,87 +93,4 @@ public static class OffenseExpeditionService
         return members?.Where((member) => member != null).Sum(CalculateMemberPower) ?? 0f;
     }
 
-    public static bool ShouldSucceed(OffenseExpeditionRun expedition)
-    {
-        if (expedition == null || expedition.Target == null)
-        {
-            return false;
-        }
-
-        float requiredPower = Mathf.Max(1f, expedition.Target.requiredPower);
-        return expedition.TotalPower >= requiredPower;
-    }
-
-    public static OffenseExpeditionResult Resolve(
-        OffenseExpeditionRun expedition,
-        bool? forceSuccess = null)
-    {
-        if (expedition == null || expedition.Target == null)
-        {
-            return null;
-        }
-
-        bool success = forceSuccess ?? ShouldSucceed(expedition);
-        float requiredPower = Mathf.Max(1f, expedition.Target.requiredPower);
-        float powerRatio = expedition.TotalPower / requiredPower;
-        float danger = Mathf.Max(0f, expedition.Target.danger);
-        int memberCount = Mathf.Max(1, expedition.MemberActors.Count);
-        float damageMultiplier = success ? 0.16f : Mathf.Lerp(0.75f, 1.35f, Mathf.Clamp01(1f - powerRatio));
-        float damagePerMember = danger * damageMultiplier / memberCount;
-        List<OffenseExpeditionMemberSnapshot> memberSnapshots = new List<OffenseExpeditionMemberSnapshot>();
-
-        foreach (CharacterActor member in expedition.MemberActors)
-        {
-            if (member == null)
-            {
-                continue;
-            }
-
-            float memberPower = CalculateMemberPower(member);
-            member.EndExpedition(alive: true);
-            CharacterStats stats = member.Stats;
-            stats?.ChangesStat(CharacterCondition.SLEEP, success ? -12f : -24f);
-            stats?.ApplyMoodFactor(
-                success ? "expedition:tension" : "expedition:failure",
-                success ? "원정의 긴장" : "원정 실패",
-                success ? -4f : -12f,
-                240f,
-                1);
-            if (damagePerMember > 0f)
-            {
-                stats?.ApplyDamage(damagePerMember, "원정 피해");
-            }
-
-            CharacterIdentity identity = member.Identity;
-            memberSnapshots.Add(new OffenseExpeditionMemberSnapshot
-            {
-                name = identity != null ? identity.DisplayName : member.name,
-                speciesTag = identity != null ? identity.SpeciesTag : string.Empty,
-                power = memberPower,
-                survived = stats == null || !stats.IsDead,
-                damageTaken = damagePerMember
-            });
-        }
-
-        string[] rewards = success
-            ? expedition.Target.rewards?
-                .Where((reward) => reward != null)
-                .Select((reward) => reward.ToSummaryText())
-                .ToArray() ?? Array.Empty<string>()
-            : Array.Empty<string>();
-
-        return new OffenseExpeditionResult
-        {
-            expeditionId = expedition.ExpeditionId,
-            targetId = expedition.Target.id,
-            targetTitle = expedition.Target.title,
-            success = success,
-            totalPower = expedition.TotalPower,
-            requiredPower = requiredPower,
-            danger = danger,
-            elapsedSeconds = expedition.TotalDurationSeconds,
-            members = memberSnapshots.ToArray(),
-            rewardSummaries = rewards
-        };
-    }
 }

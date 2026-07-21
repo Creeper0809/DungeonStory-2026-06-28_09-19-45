@@ -43,12 +43,12 @@ public static class AiDirectorContextAggregator
         AiDirectorContextSceneSnapshot snapshot,
         int maxTargetEvents = 5)
     {
-        CharacterActor[] actors = snapshot.Actors ?? Array.Empty<CharacterActor>();
-        BuildableObject[] facilities = snapshot.Facilities ?? Array.Empty<BuildableObject>();
+        IReadOnlyList<CharacterActor> actors = snapshot.Actors ?? Array.Empty<CharacterActor>();
+        IReadOnlyList<BuildableObject> facilities = snapshot.Facilities ?? Array.Empty<BuildableObject>();
 
         return new AiDirectorContextSummary
         {
-            characterCount = actors.Length,
+            characterCount = actors.Count,
             averageMood = AverageCondition(actors, CharacterCondition.MOOD),
             averageSleep = AverageCondition(actors, CharacterCondition.SLEEP),
             stockShortageFacilityCount = CountStockShortages(facilities),
@@ -58,9 +58,11 @@ public static class AiDirectorContextAggregator
         };
     }
 
-    private static float AverageCondition(CharacterActor[] actors, CharacterCondition condition)
+    private static float AverageCondition(
+        IReadOnlyList<CharacterActor> actors,
+        CharacterCondition condition)
     {
-        if (actors == null || actors.Length == 0)
+        if (actors == null || actors.Count == 0)
         {
             return 0f;
         }
@@ -84,14 +86,14 @@ public static class AiDirectorContextAggregator
         return count > 0 ? total / count : 0f;
     }
 
-    private static int CountStockShortages(BuildableObject[] facilities)
+    private static int CountStockShortages(IReadOnlyList<BuildableObject> facilities)
     {
         int count = 0;
         foreach (BuildableObject facility in facilities ?? Array.Empty<BuildableObject>())
         {
             if (facility == null
                 || facility.Facility == null
-                || !facility.Facility.requiresStock
+                || !facility.BuildingData.RequiresStockForUse()
                 || facility is not IStockedFacility stockedFacility)
             {
                 continue;
@@ -106,7 +108,9 @@ public static class AiDirectorContextAggregator
         return count;
     }
 
-    private static string[] GetTopQueuedFacilities(BuildableObject[] facilities, int limit)
+    private static string[] GetTopQueuedFacilities(
+        IReadOnlyList<BuildableObject> facilities,
+        int limit)
     {
         return (facilities ?? Array.Empty<BuildableObject>())
             .Where((facility) => facility != null && facility.ActiveVisitReservationCount > 0)
@@ -117,7 +121,9 @@ public static class AiDirectorContextAggregator
             .ToArray();
     }
 
-    private static string[] GetRepeatedFailureReasons(CharacterActor[] actors, int limit)
+    private static string[] GetRepeatedFailureReasons(
+        IReadOnlyList<CharacterActor> actors,
+        int limit)
     {
         Dictionary<string, int> counts = new Dictionary<string, int>();
         foreach (CharacterActor actor in actors ?? Array.Empty<CharacterActor>())

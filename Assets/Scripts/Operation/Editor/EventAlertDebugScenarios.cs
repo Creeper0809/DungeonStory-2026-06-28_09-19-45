@@ -23,6 +23,8 @@ public static class EventAlertDebugScenarios
         RunScenario("선택 이벤트", VerifyChoiceEvent, errors);
         RunScenario("운영일 정산 이벤트 로그", VerifySettlementKeepsEventLog, errors);
 
+        RunScenario("logged event keeps an immutable count snapshot", VerifyLoggedEventSnapshotDoesNotDrift, errors);
+
         if (errors.Count > 0)
         {
             foreach (string error in errors)
@@ -121,6 +123,7 @@ public static class EventAlertDebugScenarios
     {
         GameObject settlementObject = new GameObject("Settlement_EventLog_Test");
         OperatingDaySettlementRuntime settlement = settlementObject.AddComponent<OperatingDaySettlementRuntime>();
+        CharacterAiEditorTestDependencies.Inject(settlement);
         EventAlertRecord record = new EventAlertRecord(
             1,
             new EventAlertRequest("설계도 획득", "독 웅덩이", EventAlertImportance.Medium, "설계도"));
@@ -138,10 +141,46 @@ public static class EventAlertDebugScenarios
         return valid;
     }
 
+    private static bool VerifyLoggedEventSnapshotDoesNotDrift()
+    {
+        EventAlertRecord record = new EventAlertRecord(
+            9,
+            new EventAlertRequest("Snapshot", "Immutable", EventAlertImportance.Low));
+        EventAlertLoggedEvent logged = new EventAlertLoggedEvent(record);
+        record.Increment();
+
+        return logged.record != null
+            && logged.record.Count == 1
+            && logged.record.ButtonText == "Snapshot"
+            && record.Count == 2;
+    }
+
     private static EventAlertRuntime CreateRuntime(out GameObject root)
     {
         root = new GameObject("EventAlertRuntime_Test");
-        return root.AddComponent<EventAlertRuntime>();
+        EventAlertRuntime runtime = root.AddComponent<EventAlertRuntime>();
+        runtime.Construct(new TestEventAlertViewPresenterFactory());
+        return runtime;
+    }
+
+    private sealed class TestEventAlertViewPresenterFactory : IEventAlertViewPresenterFactory
+    {
+        public IEventAlertViewPresenter Create(EventAlertViewPresenterContext context)
+        {
+            return new TestEventAlertViewPresenter();
+        }
+    }
+
+    private sealed class TestEventAlertViewPresenter : IEventAlertViewPresenter
+    {
+        public bool IsDetailVisible { get; private set; }
+
+        public void EnsureRuntimeUI() { }
+        public void DestroyRuntimeUI() { }
+        public void CreateButton(EventAlertRecord record) { }
+        public void UpdateButton(EventAlertRecord record) { }
+        public void OpenDetail(EventAlertRecord record) => IsDetailVisible = record != null;
+        public void CloseDetail() => IsDetailVisible = false;
     }
 
     private static void CleanupRuntimeUi()

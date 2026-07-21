@@ -70,16 +70,64 @@ public sealed class BuildingSummaryFormatter : IBuildingSummaryFormatter
             lines.Add(stock);
         }
 
+        string crafting = FormatEquipmentCraftingText(building);
+        if (!string.IsNullOrWhiteSpace(crafting))
+        {
+            lines.Add(crafting);
+        }
+
         return lines;
+    }
+
+    private static string FormatEquipmentCraftingText(BuildableObject building)
+    {
+        BuildingEquipmentCraftingAbility crafting = building?.BuildingData
+            ?.GetAbility<BuildingEquipmentCraftingAbility>();
+        if (crafting == null)
+        {
+            return string.Empty;
+        }
+
+        if (!building.TryGetExpeditionEquipmentRuntime(out IExpeditionEquipmentRuntime runtime))
+        {
+            return "제작  장비 런타임 없음";
+        }
+
+        HashSet<string> craftableIds = new HashSet<string>(
+            crafting.CraftableEquipmentIds
+                .Where(id => !string.IsNullOrWhiteSpace(id)),
+            StringComparer.Ordinal);
+        string queue = string.Join(", ", runtime.CraftQueue
+            .Where(order => order != null
+                && craftableIds.Contains(order.equipmentId))
+            .Select(order =>
+            {
+                string name = runtime.TryGetDefinition(order.equipmentId, out ExpeditionEquipmentDefinition definition)
+                    ? definition.displayName
+                    : order.equipmentId;
+                string materialState = order.materialsReady ? string.Empty : " / 재료 이동 중";
+                return $"{name} {order.remainingSeconds:0.#}s{materialState}";
+            }));
+        string craftable = string.Join(", ", runtime.Definitions
+            .Where(definition => definition != null
+                && craftableIds.Contains(definition.id))
+            .Select(definition => definition.displayName));
+        return string.IsNullOrWhiteSpace(queue)
+            ? $"제작 가능  {craftable}  ·  대기 없음"
+            : $"제작 대기  {queue}";
     }
 
     private static string FormatStockText(BuildableObject building)
     {
-        if (building is Shop shop)
+        if (building is IRestockableFacility restockable)
         {
-            return shop.NeedsRestock
-                ? $"재고  {shop.GetStockCount()}/{shop.MaxInternalStock}  ·  보충 필요"
-                : $"재고  {shop.GetStockCount()}/{shop.MaxInternalStock}";
+            int maximum = building.GetInternalStockCapacity();
+            string amount = maximum > 0
+                ? $"{restockable.CurrentStock}/{maximum}"
+                : restockable.CurrentStock.ToString();
+            return restockable.NeedsRestock
+                ? $"재고  {amount}  ·  보충 필요"
+                : $"재고  {amount}";
         }
 
         if (building is IWarehouseFacility warehouse && warehouse.HasWarehouseInventory)
@@ -91,7 +139,7 @@ public sealed class BuildingSummaryFormatter : IBuildingSummaryFormatter
 
         if (building is IStockedFacility stocked)
         {
-            int maximum = building.Facility != null ? building.Facility.internalStockMax : 0;
+            int maximum = building.GetInternalStockCapacity();
             return maximum > 0 ? $"재고  {stocked.CurrentStock}/{maximum}" : $"재고  {stocked.CurrentStock}";
         }
 
@@ -100,69 +148,24 @@ public sealed class BuildingSummaryFormatter : IBuildingSummaryFormatter
 
     private static string FormatCategory(BuildingCategory category)
     {
-        return category switch
-        {
-            BuildingCategory.Wall => "벽/문",
-            BuildingCategory.Shop => "상점",
-            BuildingCategory.Special => "특수",
-            BuildingCategory.Movement => "이동",
-            BuildingCategory.Production => "생산",
-            BuildingCategory.Crafting => "제작",
-            BuildingCategory.Resource => "자원",
-            _ => "시설"
-        };
+        return BuildingCategoryCatalog.GetDisplayName(category);
     }
 
     private static string FormatRoles(FacilityRole roles)
     {
         if (roles == FacilityRole.None) return "없음";
 
-        return string.Join(", ", EnumerateFlags(roles).Select(role => role switch
-        {
-            FacilityRole.Meal => "식사",
-            FacilityRole.Purchase => "구매",
-            FacilityRole.Rest => "휴식",
-            FacilityRole.Training => "훈련",
-            FacilityRole.Research => "연구",
-            FacilityRole.Mana => "마력",
-            FacilityRole.Logistics => "물류",
-            FacilityRole.Toilet => "배변",
-            FacilityRole.Hygiene => "위생",
-            _ => role.ToString()
-        }));
+        return string.Join(", ", FacilityRoleCatalog
+            .Enumerate(roles)
+            .Select((definition) => definition.RoomLabel));
     }
 
     private static string FormatWorkTypes(FacilityWorkType workTypes)
     {
         if (workTypes == FacilityWorkType.None) return "없음";
 
-        return string.Join(", ", EnumerateFlags(workTypes).Select(workType => workType switch
-        {
-            FacilityWorkType.Operate => "운영",
-            FacilityWorkType.Restock => "보충",
-            FacilityWorkType.Repair => "수리",
-            FacilityWorkType.Clean => "청소",
-            FacilityWorkType.Research => "연구",
-            FacilityWorkType.Guard => "경비",
-            FacilityWorkType.Rescue => "구조",
-            FacilityWorkType.Rest => "휴식",
-            _ => workType.ToString()
-        }));
-    }
-
-    private static IEnumerable<FacilityRole> EnumerateFlags(FacilityRole flags)
-    {
-        foreach (FacilityRole value in Enum.GetValues(typeof(FacilityRole)))
-        {
-            if (value != FacilityRole.None && flags.HasFlag(value)) yield return value;
-        }
-    }
-
-    private static IEnumerable<FacilityWorkType> EnumerateFlags(FacilityWorkType flags)
-    {
-        foreach (FacilityWorkType value in Enum.GetValues(typeof(FacilityWorkType)))
-        {
-            if (value != FacilityWorkType.None && flags.HasFlag(value)) yield return value;
-        }
+        return string.Join(", ", WorkTypeCatalog
+            .Enumerate(workTypes)
+            .Select((definition) => definition.DisplayName));
     }
 }

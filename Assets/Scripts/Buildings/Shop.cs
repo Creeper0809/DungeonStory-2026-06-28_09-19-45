@@ -5,36 +5,26 @@ using System.Linq;
 using UnityEngine;
 using VContainer;
 
-public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableFacility
+public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRetailStockStateOwner, IWorkableFacility
 {
     private const float CheckoutWaitPollSeconds = 0.2f;
     private const float SelfServiceCheckoutSeconds = 0.8f;
     private const float StaffedCheckoutSeconds = 0.35f;
     private const float WaitingCheckoutOperateUrgency = 160f;
     private const float WaitingCheckoutOperateUrgencyPerCustomer = 40f;
-    private static readonly IGameDataProvider FallbackGameDataProvider = new ShopFallbackGameDataProvider();
-    private static readonly IShopStockCatalog FallbackStockCatalog = new ShopResourcesStockCatalog();
     private static readonly IFloatingNumberFeedbackService FallbackFloatingNumberFeedbackService =
         new ShopNoopFloatingNumberFeedbackService();
-    private static readonly IWorkforceReplanService FallbackWorkforceReplanService =
-        new ShopNoopWorkforceReplanService();
 
-    public enum Type
-    {
-        X,
-        Food,
-        Item
-    }
     private List<RemainStock> stocks = new List<RemainStock>();
     private CharacterActor worker;
     private int waitingCheckoutCount;
-    public Type type { get; private set; }
     private StockInfo baseStock;
     private GameData gameData;
     private IGameDataProvider gameDataProvider;
     private IShopStockCatalog stockCatalog;
     private IFloatingNumberFeedbackService floatingNumberFeedbackService;
     private IWorkforceReplanService workforceReplanService;
+    private IFacilityCrimeRiskEvaluator crimeRiskEvaluator;
     private bool stockInitialized;
     public int CurrentStock => GetStockCount();
     public bool HasAvailableStock => CurrentStock > 0;
@@ -51,12 +41,13 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
     public StockCategory ActiveStockCategory => ResolveActiveStockCategory();
     public int MaxInternalStock => GetMaxInternalStock(ActiveStockCategory);
+    public int MaxStock => MaxInternalStock;
     public int MissingStock => Mathf.Max(0, MaxInternalStock - CurrentStock);
     public bool NeedsRestock => MissingStock > 0;
     public bool RequiresStaffedCheckout => RequiresServingWorker();
     public bool UsesSelfService => !RequiresStaffedCheckout;
     public float CurrentPriceMultiplier => GetPriceMultiplier();
-    public IReadOnlyList<ShopProductSnapshot> ProductSnapshots
+    public IReadOnlyList<RetailProductSnapshot> ProductSnapshots
     {
         get
         {
@@ -66,7 +57,7 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
                 .Select((stock) =>
                 {
                     Stock priced = CreatePricedStock(stock);
-                    return new ShopProductSnapshot(stock.id, stock.itemName, priced.cost, stock.stock);
+                    return new RetailProductSnapshot(stock.id, stock.itemName, priced.cost, stock.stock);
                 })
                 .ToArray();
         }
@@ -77,9 +68,9 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         base.Initialization(buildingSO, buildPos);
         baseStock = null;
         stockInitialized = false;
-        type = Type.X;
         TryResolveGameData(requireProvider: false);
         TryInitializeStock(requireCatalog: false);
+        RegisterStateModule(new ShopStockStateModule(this));
     }
 
     [Inject]
@@ -87,7 +78,8 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         IGameDataProvider gameDataProvider,
         IShopStockCatalog stockCatalog,
         IFloatingNumberFeedbackService floatingNumberFeedbackService,
-        IWorkforceReplanService workforceReplanService)
+        IWorkforceReplanService workforceReplanService,
+        IFacilityCrimeRiskEvaluator crimeRiskEvaluator)
     {
         this.gameDataProvider = gameDataProvider
             ?? throw new ArgumentNullException(nameof(gameDataProvider));
@@ -97,6 +89,8 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
             ?? throw new ArgumentNullException(nameof(floatingNumberFeedbackService));
         this.workforceReplanService = workforceReplanService
             ?? throw new ArgumentNullException(nameof(workforceReplanService));
+        this.crimeRiskEvaluator = crimeRiskEvaluator
+            ?? throw new ArgumentNullException(nameof(crimeRiskEvaluator));
 
         TryResolveGameData(requireProvider: true);
         TryInitializeStock(requireCatalog: false);
@@ -107,7 +101,13 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         EnsureStockInitialized();
         if (!TryBeginUse(actor, out string failureReason))
         {
-            actor?.AddLog($"{objectNameOrDefault()} 이용 실패: {failureReason}");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Failed,
+                $"{objectNameOrDefault()} 이용 실패: {failureReason}",
+                this,
+                reasonCode: failureReason,
+                bubbleEligible: true));
             yield break;
         }
 
@@ -131,7 +131,7 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
             Stock buyItem = shopable.DetermineBuyingItem(GetStock(selectedCounts));
             actor?.Brain?.SetActionPhase("\uC0C1\uD488 \uB458\uB7EC\uBCF4\uAE30", this, $"{i + 1}/{howmany}");
             yield return moveable.Move2PosBySpeed(
-                GetFacilityAnchorWorldPosition(FacilityAnchorKind.Use, actor.transform.position),
+                GetFacilityAnchorWorldPosition(FacilityAnchorPurposeIds.Use, actor.transform.position),
                 0.7f,
                 currentAction);
             yield return Linger(actor, 0.1f, currentAction);
@@ -147,18 +147,30 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         if (cart.Count == 0)
         {
-            actor?.AddLog($"{objectNameOrDefault()} 이용 실패: 구매 가능한 상품 없음");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Failed,
+                $"{objectNameOrDefault()} 이용 실패: 구매 가능한 상품 없음",
+                this,
+                reasonCode: "no-purchasable-item",
+                bubbleEligible: true));
             EndUse(actor);
             yield break;
         }
 
-        Vector2 endPos = GetFacilityAnchorWorldPosition(FacilityAnchorKind.Checkout, actor.transform.position);
+        Vector2 endPos = GetFacilityAnchorWorldPosition(FacilityAnchorPurposeIds.Checkout, actor.transform.position);
         actor?.Brain?.SetActionPhase("\uACC4\uC0B0\uB300 \uC774\uB3D9", this);
         yield return moveable.Move2PosBySpeed(endPos, 1f, currentAction);
         yield return WaitForServingWorker(actor);
         if (!CanServeCustomer(actor, out string serviceFailureReason))
         {
-            actor?.AddLog($"{objectNameOrDefault()} 계산 대기 중단: {serviceFailureReason}");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Cancelled,
+                $"{objectNameOrDefault()} 계산 대기 중단: {serviceFailureReason}",
+                this,
+                reasonCode: serviceFailureReason,
+                bubbleEligible: true));
             EndUse(actor);
             yield break;
         }
@@ -198,7 +210,13 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         if (purchaseCount == 0)
         {
-            actor?.AddLog($"{objectNameOrDefault()} 이용 실패: 구매 가능한 상품 없음");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Failed,
+                $"{objectNameOrDefault()} 이용 실패: 구매 가능한 상품 없음",
+                this,
+                reasonCode: "no-purchasable-item",
+                bubbleEligible: true));
             EndUse(actor);
             yield break;
         }
@@ -212,6 +230,8 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         if (createsRevenue && usedMoney > 0)
         {
+            usedMoney = Mathf.Max(1, Mathf.RoundToInt(
+                usedMoney * CharacterSkillRuntimeEffects.GetRevenueMultiplier(worker)));
             RequireFloatingNumberFeedbackService().TryShow(NumberCondition.ONEARNMONEY, endPos + Vector2.up, usedMoney);
         }
 
@@ -229,7 +249,12 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         if (!createsRevenue)
         {
-            actor?.AddLog($"{objectNameOrDefault()} 직원 이용: 매출 제외");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Completed,
+                $"{objectNameOrDefault()} 직원 이용: 매출 제외",
+                this,
+                reasonCode: "staff-no-revenue"));
         }
 
         RoomEnvironmentExperienceEvent.Trigger(
@@ -279,8 +304,8 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
     public float GetCheckoutCrimeChance(CharacterActor actor, int cartItemCount, int cartValue)
     {
-        return FacilityCrimeRiskUtility.CalculateShopliftingChance(new FacilityCrimeRiskContext(
-            Facility,
+        return RequireCrimeRiskEvaluator().CalculateShopliftingChance(new FacilityCrimeRiskContext(
+            this,
             actor,
             HasServingWorker,
             HasWaitingCheckout,
@@ -301,7 +326,7 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         int cartItemCount = cart != null ? cart.Count : 0;
         int cartValue = GetCartValue(cart);
         float chance = GetCheckoutCrimeChance(actor, cartItemCount, cartValue);
-        if (!FacilityCrimeRiskUtility.ShouldTriggerCrime(chance, UnityEngine.Random.value))
+        if (!RequireCrimeRiskEvaluator().ShouldTriggerCrime(chance, UnityEngine.Random.value))
         {
             return false;
         }
@@ -316,13 +341,53 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         MarkFacilityDynamicStateDirty();
         StockCategory category = GetStockCategory(stolenStock.id);
         FacilityStockConsumedEvent.Trigger(actor, this, category, 1);
+        AddCustomerCarriedStock(actor, category, $"theft:{stolenStock.id}:{Time.frameCount}");
 
         int lossValue = Mathf.Max(0, stolenStock.cost);
         string detail = BuildCrimeDetail(actor, stolenStock, lossValue, chance);
         FacilityCrimeEvent.Trigger(actor, this, FacilityCrimeKind.Shoplifting, detail, lossValue);
         EventAlertService.Raise("Shoplifting", detail, EventAlertImportance.Medium, "Crime");
-        actor?.AddLog(detail);
+        actor?.AddActivity(CharacterActivityEvent.Facility(
+            CharacterActivityKinds.Social,
+            CharacterActivityOutcomes.Damaged,
+            detail,
+            this,
+            actionId: "crime:shoplifting",
+            reasonCode: "shoplifting",
+            value: lossValue,
+            quantity: 1,
+            bubbleEligible: true));
         return true;
+    }
+
+    private static void AddCustomerCarriedStock(CharacterActor actor, StockCategory category, string sourceId)
+    {
+        if (actor == null)
+        {
+            return;
+        }
+
+        CharacterCarryInventory inventory = CharacterCarryInventory.Ensure(actor);
+        if (inventory == null)
+        {
+            return;
+        }
+
+        IDungeonItemCatalogProvider catalogProvider = WorldItemStackRuntime.Active?.CatalogProvider
+            ?? new ResourceDungeonItemCatalogProvider();
+        inventory.TryAdd(
+            sourceId,
+            DungeonItemCatalogSO.StockItemId(category),
+            1,
+            catalogProvider,
+            WorldItemStackRuntime.Active?.HaulingSettingsProvider,
+            out _);
+    }
+
+    private IFacilityCrimeRiskEvaluator RequireCrimeRiskEvaluator()
+    {
+        return crimeRiskEvaluator
+            ?? throw new InvalidOperationException("Shop requires IFacilityCrimeRiskEvaluator injection before use.");
     }
 
     private string BuildCrimeDetail(CharacterActor actor, RemainStock stolenStock, int lossValue, float chance)
@@ -366,7 +431,12 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
             waitingCheckoutCount++;
             MarkFacilityDynamicStateDirty();
             RequireWorkforceReplanService().RequestIdleWorkersToReplan();
-            actor?.AddLog($"{objectNameOrDefault()} self-service checkout");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Progress,
+                $"{objectNameOrDefault()} 셀프 계산 중",
+                this,
+                actionId: "checkout:self-service"));
         }
 
         WaitForSeconds wait = new WaitForSeconds(selfService ? SelfServiceCheckoutSeconds : StaffedCheckoutSeconds);
@@ -394,7 +464,14 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         waitingCheckoutCount++;
         MarkFacilityDynamicStateDirty();
         RequireWorkforceReplanService().RequestIdleWorkersToReplan();
-        actor?.AddLog($"{objectNameOrDefault()} 계산 대기: 직원 없음");
+        actor?.AddActivity(CharacterActivityEvent.Facility(
+            CharacterActivityKinds.Shopping,
+            CharacterActivityOutcomes.Blocked,
+            $"{objectNameOrDefault()} 계산 대기: 직원 없음",
+            this,
+            actionId: "checkout:staffed",
+            reasonCode: "no-serving-worker",
+            bubbleEligible: true));
 
         WaitForSeconds wait = new WaitForSeconds(CheckoutWaitPollSeconds);
         try
@@ -412,7 +489,12 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         if (HasServingWorker)
         {
-            actor?.AddLog($"{objectNameOrDefault()} 계산 시작");
+            actor?.AddActivity(CharacterActivityEvent.Facility(
+                CharacterActivityKinds.Shopping,
+                CharacterActivityOutcomes.Started,
+                $"{objectNameOrDefault()} 계산 시작",
+                this,
+                actionId: "checkout:staffed"));
         }
     }
 
@@ -428,6 +510,11 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
     public List<Stock> GetStock()
     {
         return GetStock(null);
+    }
+
+    public IReadOnlyList<Stock> GetPurchasableStock()
+    {
+        return GetStock();
     }
 
     private List<Stock> GetStock(IReadOnlyDictionary<int, int> selectedCounts)
@@ -730,38 +817,48 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         return CanVisit((CharacterActor)null, out _);
     }
 
-    public bool CanAssignWorker(CharacterActor actor, out string failureReason)
+    public FacilityAssignmentStatus GetWorkerAssignmentStatus(CharacterActor actor)
     {
         PruneInvalidWorker();
-        bool hasAssignableWork = false;
-        failureReason = "지원하지 않는 작업";
+        FacilityAssignmentStatus workStatus = FacilityAssignmentStatus.Rejected(
+            FacilityAssignmentFailureKind.UnsupportedWork,
+            "지원하지 않는 작업");
         foreach (FacilityWorkType workType in WorkTaskCatalog.GetSingleTypes(Facility != null ? Facility.supportedWorkTypes : FacilityWorkType.Operate))
         {
-            if (CanAssignWork(workType, out failureReason))
+            workStatus = GetWorkAssignmentStatus(workType);
+            if (workStatus.IsAllowed)
             {
-                hasAssignableWork = true;
                 break;
             }
         }
 
-        if (!hasAssignableWork)
+        if (!workStatus.IsAllowed)
         {
-            return false;
+            return workStatus;
         }
 
         if (worker != null && worker != actor)
         {
-            failureReason = "이미 근무자 있음";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.Occupied,
+                "이미 근무자 있음");
         }
 
         if (HasWorkerReservationForOther(actor))
         {
-            failureReason = "이미 작업 예약됨";
-            return false;
+            return FacilityAssignmentStatus.Rejected(
+                FacilityAssignmentFailureKind.Reserved,
+                "이미 작업 예약됨");
         }
 
-        return true;
+        return FacilityAssignmentStatus.Allowed();
+    }
+
+    public bool CanAssignWorker(CharacterActor actor, out string failureReason)
+    {
+        FacilityAssignmentStatus status = GetWorkerAssignmentStatus(actor);
+        failureReason = status.Reason;
+        return status.IsAllowed;
     }
 
     public IEnumerator AllocateWorker(CharacterActor actor)
@@ -777,7 +874,7 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         AbilityMove moveable = actor != null ? actor.GetAbility<AbilityMove>() : null;
         if (moveable == null) yield break;
 
-        Vector2 endPos = GetFacilityAnchorWorldPosition(FacilityAnchorKind.Work, actor.transform.position);
+        Vector2 endPos = GetFacilityAnchorWorldPosition(FacilityAnchorPurposeIds.Work, actor.transform.position);
         AIAction currentAction = actor != null && actor.Brain != null
             ? actor.Brain.bestAction
             : null;
@@ -865,7 +962,7 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
     private bool RequiresServingWorker()
     {
         return Facility != null
-            && Facility.requiresStaffedService
+            && BuildingData.RequiresStaffedService()
             && Facility.SupportsWork(FacilityWorkType.Operate);
     }
 
@@ -963,18 +1060,8 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         foreach (BuildableObject part in profile.Parts)
         {
-            FacilityOperationalData data = part?.Operational;
-            if (data == null)
-            {
-                continue;
-            }
-
-            if (data.HasFunction(FacilityFunction.MealProduction)
-                || data.HasFunction(FacilityFunction.MeatProduction)
-                || data.HasFunction(FacilityFunction.MealService)
-                || data.HasFunction(FacilityFunction.RetailGeneral)
-                || data.HasFunction(FacilityFunction.RetailWeapon)
-                || data.HasFunction(FacilityFunction.WeaponCrafting))
+            if (part?.BuildingData != null
+                && part.BuildingData.GetStockCategorySignals().Any())
             {
                 return true;
             }
@@ -1031,8 +1118,9 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
     private int GetConfiguredInternalStockCapacity()
     {
-        return Facility != null && Facility.internalStockMax > 0
-            ? Facility.internalStockMax
+        int configuredCapacity = BuildingData.GetInternalStockCapacity();
+        return configuredCapacity > 0
+            ? configuredCapacity
             : GetConfiguredStockCapacity();
     }
 
@@ -1117,7 +1205,12 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         if (stockCatalog == null)
         {
-            stockCatalog = FallbackStockCatalog;
+            if (!requireCatalog)
+            {
+                return false;
+            }
+
+            RuntimeDependency.Require(stockCatalog, this);
         }
 
         stockInitialized = true;
@@ -1127,7 +1220,6 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
             return false;
         }
 
-        type = baseStock.type;
         FillStock();
         return true;
     }
@@ -1146,15 +1238,29 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
         if (gameDataProvider == null)
         {
-            gameDataProvider = FallbackGameDataProvider;
+            if (!requireProvider)
+            {
+                return false;
+            }
+
+            RuntimeDependency.Require(gameDataProvider, this);
         }
 
-        return gameDataProvider.TryGetGameData(out gameData);
+        bool resolved = gameDataProvider.TryGetGameData(out gameData);
+        if (requireProvider)
+        {
+            RuntimeDependency.Ensure(
+                resolved && gameData != null,
+                this,
+                "IGameDataProvider to return GameData");
+        }
+
+        return resolved;
     }
 
     private IShopStockCatalog RequireStockCatalog()
     {
-        return stockCatalog ?? FallbackStockCatalog;
+        return RuntimeDependency.Require(stockCatalog, this);
     }
 
     private IFloatingNumberFeedbackService RequireFloatingNumberFeedbackService()
@@ -1164,62 +1270,7 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
 
     private IWorkforceReplanService RequireWorkforceReplanService()
     {
-        return workforceReplanService ?? FallbackWorkforceReplanService;
-    }
-
-    private sealed class ShopFallbackGameDataProvider : IGameDataProvider
-    {
-        private GameData fallbackGameData;
-
-        public bool TryGetGameData(out GameData resolvedGameData)
-        {
-            fallbackGameData ??= CreateFallbackGameData();
-            resolvedGameData = fallbackGameData;
-            return resolvedGameData != null;
-        }
-
-        private static GameData CreateFallbackGameData()
-        {
-            GameData data = ScriptableObject.CreateInstance<GameData>();
-            data.hideFlags = HideFlags.HideAndDontSave;
-            data.gameSpeed = new Data<int>();
-            data.holdingMoney = new Data<int>();
-            data.day = new Data<int>();
-            data.curTime = new Data<float>();
-            data.hour = new Data<int>();
-            data.timeOfDay = new Data<TimeOfDay>();
-            data.gameSpeed.Initialize(1);
-            data.holdingMoney.Initialize(100000);
-            data.day.Initialize(1);
-            data.curTime.Initialize(0f);
-            data.hour.Initialize(0);
-            data.timeOfDay.Initialize(TimeOfDay.Morning);
-            return data;
-        }
-    }
-
-    private sealed class ShopResourcesStockCatalog : IShopStockCatalog
-    {
-        public bool TryGetStockInfoForShop(int shopId, out StockInfo stockInfo)
-        {
-            stockInfo = Resources.LoadAll<StockInfo>("SO/Stock")
-                .FirstOrDefault(candidate => candidate != null && candidate.shopId == shopId);
-            return stockInfo != null;
-        }
-
-        public bool TryGetSaleItem(int saleItemId, out SaleItem saleItem)
-        {
-            saleItem = Resources.LoadAll<SaleItem>("SO/Stock")
-                .FirstOrDefault(candidate => candidate != null && candidate.id == saleItemId);
-            return saleItem != null;
-        }
-
-        public StockCategory GetStockCategory(int saleItemId)
-        {
-            return TryGetSaleItem(saleItemId, out SaleItem saleItem)
-                ? saleItem.category
-                : StockCategory.General;
-        }
+        return RuntimeDependency.Require(workforceReplanService, this);
     }
 
     private sealed class ShopNoopFloatingNumberFeedbackService : IFloatingNumberFeedbackService
@@ -1227,15 +1278,11 @@ public class Shop : BuildableObject, IInteractable, IStockedFacility, IWorkableF
         public bool TryShow(NumberCondition condition, Vector3 worldPosition, float value) => false;
     }
 
-    private sealed class ShopNoopWorkforceReplanService : IWorkforceReplanService
-    {
-        public void RequestIdleWorkersToReplan(bool clearFailures = true) { }
-    }
 }
 
-public readonly struct ShopProductSnapshot
+public readonly struct RetailProductSnapshot
 {
-    public ShopProductSnapshot(int id, string name, int price, int quantity)
+    public RetailProductSnapshot(int id, string name, int price, int quantity)
     {
         Id = id;
         Name = name ?? string.Empty;

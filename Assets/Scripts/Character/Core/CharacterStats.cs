@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System;
 using Sirenix.OdinInspector;
 using UnityEngine;
@@ -8,13 +9,6 @@ using VContainer;
 [DisallowMultipleComponent]
 public class CharacterStats : SerializedMonoBehaviour
 {
-    private static readonly IOwnerRunLifecycleService FallbackOwnerRunLifecycleService =
-        new CharacterStatsNoopOwnerRunLifecycleService();
-    private static readonly IMetaProgressionRuntimeReader FallbackMetaProgressionRuntimeReader =
-        new CharacterStatsDefaultMetaProgressionReader();
-    private static readonly IStaffDiscontentRuntimeService FallbackStaffDiscontentRuntimeService =
-        new CharacterStatsNoopStaffDiscontentRuntimeService();
-
     [SerializeField]
     [ReadOnly]
     private CharacterActor actor;
@@ -51,21 +45,24 @@ public class CharacterStats : SerializedMonoBehaviour
     private IStaffDiscontentRuntimeService staffDiscontentRuntimeService;
     private IOwnerRunLifecycleService ownerRunLifecycleService;
     private IMetaProgressionRuntimeReader metaProgressionRuntimeReader;
+    [NonSerialized] private ControlledStatDictionary controlledStats;
 
-    public Dictionary<CharacterCondition, float> Stats
+    public IDictionary<CharacterCondition, float> Stats
     {
         get
         {
             EnsureStats();
-            return stats;
+            return controlledStats ??= new ControlledStatDictionary(this);
         }
         set
         {
-            stats = value;
+            stats = value != null
+                ? new Dictionary<CharacterCondition, float>(value)
+                : new Dictionary<CharacterCondition, float>();
             EnsureStats();
             AdoptAssignedMoodAsBase();
             RecalculateMood(notify: false, forceNotify: false, adoptExternalOverride: false);
-            OnStatChange?.Invoke(stats);
+            PublishStatsChanged(includeMood: true);
         }
     }
 
@@ -74,7 +71,8 @@ public class CharacterStats : SerializedMonoBehaviour
     public float CurrentHealth => currentHealth;
     public float InjurySeverity => injurySeverity;
     public float Mood => GetMoodSnapshot().Value;
-    public event Action<Dictionary<CharacterCondition, float>> OnStatChange;
+    public IReadOnlyDictionary<CharacterCondition, float> StatSnapshot => CreateStatSnapshot();
+    public event Action<IReadOnlyDictionary<CharacterCondition, float>> OnStatChange;
     public event Action<CharacterMoodSnapshot> OnMoodChange;
 
     private void Awake()
@@ -156,10 +154,22 @@ public class CharacterStats : SerializedMonoBehaviour
         }
 
         SynchronizeExternalMoodOverride();
+        float previousValue = stats[condition];
         stats[condition] = Mathf.Clamp(stats[condition] + value, 0, 100);
+        float nextValue = stats[condition];
+        if (actor?.Progression != null
+            && ((previousValue >= 20f && nextValue < 20f)
+                || (previousValue <= 80f && nextValue > 80f)))
+        {
+            actor.Progression.RecordNarrative(
+                CharacterNarrativeDomain.Need,
+                $"need:{condition.ToString().ToLowerInvariant()}",
+                string.Empty,
+                nextValue < 20f ? "critical" : "satisfied",
+                nextValue);
+        }
         RecalculateMood(notify: false, forceNotify: false, adoptExternalOverride: false);
-        OnStatChange?.Invoke(stats);
-        OnMoodChange?.Invoke(BuildMoodSnapshot(Time.time));
+        PublishStatsChanged(includeMood: true);
     }
 
     public void ApplyMoodFactor(
@@ -193,6 +203,16 @@ public class CharacterStats : SerializedMonoBehaviour
 
         nextMoodExpiryCheckAt = now + 0.25f;
         RecalculateMood(notify: true, forceNotify: true, adoptExternalOverride: false);
+        if (actor?.Progression != null
+            && !id.StartsWith("skill:", StringComparison.Ordinal))
+        {
+            actor.Progression.RecordNarrative(
+                CharacterNarrativeDomain.Mood,
+                id,
+                string.Empty,
+                value >= 0f ? "positive" : "negative",
+                value);
+        }
     }
 
     public bool RemoveMoodFactor(string id)
@@ -223,70 +243,135 @@ public class CharacterStats : SerializedMonoBehaviour
 
     public int GetCharacterStat(CharacterStatType statType)
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetStat(statType) : 5;
+        return actor != null && actor.Progression != null
+            ? actor.Progression.GetFinalStat(statType)
+            : identity != null && identity.Profile != null ? identity.Profile.GetStat(statType) : 5;
+    }
+
+    public int GetCharacterStat(string statId)
+    {
+        return actor != null && actor.Progression != null
+            ? actor.Progression.GetFinalStat(statId)
+            : identity != null && identity.Profile != null ? identity.Profile.GetStat(statId) : 0;
     }
 
     public float GetMoveSpeed()
     {
         float baseSpeed = identity != null && identity.Data != null ? identity.Data.moveSpeed : 1f;
+        float statMultiplier = Mathf.Clamp(
+            1f + ((GetCharacterStat(CharacterStatType.MoveSpeed) - 5) * 0.08f),
+            0.5f,
+            1.8f);
         return baseSpeed
-            * (identity != null && identity.Profile != null ? identity.Profile.GetMoveSpeedMultiplier() : 1f)
+            * statMultiplier
+            * (GetEffectiveProfile()?.GetMoveModifierOnly() ?? 1f)
             * GetFatigueEfficiencyMultiplier()
             * GetInjuryEfficiencyMultiplier();
     }
 
     public float GetConsumptionMultiplier()
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetConsumptionMultiplier() : 1f;
+        return GetEffectiveProfile()?.GetConsumptionMultiplier() ?? 1f;
     }
 
     public float GetStayDurationMultiplier()
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetStayDurationMultiplier() : 1f;
+        return GetEffectiveProfile()?.GetStayDurationMultiplier() ?? 1f;
     }
 
     public float GetCrowdSensitivityMultiplier()
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetCrowdSensitivityMultiplier() : 1f;
+        return GetEffectiveProfile()?.GetCrowdSensitivityMultiplier() ?? 1f;
     }
 
     public float GetWorkSpeedMultiplier(FacilityWorkType workTypes)
     {
-        IStaffDiscontentRuntimeService discontentService = staffDiscontentRuntimeService
-            ?? FallbackStaffDiscontentRuntimeService;
+        IStaffDiscontentRuntimeService discontentService =
+            RuntimeDependency.Require(staffDiscontentRuntimeService, this);
         float discontentMultiplier = actor != null
             ? discontentService.GetWorkEfficiencyMultiplier(actor)
             : 1f;
-        return (identity != null && identity.Profile != null ? identity.Profile.GetWorkSpeedMultiplier(workTypes) : 1f)
+        CharacterStatType workStat = GetBestWorkStat(workTypes);
+        float statMultiplier = Mathf.Clamp(
+            1f + ((GetCharacterStat(workStat) - 5) * 0.06f),
+            0.5f,
+            2f);
+        return statMultiplier
+            * (GetEffectiveProfile()?.GetWorkModifierOnly(workTypes) ?? 1f)
             * GetFatigueEfficiencyMultiplier()
             * GetInjuryEfficiencyMultiplier()
-            * discontentMultiplier;
+            * discontentMultiplier
+            * CharacterSkillRuntimeEffects.GetWorkSpeedMultiplier(actor);
     }
 
     public float GetWorkPreferenceScore(FacilityWorkType workTypes)
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetWorkPreferenceScore(workTypes) : 0.5f;
+        return GetEffectiveProfile()?.GetWorkPreferenceScore(workTypes) ?? 0.5f;
     }
 
     public float GetFacilityPreferenceScore(FacilityRole roles)
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetFacilityPreferenceScore(roles) : 0.5f;
+        return GetEffectiveProfile()?.GetFacilityPreferenceScore(roles) ?? 0.5f;
     }
 
     public float GetAccidentChanceMultiplier()
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetAccidentChanceMultiplier() : 1f;
+        CharacterRuntimeProfile profile = GetEffectiveProfile();
+        float enduranceMultiplier = Mathf.Clamp(
+            1f - ((GetCharacterStat(CharacterStatType.Endurance) - 5) * 0.03f),
+            0.5f,
+            1.5f);
+        float toughnessMultiplier = Mathf.Clamp(
+            1f - ((GetCharacterStat(CharacterStatType.Toughness) - 5) * 0.02f),
+            0.6f,
+            1.4f);
+        return (profile?.GetAccidentModifierOnly() ?? 1f)
+            * enduranceMultiplier
+            * toughnessMultiplier;
     }
 
     public CharacterSpeciesIncidentType GetIncidentType()
     {
-        return identity != null && identity.Profile != null ? identity.Profile.GetIncidentType() : CharacterSpeciesIncidentType.None;
+        return GetEffectiveProfile()?.GetIncidentType() ?? CharacterSpeciesIncidentType.None;
+    }
+
+    public float GetCrimeRiskMultiplier()
+    {
+        return GetEffectiveProfile()?.GetCrimeRiskMultiplier() ?? 1f;
     }
 
     public float GetCombatPowerMultiplier()
     {
-        return (identity != null && identity.Profile != null ? identity.Profile.GetCombatPowerMultiplier() : 1f)
+        return (GetEffectiveProfile()?.GetCombatPowerMultiplier() ?? 1f)
             * GetInjuryEfficiencyMultiplier();
+    }
+
+    public float GetSpendingMultiplier()
+    {
+        float statMultiplier = Mathf.Clamp(
+            1f + ((GetCharacterStat(CharacterStatType.Sales) - 5) * 0.05f),
+            0.5f,
+            2f);
+        return statMultiplier * (GetEffectiveProfile()?.GetSpendingModifierOnly() ?? 1f);
+    }
+
+    private CharacterRuntimeProfile GetEffectiveProfile()
+    {
+        return actor != null && actor.Progression != null
+            ? actor.Progression.GetEffectiveRuntimeProfile()
+            : identity?.Profile;
+    }
+
+    private static CharacterStatType GetBestWorkStat(FacilityWorkType workTypes)
+    {
+        if ((workTypes & FacilityWorkType.Research) != 0) return CharacterStatType.Research;
+        if ((workTypes & FacilityWorkType.Guard) != 0) return CharacterStatType.Attack;
+        if ((workTypes & FacilityWorkType.Clean) != 0) return CharacterStatType.Cleaning;
+        if ((workTypes & FacilityWorkType.Restock) != 0) return CharacterStatType.Strength;
+        if ((workTypes & FacilityWorkType.Repair) != 0) return CharacterStatType.Dexterity;
+        if ((workTypes & FacilityWorkType.Operate) != 0) return CharacterStatType.Sales;
+        if ((workTypes & FacilityWorkType.Rescue) != 0) return CharacterStatType.Toughness;
+        return CharacterStatType.Endurance;
     }
 
     public float GetFatigueEfficiencyMultiplier()
@@ -317,9 +402,17 @@ public class CharacterStats : SerializedMonoBehaviour
             -Mathf.Clamp(amount * 0.25f, 2f, 10f),
             180f,
             2);
-        log?.AddLog(string.IsNullOrWhiteSpace(reason)
-            ? $"피해 {amount:0.#}"
-            : $"피해 {amount:0.#}: {reason}");
+        log?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Health,
+            CharacterActivityOutcomes.Damaged,
+            string.IsNullOrWhiteSpace(reason)
+                ? $"피해 {amount:0.#}"
+                : $"피해 {amount:0.#}: {reason}",
+            actionId: "health:damage",
+            reasonCode: reason,
+            value: amount,
+            sentiment: -0.8f,
+            bubbleEligible: true));
 
         if (currentHealth <= 0f)
         {
@@ -339,14 +432,34 @@ public class CharacterStats : SerializedMonoBehaviour
             Mathf.Clamp(amount * 0.15f, 1f, 6f),
             120f,
             1);
-        log?.AddLog($"회복 {amount:0.#}");
+        log?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Health,
+            CharacterActivityOutcomes.Completed,
+            $"회복 {amount:0.#}",
+            actionId: "health:heal",
+            value: amount,
+            sentiment: 0.55f));
+    }
+
+    public void ScaleMaxHealth(float multiplier)
+    {
+        float safeMultiplier = Mathf.Max(0.01f, multiplier);
+        maxHealth = Mathf.Max(1f, maxHealth * safeMultiplier);
+        currentHealth = Mathf.Clamp(currentHealth * safeMultiplier, 0f, maxHealth);
+        injurySeverity = Mathf.Clamp01(1f - (currentHealth / Mathf.Max(1f, maxHealth)));
     }
 
     public void SetInjurySeverity(float value)
     {
         injurySeverity = Mathf.Clamp01(value);
         currentHealth = Mathf.Clamp(maxHealth * (1f - injurySeverity), 1f, maxHealth);
-        log?.AddLog($"부상도 변경: {Mathf.RoundToInt(injurySeverity * 100f)}%");
+        log?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Health,
+            CharacterActivityOutcomes.Changed,
+            $"부상도 변경: {Mathf.RoundToInt(injurySeverity * 100f)}%",
+            actionId: "health:injury-severity",
+            value: injurySeverity,
+            sentiment: -injurySeverity));
     }
 
     public void Die(string reason = "")
@@ -356,14 +469,22 @@ public class CharacterStats : SerializedMonoBehaviour
         visual?.SetRenderersVisible(true);
         currentHealth = 0f;
         injurySeverity = 1f;
-        log?.AddLog(string.IsNullOrWhiteSpace(reason) ? "사망" : $"사망: {reason}");
+        log?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Health,
+            CharacterActivityOutcomes.Defeated,
+            string.IsNullOrWhiteSpace(reason) ? "사망" : $"사망: {reason}",
+            actionId: "health:death",
+            reasonCode: reason,
+            value: 1f,
+            sentiment: -1f,
+            bubbleEligible: true));
         lifecycle?.SetLifecycleState(CharacterLifecycleState.Despawned);
 
         CharacterDeathEvent.Trigger(actor, reason);
 
         if (identity != null && identity.IsOwner && actor != null)
         {
-            (ownerRunLifecycleService ?? FallbackOwnerRunLifecycleService).HandleOwnerDeath(actor, reason);
+            RuntimeDependency.Require(ownerRunLifecycleService, this).HandleOwnerDeath(actor, reason);
         }
     }
 
@@ -389,16 +510,66 @@ public class CharacterStats : SerializedMonoBehaviour
         }
     }
 
+    public void RestorePersistentState(
+        IReadOnlyDictionary<CharacterCondition, float> savedStats,
+        float savedCurrentHealth,
+        float savedInjurySeverity,
+        float savedBaseMood,
+        IReadOnlyList<CharacterMoodFactorSnapshot> savedInteractionMoodFactors)
+    {
+        stats = savedStats != null
+            ? new Dictionary<CharacterCondition, float>(savedStats)
+            : new Dictionary<CharacterCondition, float>();
+        baseMood = Mathf.Clamp(savedBaseMood, 0f, 100f);
+        interactionMoodFactors ??= new List<CharacterMoodMemory>();
+        interactionMoodFactors.Clear();
+        EnsureStats();
+        stats[CharacterCondition.MOOD] = baseMood;
+
+        float now = Time.time;
+        if (savedInteractionMoodFactors != null)
+        {
+            foreach (CharacterMoodFactorSnapshot factor in savedInteractionMoodFactors)
+            {
+                if (factor == null
+                    || factor.Kind != CharacterMoodFactorKind.Interaction
+                    || string.IsNullOrWhiteSpace(factor.Id)
+                    || string.IsNullOrWhiteSpace(factor.Label)
+                    || Mathf.Approximately(factor.Value, 0f)
+                    || factor.RemainingSeconds <= 0f)
+                {
+                    continue;
+                }
+
+                interactionMoodFactors.Add(new CharacterMoodMemory(
+                    factor.Id,
+                    factor.Label,
+                    factor.Value,
+                    factor.RemainingSeconds,
+                    1,
+                    now));
+            }
+        }
+
+        RecalculateVitals(resetCurrentHealth: true);
+        currentHealth = Mathf.Clamp(savedCurrentHealth, 0f, maxHealth);
+        injurySeverity = Mathf.Clamp01(savedInjurySeverity);
+        nextMoodExpiryCheckAt = now + 0.25f;
+        lastCalculatedMood = float.NaN;
+        RecalculateMood(notify: true, forceNotify: true, adoptExternalOverride: false);
+        PublishStatsChanged(includeMood: false);
+    }
+
     private void EnsureStats()
     {
         stats ??= new Dictionary<CharacterCondition, float>();
         interactionMoodFactors ??= new List<CharacterMoodMemory>();
-        EnsureStat(CharacterCondition.SLEEP, 100f);
-        EnsureStat(CharacterCondition.HUNGER, 100f);
-        EnsureStat(CharacterCondition.FUN, 100f);
+        foreach (CharacterNeedDefinition definition in CharacterNeedCatalog.All)
+        {
+            EnsureStat(definition.Condition, definition.DefaultValue);
+        }
+
         EnsureStat(CharacterCondition.MOOD, baseMood);
-        EnsureStat(CharacterCondition.EXCRETION, 100f);
-        EnsureStat(CharacterCondition.HYGIENE, 100f);
     }
 
     private void AdoptAssignedMoodAsBase()
@@ -447,8 +618,182 @@ public class CharacterStats : SerializedMonoBehaviour
 
         if (notify && (forceNotify || expired || !Mathf.Approximately(previous, snapshot.Value)))
         {
-            OnStatChange?.Invoke(stats);
+            OnStatChange?.Invoke(CreateStatSnapshot());
             OnMoodChange?.Invoke(snapshot);
+        }
+    }
+
+    private void SetStatValue(CharacterCondition condition, float value)
+    {
+        EnsureStats();
+        stats[condition] = Mathf.Clamp(value, 0f, 100f);
+        if (condition == CharacterCondition.MOOD)
+        {
+            AdoptAssignedMoodAsBase();
+        }
+
+        RecalculateMood(notify: false, forceNotify: false, adoptExternalOverride: false);
+        PublishStatsChanged(includeMood: true);
+    }
+
+    private bool RemoveStatValue(CharacterCondition condition)
+    {
+        EnsureStats();
+        bool removed = stats.Remove(condition);
+        if (!removed)
+        {
+            return false;
+        }
+
+        EnsureStats();
+        RecalculateMood(notify: false, forceNotify: false, adoptExternalOverride: false);
+        PublishStatsChanged(includeMood: true);
+        return true;
+    }
+
+    private void ResetStatValues()
+    {
+        stats.Clear();
+        EnsureStats();
+        AdoptAssignedMoodAsBase();
+        RecalculateMood(notify: false, forceNotify: false, adoptExternalOverride: false);
+        PublishStatsChanged(includeMood: true);
+    }
+
+    private void PublishStatsChanged(bool includeMood)
+    {
+        OnStatChange?.Invoke(CreateStatSnapshot());
+        if (includeMood)
+        {
+            OnMoodChange?.Invoke(BuildMoodSnapshot(Time.time));
+        }
+    }
+
+    private IReadOnlyDictionary<CharacterCondition, float> CreateStatSnapshot()
+    {
+        EnsureStats();
+        return new ReadOnlyDictionary<CharacterCondition, float>(
+            new Dictionary<CharacterCondition, float>(stats));
+    }
+
+    private sealed class ControlledStatDictionary : IDictionary<CharacterCondition, float>
+    {
+        private readonly CharacterStats owner;
+
+        public ControlledStatDictionary(CharacterStats owner)
+        {
+            this.owner = owner ?? throw new ArgumentNullException(nameof(owner));
+        }
+
+        public float this[CharacterCondition key]
+        {
+            get
+            {
+                owner.EnsureStats();
+                return owner.stats[key];
+            }
+            set => owner.SetStatValue(key, value);
+        }
+
+        public ICollection<CharacterCondition> Keys
+        {
+            get
+            {
+                owner.EnsureStats();
+                return new List<CharacterCondition>(owner.stats.Keys);
+            }
+        }
+
+        public ICollection<float> Values
+        {
+            get
+            {
+                owner.EnsureStats();
+                return new List<float>(owner.stats.Values);
+            }
+        }
+
+        public int Count
+        {
+            get
+            {
+                owner.EnsureStats();
+                return owner.stats.Count;
+            }
+        }
+
+        public bool IsReadOnly => false;
+
+        public void Add(CharacterCondition key, float value)
+        {
+            if (ContainsKey(key))
+            {
+                throw new ArgumentException($"Stat '{key}' already exists.", nameof(key));
+            }
+
+            owner.SetStatValue(key, value);
+        }
+
+        public bool ContainsKey(CharacterCondition key)
+        {
+            owner.EnsureStats();
+            return owner.stats.ContainsKey(key);
+        }
+
+        public bool Remove(CharacterCondition key)
+        {
+            return owner.RemoveStatValue(key);
+        }
+
+        public bool TryGetValue(CharacterCondition key, out float value)
+        {
+            owner.EnsureStats();
+            return owner.stats.TryGetValue(key, out value);
+        }
+
+        public void Add(KeyValuePair<CharacterCondition, float> item)
+        {
+            Add(item.Key, item.Value);
+        }
+
+        public void Clear()
+        {
+            owner.ResetStatValues();
+        }
+
+        public bool Contains(KeyValuePair<CharacterCondition, float> item)
+        {
+            return TryGetValue(item.Key, out float value)
+                && EqualityComparer<float>.Default.Equals(value, item.Value);
+        }
+
+        public void CopyTo(KeyValuePair<CharacterCondition, float>[] array, int arrayIndex)
+        {
+            if (array == null)
+            {
+                throw new ArgumentNullException(nameof(array));
+            }
+
+            foreach (KeyValuePair<CharacterCondition, float> pair in this)
+            {
+                array[arrayIndex++] = pair;
+            }
+        }
+
+        public bool Remove(KeyValuePair<CharacterCondition, float> item)
+        {
+            return Contains(item) && Remove(item.Key);
+        }
+
+        public IEnumerator<KeyValuePair<CharacterCondition, float>> GetEnumerator()
+        {
+            owner.EnsureStats();
+            return new Dictionary<CharacterCondition, float>(owner.stats).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
         }
     }
 
@@ -501,7 +846,7 @@ public class CharacterStats : SerializedMonoBehaviour
 
     private IMetaProgressionRuntimeReader ResolveMetaProgressionRuntimeReader()
     {
-        return metaProgressionRuntimeReader ?? FallbackMetaProgressionRuntimeReader;
+        return RuntimeDependency.Require(metaProgressionRuntimeReader, this);
     }
 
     private void EnsureStat(CharacterCondition condition, float defaultValue)
@@ -512,36 +857,4 @@ public class CharacterStats : SerializedMonoBehaviour
         }
     }
 
-    private sealed class CharacterStatsNoopOwnerRunLifecycleService : IOwnerRunLifecycleService
-    {
-        public void HandleOwnerDeath(CharacterActor owner, string reason) { }
-    }
-
-    private sealed class CharacterStatsNoopStaffDiscontentRuntimeService : IStaffDiscontentRuntimeService
-    {
-        public float GetWorkEfficiencyMultiplier(CharacterActor staff) => 1f;
-
-        public bool ShouldBlockWork(CharacterActor staff, out string reason)
-        {
-            reason = string.Empty;
-            return false;
-        }
-
-        public bool IsRebellionTarget(CharacterActor target) => false;
-        public bool ResolveSuppressedRebel(CharacterActor rebel, CharacterActor defender) => false;
-    }
-
-    private sealed class CharacterStatsDefaultMetaProgressionReader : IMetaProgressionRuntimeReader
-    {
-        public int GetStartingFacilityCandidateBonus() => 0;
-        public int GetStartingOwnerTraitCandidateBonus() => 0;
-        public float GetOwnerMaxHealthMultiplier() => 1f;
-        public float GetInvasionWarningThresholdMultiplier() => 1f;
-        public bool IsRecipePreserved(string recipeId) => false;
-
-        public IReadOnlyCollection<int> GetExpandedBasicPurchaseBuildingIds(IEnumerable<BuildingSO> buildings)
-        {
-            return Array.Empty<int>();
-        }
-    }
 }

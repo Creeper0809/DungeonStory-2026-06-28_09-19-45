@@ -10,6 +10,11 @@ public sealed class EventAlertSelectionState
         }
     }
 
+    public void Clear()
+    {
+        SelectedRecord = null;
+    }
+
     public bool ExecuteChoice(int index)
     {
         if (SelectedRecord == null || index < 0 || index >= SelectedRecord.Choices.Count)

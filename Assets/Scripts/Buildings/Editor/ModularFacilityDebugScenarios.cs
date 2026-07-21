@@ -34,6 +34,7 @@ public static class ModularFacilityDebugScenarios
     public static void RunAll()
     {
         VerifyCatalogAssets();
+        VerifyAbilityAuthoringContract();
         VerifyOperationalContracts();
         VerifyProgressionEconomy();
         VerifyOperationalRuntimeOutcomes();
@@ -50,6 +51,153 @@ public static class ModularFacilityDebugScenarios
         Debug.Log("ModularFacilityDebugScenarios passed: operational contracts, assets, runtime instances, migration, slots, support, and room composition.");
     }
 
+    private static void VerifyAbilityAuthoringContract()
+    {
+        FieldInfo abilityField = typeof(BuildingSO).GetField(
+            BuildingSO.AbilityModulesFieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Require(abilityField != null, "BuildingSO ability list field is missing.");
+        Require(abilityField.FieldType == typeof(BuildingAbilityCollection),
+            "BuildingSO abilities must use BuildingAbilityCollection.");
+        FieldInfo itemsField = typeof(BuildingAbilityCollection).GetField(
+            "items",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Require(itemsField != null && itemsField.FieldType == typeof(List<BuildingAbility>),
+            "BuildingAbilityCollection must own List<BuildingAbility>.");
+        Require(itemsField.GetCustomAttribute<SerializeReference>() != null,
+            "BuildingAbilityCollection items must use SerializeReference.");
+
+        Type[] addableTypes = TypeCache.GetTypesDerivedFrom<BuildingAbility>()
+            .Where(type => type.IsSerializable
+                && !type.IsAbstract
+                && !type.IsGenericTypeDefinition
+                && type.GetConstructor(Type.EmptyTypes) != null)
+            .ToArray();
+        Require(addableTypes.Length >= 8, $"Expected at least 8 addable building abilities, found {addableTypes.Length}.");
+        Require(addableTypes.All(type => type.IsSerializable),
+            "Every addable building ability must be serializable.");
+        Require(BuildingAbilityListDrawer.AddableTypes.SequenceEqual(
+                addableTypes.OrderBy(BuildingAbilityListDrawer.GetDisplayName)),
+            "Inspector add menu does not expose every addable ability type.");
+
+        BuildingSO authoringFixture = ScriptableObject.CreateInstance<BuildingSO>();
+        try
+        {
+            SerializedObject serializedFixture = new SerializedObject(authoringFixture);
+            SerializedProperty fixtureItems = serializedFixture
+                .FindProperty(BuildingSO.AbilityModulesFieldName)
+                ?.FindPropertyRelative("items");
+            Require(fixtureItems != null, "Ability authoring fixture list was not serialized.");
+            string propertyPath = fixtureItems.propertyPath;
+            Require(BuildingAbilityListDrawer.AddAbility(
+                    authoringFixture,
+                    propertyPath,
+                    typeof(BuildingLightingAbility)),
+                "Inspector add operation did not create the selected ability type.");
+            Require(authoringFixture.Abilities.Count == 1
+                    && authoringFixture.Abilities[0] is BuildingLightingAbility,
+                "Inspector add operation did not preserve the concrete managed-reference type.");
+            Require(!BuildingAbilityListDrawer.AddAbility(
+                    authoringFixture,
+                    propertyPath,
+                    typeof(BuildingLightingAbility)),
+                "Inspector add operation allowed a duplicate ability type.");
+            bool duplicateRejected = false;
+            try
+            {
+                authoringFixture.AbilityModules.Add(new BuildingLightingAbility());
+            }
+            catch (InvalidOperationException)
+            {
+                duplicateRejected = true;
+            }
+
+            Require(duplicateRejected, "Programmatic ability add allowed a duplicate concrete type.");
+
+            serializedFixture.Update();
+            fixtureItems = serializedFixture.FindProperty(propertyPath);
+            BuildingAbilityListDrawer drawer = new BuildingAbilityListDrawer();
+            var cachedList = drawer.GetOrCreateList(fixtureItems);
+            cachedList.index = 0;
+            Require(ReferenceEquals(cachedList, drawer.GetOrCreateList(fixtureItems))
+                    && drawer.GetOrCreateList(fixtureItems).index == 0,
+                "Inspector ability selection did not survive its next draw pass.");
+            Require(BuildingAbilityListDrawer.RemoveSelected(fixtureItems, 0),
+                "Inspector remove operation rejected a valid selection.");
+            Require(authoringFixture.Abilities.Count == 0,
+                "Inspector remove operation did not clear the selected ability.");
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(authoringFixture);
+        }
+
+        FieldInfo legacyMaintenance = typeof(BuildingSO).GetField("maintenance");
+        FieldInfo legacyFacility = typeof(BuildingSO).GetField("facility");
+        FieldInfo legacyDefense = typeof(BuildingSO).GetField("defense");
+        FieldInfo legacyEvolution = typeof(BuildingSO).GetField("evolution");
+        Require(legacyMaintenance == null
+                && legacyFacility == null
+                && legacyDefense == null
+                && legacyEvolution == null,
+            "BuildingSO still serializes fixed maintenance/facility/defense/evolution fields.");
+
+        foreach (BuildingSO asset in LoadEveryBuildingAsset())
+        {
+            string path = AssetDatabase.GetAssetPath(asset);
+            Require(!SerializationUtility.HasManagedReferencesWithMissingTypes(asset),
+                $"{path} contains a missing managed-reference ability type.");
+            asset.ValidateAbilitiesOrThrow();
+            IReadOnlyList<BuildingAbility> abilities = asset.Abilities;
+            Require(abilities.All(ability => !string.IsNullOrWhiteSpace(ability.AbilityId)),
+                $"{path} contains an ability without an explicit stable ID.");
+            Require(abilities.All(ability => !ability.AbilityId.Contains(':')),
+                $"{path} contains an ability ID with a reserved delimiter.");
+            Require(abilities.Select(ability => ability.AbilityId).Distinct(StringComparer.Ordinal).Count()
+                    == abilities.Count,
+                $"{path} contains duplicate ability IDs.");
+        }
+
+        bool delimiterRejected = false;
+        try
+        {
+            BuildingStateModuleIds.ForAbility("production:legacy", "test");
+        }
+        catch (ArgumentException)
+        {
+            delimiterRejected = true;
+        }
+
+        Require(delimiterRejected, "State module ID builder accepted an ambiguous ':' segment.");
+
+        foreach (BuildingSO asset in LoadAll())
+        {
+            IReadOnlyList<BuildingAbility> abilities = asset.Abilities;
+            Require(abilities.All(ability => ability != null),
+                $"{asset.name} contains a null ability entry.");
+            Require(abilities.Select(ability => ability.GetType()).Distinct().Count() == abilities.Count,
+                $"{asset.name} contains duplicate ability types.");
+            Require(abilities.All(ability => addableTypes.Contains(ability.GetType())),
+                $"{asset.name} contains an ability unavailable from the Inspector add menu.");
+
+            SerializedObject serializedAsset = new SerializedObject(asset);
+            SerializedProperty serializedCollection = serializedAsset.FindProperty(
+                BuildingSO.AbilityModulesFieldName);
+            SerializedProperty serializedAbilities = serializedCollection?.FindPropertyRelative("items");
+            Require(serializedAbilities != null && serializedAbilities.isArray,
+                $"{asset.name} ability list is not available to Unity serialization.");
+            Require(serializedAbilities.arraySize == abilities.Count,
+                $"{asset.name} serialized/runtime ability counts differ.");
+            for (int index = 0; index < serializedAbilities.arraySize; index++)
+            {
+                SerializedProperty element = serializedAbilities.GetArrayElementAtIndex(index);
+                Require(element.propertyType == SerializedPropertyType.ManagedReference
+                        && element.managedReferenceValue != null,
+                    $"{asset.name} ability {index} is not a valid managed reference.");
+            }
+        }
+    }
+
     private static void VerifyOperationalContracts()
     {
         Directory.CreateDirectory("Temp");
@@ -57,73 +205,91 @@ public static class ModularFacilityDebugScenarios
         string[] catalogCodes = ModularFacilityAssetBuilder.GetCatalogCodes().ToArray();
         List<string> rows = new List<string>
         {
-            "id\tcode\tname\tlayer\tfootprint\truntime\tfunctions\troles\tworkTypes\tstorageCategory\tstorageCapacity\tseats\ttables\tservice\tworkOutput\tcost\tphase\trefundRate\tlightIntensity\tlightRadius\tresult"
+            "id\tcode\tname\tlayer\tfootprint\truntime\troles\tworkTypes\tabilityCount\truntimeHandlers\tstateModules\tstockSignals\tstorageCapacity\tseats\ttables\tservice\tproduction\tworkOutput\tcost\tphase\trefundRate\tlightingAbility\tlightIntensity\tlightRadius\tresult"
         };
 
         Require(assets.Length == catalogCodes.Length, "Operational report asset/code count mismatch.");
         for (int index = 0; index < assets.Length; index++)
         {
             BuildingSO asset = assets[index];
-            FacilityOperationalData data = asset.Operational;
+            string code = asset.GetFacilityCode();
+            BuildingEconomyAbility economyAbility = asset.GetAbility<BuildingEconomyAbility>();
+            BuildingNeedRecoveryAbility recoveryAbility = asset.GetAbility<BuildingNeedRecoveryAbility>();
+            BuildingStorageAbility storageAbility = asset.GetAbility<BuildingStorageAbility>();
+            BuildingSeatingAbility seatingAbility = asset.GetAbility<BuildingSeatingAbility>();
+            BuildingTableAbility tableAbility = asset.GetAbility<BuildingTableAbility>();
+            BuildingServiceAbility serviceAbility = asset.GetAbility<BuildingServiceAbility>();
+            BuildingProductionAbility productionAbility = asset.GetAbility<BuildingProductionAbility>();
+            BuildingLightingAbility lightingAbility = asset.GetAbility<BuildingLightingAbility>();
             List<string> failures = new List<string>();
-            CheckContract(data.IsModular, "missing modular code", failures);
-            CheckContract(string.Equals(data.code, catalogCodes[index], StringComparison.Ordinal), "catalog code mismatch", failures);
-            CheckContract(data.functions != FacilityFunction.None, "no runtime function", failures);
-            CheckContract(data.constructionCost > 0, "construction cost must be positive", failures);
-            CheckContract(data.unlockPhase >= 1 && data.unlockPhase <= 3, "unlock phase out of range", failures);
-            CheckContract(data.demolitionRefundRate >= 0f && data.demolitionRefundRate <= 1f, "refund rate out of range", failures);
-            bool validRuntime = data.HasFunction(FacilityFunction.RetailGeneral)
-                && asset.Facility.roles.HasFlag(FacilityRole.Purchase)
-                    ? asset.type == typeof(Shop)
-                    : asset.type != null && typeof(Facility).IsAssignableFrom(asset.type);
-            CheckContract(validRuntime, "runtime type does not match its operational role", failures);
+            CheckContract(asset.IsModularFacility(), "missing modular facility identity ability", failures);
+            CheckContract(string.Equals(code, catalogCodes[index], StringComparison.Ordinal), "catalog code mismatch", failures);
+            CheckContract(economyAbility != null, "missing economy ability", failures);
+            CheckContract(asset.GetConstructionCost() > 0, "construction cost must be positive", failures);
+            CheckContract(asset.GetUnlockPhase() >= 1 && asset.GetUnlockPhase() <= 3, "unlock phase out of range", failures);
+            CheckContract(asset.GetDemolitionRefundRate() >= 0f && asset.GetDemolitionRefundRate() <= 1f, "refund rate out of range", failures);
+            CheckContract(asset.type != null && typeof(BuildableObject).IsAssignableFrom(asset.type),
+                "runtime type is not a buildable object", failures);
+            CheckContract(storageAbility == null || storageAbility.IsValid, "invalid storage ability", failures);
+            CheckContract(seatingAbility == null || seatingAbility.IsValid, "invalid seating ability", failures);
+            CheckContract(tableAbility == null || tableAbility.IsValid, "invalid table ability", failures);
+            CheckContract(serviceAbility == null || serviceAbility.IsValid, "invalid service ability", failures);
+            CheckContract(lightingAbility == null || lightingAbility.IsValid, "invalid lighting ability", failures);
+            CheckContract(productionAbility == null || productionAbility.IsValid, "invalid production ability", failures);
+            CheckContract(productionAbility == null
+                    || (productionAbility is IBuildingWorkCompletedRuntimeAbility
+                        && productionAbility is IBuildingRuntimeStateAbility
+                        && productionAbility is IBuildingStockCategorySignal),
+                "production capability is not self-contained", failures);
+            CheckContract(lightingAbility == null || lightingAbility is IBuildingVisualRuntimeAbility,
+                "lighting capability has no visual handler", failures);
+            CheckContract(!asset.GetNeedRecovery().HasEffect
+                    || (recoveryAbility != null && recoveryAbility.HasEffect),
+                "recovery accessor must resolve BuildingNeedRecoveryAbility", failures);
 
-            bool storage = data.HasFunction(FacilityFunction.Storage);
-            bool seating = data.HasFunction(FacilityFunction.Seating);
-            bool table = data.HasFunction(FacilityFunction.Table);
-            bool lighting = data.HasFunction(FacilityFunction.Lighting);
-            bool production = data.HasFunction(FacilityFunction.MealProduction)
-                || data.HasFunction(FacilityFunction.WeaponCrafting)
-                || data.HasFunction(FacilityFunction.Alchemy)
-                || data.HasFunction(FacilityFunction.ManaStorage)
-                || data.HasFunction(FacilityFunction.ManaRitual);
-            CheckContract(storage == (data.storageCapacity > 0), "storage function/capacity mismatch", failures);
-            CheckContract(seating == (data.seatCapacity > 0), "seating function/capacity mismatch", failures);
-            CheckContract(table == (data.tableCapacity > 0), "table function/capacity mismatch", failures);
-            CheckContract(!data.HasFunction(FacilityFunction.MealService) || data.serviceCapacity > 0,
-                "meal service has no service capacity", failures);
-            CheckContract(lighting == (data.lightIntensity > 0f && data.lightRadius > 0f), "lighting parameters mismatch", failures);
-            CheckContract(data.workOutputAmount == 0 || production, "work output has no production function", failures);
-            CheckContract(asset.Facility.supportedWorkTypes != FacilityWorkType.None
-                    || data.HasFunction(FacilityFunction.Support),
-                "non-support facility has no work interaction", failures);
+            string[] runtimeHandlers = asset.Abilities
+                .Where(ability => ability is IBuildingVisualRuntimeAbility
+                    || ability is IBuildingUseCompletedRuntimeAbility
+                    || ability is IBuildingWorkCompletedRuntimeAbility)
+                .Select(ability => ability.GetType().Name)
+                .ToArray();
+            string[] stateModules = asset.Abilities
+                .OfType<IBuildingRuntimeStateAbility>()
+                .Select(ability => ability.GetType().Name)
+                .ToArray();
+            StockCategory[] stockSignals = asset.GetStockCategorySignals().Distinct().ToArray();
+            FacilityData facility = asset.Facility;
 
             string result = failures.Count == 0 ? "PASS" : string.Join(" | ", failures);
             rows.Add(string.Join("\t", new object[]
             {
                 asset.id,
-                data.code,
+                code,
                 asset.objectName,
                 asset.Placement.Layer,
                 $"{asset.width}x{asset.height}",
                 asset.type?.Name ?? string.Empty,
-                data.functions,
-                asset.Facility.roles,
-                asset.Facility.supportedWorkTypes,
-                data.storageCategory,
-                data.storageCapacity,
-                data.seatCapacity,
-                data.tableCapacity,
-                data.serviceCapacity,
-                data.workOutputAmount,
-                data.constructionCost,
-                data.unlockPhase,
-                data.demolitionRefundRate.ToString("0.##"),
-                data.lightIntensity.ToString("0.##"),
-                data.lightRadius.ToString("0.##"),
+                facility?.roles ?? FacilityRole.None,
+                facility?.supportedWorkTypes ?? FacilityWorkType.None,
+                asset.Abilities.Count,
+                string.Join(",", runtimeHandlers),
+                string.Join(",", stateModules),
+                string.Join(",", stockSignals),
+                asset.GetStorageCapacity(),
+                asset.GetSeatCapacity(),
+                asset.GetTableCapacity(),
+                asset.GetServiceCapacity(),
+                productionAbility != null ? productionAbility.outputCategory.ToString() : string.Empty,
+                asset.GetWorkOutputAmount(),
+                asset.GetConstructionCost(),
+                asset.GetUnlockPhase(),
+                asset.GetDemolitionRefundRate().ToString("0.##"),
+                lightingAbility != null ? lightingAbility.AbilityId : string.Empty,
+                lightingAbility != null ? lightingAbility.intensity.ToString("0.##") : string.Empty,
+                lightingAbility != null ? lightingAbility.radius.ToString("0.##") : string.Empty,
                 result
             }));
-            Require(failures.Count == 0, $"{data.code} operational contract failed: {result}.");
+            Require(failures.Count == 0, $"{code} capability contract failed: {result}.");
         }
 
         File.WriteAllLines(ContractReportPath, rows);
@@ -137,9 +303,9 @@ public static class ModularFacilityDebugScenarios
         List<string> failures = new List<string>();
         List<UnityEngine.Object> cleanup = new List<UnityEngine.Object>();
         BuildingSO[] assets = LoadAll();
-        BuildingSO phase1 = assets.First(asset => asset.Operational.unlockPhase == 1);
-        BuildingSO phase2 = assets.First(asset => asset.Operational.unlockPhase == 2);
-        BuildingSO phase3 = assets.First(asset => asset.Operational.unlockPhase == 3);
+        BuildingSO phase1 = assets.First(asset => asset.GetUnlockPhase() == 1);
+        BuildingSO phase2 = assets.First(asset => asset.GetUnlockPhase() == 2);
+        BuildingSO phase3 = assets.First(asset => asset.GetUnlockPhase() == 3);
         GameData gameData = CreateGameData();
         cleanup.Add(gameData);
 
@@ -183,7 +349,7 @@ public static class ModularFacilityDebugScenarios
                 $"placed={lockedPlaced}; money={lockedMoney}->{gameData.holdingMoney.Value}; reason={lockedReason}");
 
             gameData.day.Value = 7;
-            int phase3Cost = phase3.Operational.constructionCost;
+            int phase3Cost = phase3.GetConstructionCost();
             gameData.holdingMoney.Value = Mathf.Max(0, phase3Cost - 1);
             Grid poorGrid = CreateSupportedGrid(20);
             GridBuildingPlacementService poorService = CreateEconomyPlacementService(poorGrid, phase3, gameData);
@@ -197,7 +363,7 @@ public static class ModularFacilityDebugScenarios
                 $"placed={poorPlaced}; money={poorMoney}->{gameData.holdingMoney.Value}; reason={poorReason}");
 
             gameData.day.Value = 4;
-            int phase2Cost = phase2.Operational.constructionCost;
+            int phase2Cost = phase2.GetConstructionCost();
             gameData.holdingMoney.Value = phase2Cost;
             Grid successGrid = CreateSupportedGrid(20);
             GridBuildingPlacementService successService = CreateEconomyPlacementService(successGrid, phase2, gameData);
@@ -356,16 +522,18 @@ public static class ModularFacilityDebugScenarios
         building.category = BuildingCategory.Shop;
         building.type = typeof(Facility);
         building.unlocked = true;
-        building.facility = new FacilityData();
-        building.evolution = new FacilityEvolutionContributionData();
-        building.operational = new FacilityOperationalData
+        building.ReplaceAbilities(new BuildingAbilityCollection());
+        building.Facility = new FacilityData();
+        building.Evolution = new FacilityEvolutionContributionData();
+        if (!string.IsNullOrWhiteSpace(code))
         {
-            code = code,
-            functions = FacilityFunction.Support,
-            constructionCost = constructionCost,
-            unlockPhase = 1,
-            demolitionRefundRate = 0.5f
-        };
+            building.AbilityModules.Add(new BuildingFacilityPartAbility { code = code });
+            BuildingEconomyAbility economyAbility = new BuildingEconomyAbility();
+            economyAbility.constructionCost = constructionCost;
+            economyAbility.unlockPhase = 1;
+            economyAbility.demolitionRefundRate = 0.5f;
+            building.AbilityModules.Add(economyAbility);
+        }
         cleanup.Add(building);
         return building;
     }
@@ -426,7 +594,6 @@ public static class ModularFacilityDebugScenarios
             Facility hearth = (Facility)CreateAndRegister(grid, Load("D01"), new Vector2Int(3, 0), created);
             Facility foodShelf = (Facility)CreateAndRegister(grid, Load("D10"), new Vector2Int(4, 0), created);
             Facility forge = (Facility)CreateAndRegister(grid, Load("S08"), new Vector2Int(6, 0), created);
-            Facility weaponLocker = (Facility)CreateAndRegister(grid, Load("S07"), new Vector2Int(8, 0), created);
             Facility alchemy = (Facility)CreateAndRegister(grid, Load("Q02"), new Vector2Int(10, 0), created);
             Facility reagentShelf = (Facility)CreateAndRegister(grid, Load("Q04"), new Vector2Int(12, 0), created);
             Facility alarm = (Facility)CreateAndRegister(grid, Load("G02"), new Vector2Int(13, 0), created);
@@ -446,39 +613,62 @@ public static class ModularFacilityDebugScenarios
                 "Meal production did not return the configured output.");
             Require(foodShelf.Inventory.GetStock(StockCategory.Food) == 4,
                 "Meal production did not enter food storage.");
-            Require(ModularFacilityRuntimeEffects.ApplyWorkCompleted(null, forge, FacilityWorkType.Operate) == 3,
-                "Weapon crafting did not return the configured output.");
-            Require(weaponLocker.Inventory.GetStock(StockCategory.Weapon) == 3,
-                "Weapon crafting did not enter weapon storage.");
+            Require(forge.SupportsWork(FacilityWorkType.Craft)
+                    && !forge.SupportsWork(FacilityWorkType.Operate)
+                    && forge.BuildingData.GetAbility<BuildingEquipmentCraftingAbility>() != null,
+                "Blacksmith bench must be an equipment crafting work target, not a direct weapon producer.");
             Require(ModularFacilityRuntimeEffects.ApplyWorkCompleted(null, alchemy, FacilityWorkType.Research) == 3,
                 "Alchemy research did not return the configured mana output.");
             Require(reagentShelf.Inventory.GetStock(StockCategory.Mana) == 3,
                 "Alchemy output did not enter mana storage.");
 
             ModularFacilityRuntimeEffects.ApplyWorkCompleted(null, alarm, FacilityWorkType.Repair);
-            Require(alarm.OperationalState.alarmCharges == 0,
+            BuildingSecurityAbility securityAbility = alarm.BuildingData.GetAbility<BuildingSecurityAbility>();
+            BuildingSecurityStateModule securityState = alarm.RequireStateModule<BuildingSecurityStateModule>(
+                BuildingStateModuleIds.ForAbility("security", securityAbility.AbilityId));
+            Require(securityState.AlarmCharges == 0,
                 "Repairing an alarm must not arm it.");
             for (int i = 0; i < 5; i++)
             {
                 ModularFacilityRuntimeEffects.ApplyWorkCompleted(null, alarm, FacilityWorkType.Guard);
             }
-            Require(alarm.OperationalState.alarmCharges == 3,
+            Require(securityState.AlarmCharges == 3,
                 "Alarm charges must cap at three guard completions.");
 
             foreach (BuildableObject part in hearth.GetRoomOperationalProfile().Parts)
             {
-                part.OperationalState.cleanliness = 12f;
+                part.SetCleanliness(12f);
             }
             ModularFacilityRuntimeEffects.ApplyWorkCompleted(null, toilet, FacilityWorkType.Clean);
-            Require(hearth.GetRoomOperationalProfile().Parts.All(part => Mathf.Approximately(part.OperationalState.cleanliness, 100f)),
+            Require(hearth.GetRoomOperationalProfile().Parts.All(part => Mathf.Approximately(part.FacilityState.cleanliness, 100f)),
                 "Cleaning did not restore every facility in the room.");
 
-            Light2D light = torch.GetComponent<Light2D>();
+            Light2D light = torch.GetComponentInChildren<Light2D>();
+            BuildingLightingAbility torchLighting = torch.BuildingData.GetAbility<BuildingLightingAbility>();
+            RoomClippedLight2D clippedLight = torch.GetComponentInChildren<RoomClippedLight2D>();
+            clippedLight?.ForceRefresh();
             Require(light != null
-                    && light.lightType == Light2D.LightType.Point
-                    && Mathf.Approximately(light.intensity, torch.Operational.lightIntensity)
-                    && Mathf.Approximately(light.pointLightOuterRadius, torch.Operational.lightRadius),
-                "Lighting facility did not create its configured runtime Light2D.");
+                    && torchLighting != null
+                    && clippedLight != null
+                    && clippedLight.HasCurrentWorldRect
+                    && light.lightType == Light2D.LightType.Freeform
+                    && clippedLight.CurrentFalloffSize > 0.25f
+                    && Mathf.Approximately(light.intensity, torchLighting.intensity)
+                    && Mathf.Approximately(light.pointLightOuterRadius, torchLighting.radius),
+                "Lighting facility did not create its configured room-clipped runtime Light2D.");
+            Require(light.targetSortingLayers != null
+                    && !light.targetSortingLayers.Contains(SortingLayer.NameToID("Wall"))
+                    && light.targetSortingLayers.Contains(SortingLayer.NameToID("DungeonBackObject")),
+                "Lighting facility must not affect the Wall sorting layer used by ceilings.");
+            Require(clippedLight.CurrentWorldRect.xMin >= grid.GetWorldPos(new Vector2Int(27, 0)).x - 0.5f,
+                "Lighting facility leaked past the left room boundary.");
+            Require(clippedLight.CurrentWorldRect.xMax <= grid.GetWorldPos(new Vector2Int(2, 0)).x + 0.5f,
+                "Lighting facility leaked past the right room boundary.");
+            Require(clippedLight.CurrentCoreRect.width < clippedLight.CurrentWorldRect.width
+                    && clippedLight.CurrentCoreRect.height < clippedLight.CurrentWorldRect.height,
+                "Lighting facility should fade out inside the clipped room instead of cutting off at the wall.");
+            Require(clippedLight.CurrentShapePointCount >= 16,
+                "Lighting facility should use a rounded freeform path instead of a visible rectangle.");
 
             GameObject actorObject = new GameObject("Modular Operational Outcome Actor");
             cleanup.Add(actorObject);
@@ -513,9 +703,9 @@ public static class ModularFacilityDebugScenarios
                 .Where(factor => factor.Kind == CharacterMoodFactorKind.Interaction)
                 .Select(factor => factor.Label)
                 .ToArray();
-            Require(trainingLabels.Contains("근접 훈련의 감각이 살아남")
+            Require(trainingLabels.Contains("근접 훈련 감각이 살아남")
                     && trainingLabels.Contains("과녁에 집중해 마음이 맑아짐")
-                    && trainingLabels.Contains("고된 훈련을 끝낸 성취감"),
+                    && trainingLabels.Contains("묵직한 훈련으로 성취감이 남음"),
                 "Training facilities did not create their distinct mood experiences.");
         }
         finally
@@ -548,7 +738,12 @@ public static class ModularFacilityDebugScenarios
             Facility foodShelf = (Facility)CreateAndRegister(foodGrid, Load("D10"), new Vector2Int(13, 0), created);
             Facility logistics = (Facility)CreateAndRegister(foodGrid, Load("L01"), new Vector2Int(15, 0), created);
             Shop foodShop = (Shop)CreateAndRegister(foodGrid, Load("S01"), new Vector2Int(18, 0), created);
-            foodShop.ConstructShop(gameDataProvider, ShopStockCatalog, numberFeedback, workforce);
+            foodShop.ConstructShop(
+                gameDataProvider,
+                ShopStockCatalog,
+                numberFeedback,
+                workforce,
+                FacilityCrimeEditorTestDependencies.Evaluator);
 
             FacilityRoomOperationalProfile foodProfile = hearth.GetRoomOperationalProfile();
             Require(foodProfile.IsUsableRoom
@@ -590,7 +785,12 @@ public static class ModularFacilityDebugScenarios
             CreateAndRegister(weaponGrid, Load("S06"), new Vector2Int(6, 0), created);
             CreateAndRegister(weaponGrid, Load("S07"), new Vector2Int(8, 0), created);
             Shop weaponShop = (Shop)CreateAndRegister(weaponGrid, Load("S01"), new Vector2Int(11, 0), created);
-            weaponShop.ConstructShop(gameDataProvider, ShopStockCatalog, numberFeedback, workforce);
+            weaponShop.ConstructShop(
+                gameDataProvider,
+                ShopStockCatalog,
+                numberFeedback,
+                workforce,
+                FacilityCrimeEditorTestDependencies.Evaluator);
             Require(weaponShop.ActiveStockCategory == StockCategory.Weapon,
                 $"Weapon room specialized as {weaponShop.ActiveStockCategory}.");
             VerifyShopProducts(weaponShop, StockCategory.Weapon, "weapon specialization");
@@ -598,10 +798,28 @@ public static class ModularFacilityDebugScenarios
             Grid generalGrid = CreateFormalRoomGrid(14, created, cleanup);
             CreateAndRegister(generalGrid, Load("S02"), new Vector2Int(5, 0), created);
             Shop generalShop = (Shop)CreateAndRegister(generalGrid, Load("S01"), new Vector2Int(8, 0), created);
-            generalShop.ConstructShop(gameDataProvider, ShopStockCatalog, numberFeedback, workforce);
+            generalShop.ConstructShop(
+                gameDataProvider,
+                ShopStockCatalog,
+                numberFeedback,
+                workforce,
+                FacilityCrimeEditorTestDependencies.Evaluator);
             Require(generalShop.ActiveStockCategory == StockCategory.General,
                 $"General room specialized as {generalShop.ActiveStockCategory}.");
             VerifyShopProducts(generalShop, StockCategory.General, "general specialization");
+
+            Grid manaGrid = CreateFormalRoomGrid(18, created, cleanup);
+            CreateAndRegister(manaGrid, Load("Q02"), new Vector2Int(4, 0), created);
+            CreateAndRegister(manaGrid, Load("M04"), new Vector2Int(7, 0), created);
+            Shop manaShop = (Shop)CreateAndRegister(manaGrid, Load("S01"), new Vector2Int(11, 0), created);
+            manaShop.ConstructShop(
+                gameDataProvider,
+                ShopStockCatalog,
+                numberFeedback,
+                workforce,
+                FacilityCrimeEditorTestDependencies.Evaluator);
+            Require(manaShop.ActiveStockCategory == StockCategory.Mana,
+                $"Mana room specialized as {manaShop.ActiveStockCategory}.");
         }
         finally
         {
@@ -636,7 +854,8 @@ public static class ModularFacilityDebugScenarios
                 new FixedGameDataProvider(gameData),
                 ShopStockCatalog,
                 new NoopFloatingNumberFeedbackService(),
-                new NoopWorkforceReplanService());
+                new NoopWorkforceReplanService(),
+                FacilityCrimeEditorTestDependencies.Evaluator);
 
             if (!shop.HasAvailableStock
                 && ShopStockCatalog.TryGetSaleItemByCategory(shop.ActiveStockCategory, out SaleItem stockItem))
@@ -799,7 +1018,7 @@ public static class ModularFacilityDebugScenarios
 
     private static void VerifyShopProducts(Shop shop, StockCategory expected, string context)
     {
-        ShopProductSnapshot[] products = shop.ProductSnapshots.ToArray();
+        RetailProductSnapshot[] products = shop.ProductSnapshots.ToArray();
         Require(products.Length > 0, $"{context} exposed no products.");
         Require(products.All(product => ShopStockCatalog.GetStockCategory(product.Id) == expected),
             $"{context} exposed a product outside {expected}.");
@@ -839,7 +1058,8 @@ public static class ModularFacilityDebugScenarios
         Require(assets.All((asset) => asset.sprite != null && asset.icon != null), "Every modular facility needs a sprite and icon.");
         Require(assets.All((asset) => asset.type != null && typeof(BuildableObject).IsAssignableFrom(asset.type)), "Every modular facility needs a buildable runtime type.");
         Require(assets.All((asset) => asset.unlocked), "All produced modular parts must be visible for the current verification build.");
-        Require(assets.All((asset) => !asset.Facility.selfContainedRoom), "Modular facilities cannot claim self-contained rooms.");
+        Require(assets.All((asset) => asset.Facility == null || !asset.IsSelfContainedRoom()),
+            "Modular facilities cannot claim self-contained rooms.");
 
         string[] codes = ModularFacilityAssetBuilder.GetCatalogCodes().ToArray();
         Require(codes.Length == 73 && codes.Distinct(StringComparer.Ordinal).Count() == 73, "Catalog codes must contain 73 unique values.");
@@ -902,8 +1122,18 @@ public static class ModularFacilityDebugScenarios
                     SpriteRenderer renderer = instance.GetComponentInChildren<SpriteRenderer>();
                     Require(renderer != null && renderer.sprite == asset.sprite,
                         $"{asset.name} did not create its independent renderer.");
-                    Require(renderer.sortingLayerName == (asset.layer == GridLayer.FloorOverlay ? "DungeonHallway" : "Wall"),
+                    string expectedLayer = asset.layer == GridLayer.FloorOverlay
+                        ? "DungeonHallway"
+                        : "DungeonBackObject";
+                    Require(renderer.sortingLayerName == expectedLayer,
                         $"{asset.name} uses unexpected sorting layer {renderer.sortingLayerName}.");
+                    if (asset.layer == GridLayer.WallFixture || asset.layer == GridLayer.CeilingFixture)
+                    {
+                        Require(renderer.sortingOrder < 100,
+                            $"{asset.name} mounted fixture should render behind room furniture, order {renderer.sortingOrder}.");
+                        Require(renderer.transform.localPosition.y > 1.5f,
+                            $"{asset.name} mounted fixture should attach to the upper wall/ceiling, local y {renderer.transform.localPosition.y}.");
+                    }
                 }
 
                 cursor += Mathf.Max(1, asset.width) + 2;
@@ -913,7 +1143,7 @@ public static class ModularFacilityDebugScenarios
             Facility warehouse = created.FirstOrDefault((item) => item != null && item.id == 1050) as Facility;
             Require(warehouse != null && warehouse.HasWarehouseInventory,
                 "L01 did not create its warehouse inventory.");
-            Require(warehouse.Inventory.TotalStock == warehouse.BuildingData.Facility.internalStockMax,
+            Require(warehouse.Inventory.TotalStock == warehouse.GetInternalStockCapacity(),
                 "L01 warehouse inventory was not seeded to its configured capacity.");
             Require(created.FirstOrDefault((item) => item != null && item.id == 1012) is Shop,
                 "S01 did not create a Shop runtime component.");
@@ -950,12 +1180,12 @@ public static class ModularFacilityDebugScenarios
 
     private static void VerifyExtendedRoomRoles()
     {
-        RoomRole roles = RoomRoleUtility.FromFacilityRoles(
+        FacilityRole roles = (
             FacilityRole.Administration | FacilityRole.Security);
-        Require((roles & RoomRole.Administration) != 0, "Administration facility role did not create an administration room role.");
-        Require((roles & RoomRole.Security) != 0, "Security facility role did not create a security room role.");
-        Require(RoomEnvironmentPresentation.GetRoomName(RoomRole.Administration) == "사장실", "Administration room name is not connected.");
-        Require(RoomEnvironmentPresentation.GetRoomName(RoomRole.Security) == "경비실", "Security room name is not connected.");
+        Require((roles & FacilityRole.Administration) != 0, "Administration facility role did not create an administration room role.");
+        Require((roles & FacilityRole.Security) != 0, "Security facility role did not create a security room role.");
+        Require(RoomEnvironmentPresentation.GetRoomName(FacilityRole.Administration) == "사장실", "Administration room name is not connected.");
+        Require(RoomEnvironmentPresentation.GetRoomName(FacilityRole.Security) == "경비실", "Security room name is not connected.");
     }
 
     private static void VerifyLegacyInitialPlacementRecipes()
@@ -1116,7 +1346,7 @@ public static class ModularFacilityDebugScenarios
                 int visitableCount = 0;
                 int mountedCount = 0;
                 string roomName = string.Empty;
-                RoomRole roles = RoomRole.None;
+                FacilityRole roles = FacilityRole.None;
                 bool usable = false;
                 bool hasDoor = false;
                 string result = "PASS";
@@ -1139,7 +1369,12 @@ public static class ModularFacilityDebugScenarios
                         parts.Add(part);
                         if (part is Shop shop)
                         {
-                            shop.ConstructShop(gameDataProvider, ShopStockCatalog, numberFeedback, workforce);
+                            shop.ConstructShop(
+                                gameDataProvider,
+                                ShopStockCatalog,
+                                numberFeedback,
+                                workforce,
+                                FacilityCrimeEditorTestDependencies.Evaluator);
                         }
                     }
 
@@ -1156,9 +1391,9 @@ public static class ModularFacilityDebugScenarios
                     FacilityRole facilityRoles = parts.Aggregate(
                         FacilityRole.None,
                         (current, part) => current | (part.Facility?.roles ?? FacilityRole.None));
-                    RoomRole expectedRoles = RoomRoleUtility.FromFacilityRoles(facilityRoles);
+                    FacilityRole expectedRoles = (facilityRoles);
                     Require(usable && hasDoor, $"{monolith.name} room is not closed and usable.");
-                    Require(expectedRoles != RoomRole.None && (roles & expectedRoles) == expectedRoles,
+                    Require(expectedRoles != FacilityRole.None && (roles & expectedRoles) == expectedRoles,
                         $"{monolith.name} roles {roles} do not contain {expectedRoles}.");
                     Require(!string.IsNullOrWhiteSpace(roomName), $"{monolith.name} has no room presentation name.");
 
@@ -1257,7 +1492,7 @@ public static class ModularFacilityDebugScenarios
                     && candidate.ContainsPart(alchemyBench));
             Require(room != null && room.IsUsable && room.HasDoor,
                 "Modular research room was not recognized as a usable formal room.");
-            Require((room.Roles & RoomRole.Research) != 0 && (room.Roles & RoomRole.Mana) != 0,
+            Require((room.Roles & FacilityRole.Research) != 0 && (room.Roles & FacilityRole.Mana) != 0,
                 $"Unexpected modular room roles: {room.Roles}.");
 
             RoomEnvironmentSettingsSO settings = ScriptableObject.CreateInstance<RoomEnvironmentSettingsSO>();
@@ -1271,10 +1506,10 @@ public static class ModularFacilityDebugScenarios
             Require(snapshot.Fixtures.Contains(chandelier) && snapshot.Luxury > 0f,
                 "Ceiling fixture did not contribute to the modular room environment.");
             Require(snapshot.RoleContributions.Count == 2
-                && snapshot.RoleContributions.First((entry) => entry.Role == RoomRole.Research).Count == 2
-                && snapshot.RoleContributions.First((entry) => entry.Role == RoomRole.Mana).Count == 1,
+                && snapshot.RoleContributions.First((entry) => entry.Role == FacilityRole.Research).Count == 2
+                && snapshot.RoleContributions.First((entry) => entry.Role == FacilityRole.Mana).Count == 1,
                 "Core modular facilities did not produce the expected composite role counts.");
-            Require(snapshot.PrimaryRole == RoomRole.Research && !snapshot.UsesMixedColor,
+            Require(snapshot.PrimaryRole == FacilityRole.Research && !snapshot.UsesMixedColor,
                 "Research should be the unique primary role in the modular room.");
             Require(RoomEnvironmentPresentation.GetRoomName(snapshot.Roles) == "연구 + 마나",
                 "Composite modular room name was not connected to the presentation layer.");
@@ -1304,9 +1539,11 @@ public static class ModularFacilityDebugScenarios
         data.height = 1;
         data.layer = GridLayer.Building;
         data.category = category;
-        data.type = typeof(BuildableObject);
-        data.facility = new FacilityData();
-        data.evolution = new FacilityEvolutionContributionData();
+        data.type = category == BuildingCategory.Movement
+            ? typeof(Door)
+            : typeof(BuildableObject);
+        data.Facility = new FacilityData();
+        data.Evolution = new FacilityEvolutionContributionData();
         cleanup.Add(data);
         CreateAndRegister(grid, data, position, created);
     }
@@ -1318,6 +1555,16 @@ public static class ModularFacilityDebugScenarios
             .Select(AssetDatabase.LoadAssetAtPath<BuildingSO>)
             .Where((asset) => asset != null)
             .OrderBy((asset) => asset.id)
+            .ToArray();
+    }
+
+    private static BuildingSO[] LoadEveryBuildingAsset()
+    {
+        return AssetDatabase.FindAssets("t:BuildingSO", new[] { "Assets" })
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Select(AssetDatabase.LoadAssetAtPath<BuildingSO>)
+            .Where(asset => asset != null)
+            .OrderBy(AssetDatabase.GetAssetPath, StringComparer.Ordinal)
             .ToArray();
     }
 
@@ -1534,6 +1781,10 @@ public static class ModularFacilityDebugScenarios
     private sealed class NoopWorkforceReplanService : IWorkforceReplanService
     {
         public void RequestIdleWorkersToReplan(bool clearFailures = true)
+        {
+        }
+
+        public void RequestOneWorkerToReplanFor(FacilityWorkType workType, bool clearFailures = true)
         {
         }
     }

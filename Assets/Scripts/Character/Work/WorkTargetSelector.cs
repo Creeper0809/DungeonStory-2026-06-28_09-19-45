@@ -26,14 +26,24 @@ public sealed class WorkTargetSelector
         if (!canStartWork && !HasUrgentAvailableWork(searchResult, requestedWorkType))
         {
             work.AssignWork(null, FacilityWorkType.None);
-            work.WorkerActor?.AddLog(work.IsOffDuty ? "작업 보류: 비번" : "작업 보류: 피로/기분 보호");
+            work.WorkerActor?.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Duty,
+                CharacterActivityOutcomes.Blocked,
+                work.IsOffDuty ? "작업 보류: 비번" : "작업 보류: 피로/기분 보호",
+                reasonCode: work.IsOffDuty ? "off-duty" : "wellbeing-protection",
+                sentiment: -0.2f,
+                bubbleEligible: true));
             return false;
         }
 
         if (!canStartWork)
         {
             work.SetDutyState(AbilityWork.DutyState.OnDuty);
-            work.WorkerActor?.AddLog("비번 중 긴급 작업 합류");
+            work.WorkerActor?.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Duty,
+                CharacterActivityOutcomes.Responded,
+                "비번 중 긴급 작업 합류",
+                reasonCode: "urgent-work"));
         }
 
         if (work.PriorityWorkTarget != null)
@@ -53,7 +63,13 @@ public sealed class WorkTargetSelector
                 return true;
             }
 
-            work.WorkerActor?.AddLog("우선 작업 취소: 대상 사용 불가");
+            work.WorkerActor?.AddActivity(CharacterActivityEvent.Work(
+                work.PriorityWorkType,
+                CharacterActivityOutcomes.Cancelled,
+                "우선 작업 취소: 대상 사용 불가",
+                work.PriorityWorkTarget,
+                reasonCode: "target-unavailable",
+                bubbleEligible: true));
             work.ClearPriorityWorkTarget();
         }
 
@@ -217,12 +233,13 @@ public sealed class WorkTargetSelector
             return false;
         }
 
-        if (!workable.CanAssignWorker(work.WorkerActor, out string failureReason))
+        FacilityAssignmentStatus workerStatus = workable.GetWorkerAssignmentStatus(work.WorkerActor);
+        if (!workerStatus.IsAllowed)
         {
             bestCandidate = WorkTargetCandidate.Invalid(
                 building,
-                failureReason,
-                AIActionFailure.ClassifyKind(failureReason, AIActionFailureKind.CannotStart));
+                workerStatus.Reason,
+                workerStatus.FailureKind.ToAiActionFailureKind());
             LastRejectedCandidate = bestCandidate;
             return false;
         }
@@ -252,25 +269,27 @@ public sealed class WorkTargetSelector
 
             if (workType == FacilityWorkType.Restock)
             {
-                if (building is not Shop shop)
+                if (building is not IRestockableFacility restockable)
                 {
-                    lastWorkTypeFailure = AIActionFailure.FromReason(
-                        "보충 대상 상점이 아닙니다",
+                    lastWorkTypeFailure = AIActionFailure.Create(
                         AIActionFailureKind.Unsupported,
+                        "재고를 보충할 수 없는 시설입니다",
                         building);
                     continue;
                 }
 
-                if (!shop.NeedsRestock)
+                if (!restockable.NeedsRestock)
                 {
                     continue;
                 }
 
-                if (!shop.HasRestockSupply(FindReachableWarehouses(searchResult), out failureReason))
+                if (!restockable.HasRestockSupply(
+                    FindReachableWarehouses(searchResult),
+                    out string supplyFailureReason))
                 {
-                    lastWorkTypeFailure = AIActionFailure.FromReason(
-                        failureReason,
+                    lastWorkTypeFailure = AIActionFailure.Create(
                         AIActionFailureKind.NoWork,
+                        supplyFailureReason,
                         building);
                     continue;
                 }
@@ -278,6 +297,11 @@ public sealed class WorkTargetSelector
 
             if (workType == FacilityWorkType.Research
                 && !work.BlueprintResearchWorkService.HasResearchWorkFor(building))
+            {
+                continue;
+            }
+
+            if (workType == FacilityWorkType.Craft && !building.HasPendingEquipmentCraftWork())
             {
                 continue;
             }
@@ -290,11 +314,12 @@ public sealed class WorkTargetSelector
                 continue;
             }
 
-            if (!building.CanAssignWork(workType, out failureReason))
+            FacilityAssignmentStatus workStatus = building.GetWorkAssignmentStatus(workType);
+            if (!workStatus.IsAllowed)
             {
-                lastWorkTypeFailure = AIActionFailure.FromReason(
-                    failureReason,
-                    AIActionFailureKind.NoWork,
+                lastWorkTypeFailure = AIActionFailure.Create(
+                    workStatus.FailureKind.ToAiActionFailureKind(),
+                    workStatus.Reason,
                     building);
                 continue;
             }
@@ -385,11 +410,16 @@ public sealed class WorkTargetSelector
         return Mathf.Clamp(25f - path.Count, 0f, 25f);
     }
 
-    private static float GetRoomContextScore(BuildableObject building)
+    private float GetRoomContextScore(BuildableObject building)
     {
         if (building == null)
         {
             return 0f;
+        }
+
+        if (work.RoomEnvironmentQuery != null)
+        {
+            return work.RoomEnvironmentQuery.GetFacilityPreferenceScore(building);
         }
 
         try
@@ -402,7 +432,7 @@ public sealed class WorkTargetSelector
 
             if (!profile.IsUsableRoom)
             {
-                return building.Facility != null && building.Facility.requiresRoomRole ? -15f : 0f;
+                return building.BuildingData.RequiresRoomRole() ? -15f : 0f;
             }
 
             return Mathf.Lerp(8f, 28f, profile.Room.GetQualityScore());
@@ -420,7 +450,7 @@ public sealed class WorkTargetSelector
             return 0f;
         }
 
-        float score = Mathf.Lerp(-8f, 12f, Mathf.Clamp01(building.OperationalState.cleanliness / 100f));
+        float score = Mathf.Lerp(-8f, 12f, Mathf.Clamp01(building.FacilityState.cleanliness / 100f));
         if (building.IsDamaged && workType != FacilityWorkType.Repair)
         {
             score -= 18f;

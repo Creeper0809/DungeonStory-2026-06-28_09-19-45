@@ -14,22 +14,37 @@ public class InvasionCombatReportRuntime : MonoBehaviour,
     [SerializeField] private int maxActivationNoticeLength = 64;
 
     private InvasionCombatReport currentReport;
+    private InvasionCombatReportSnapshot currentReportView;
     private bool isRecording;
-    private readonly System.Collections.Generic.List<InvasionCombatReport> reportHistory = new System.Collections.Generic.List<InvasionCombatReport>();
+    private readonly System.Collections.Generic.List<InvasionCombatReportSnapshot> reportHistory = new System.Collections.Generic.List<InvasionCombatReportSnapshot>();
+    private System.Collections.Generic.IReadOnlyList<InvasionCombatReportSnapshot> reportHistoryView;
 
-    public InvasionCombatReport CurrentReport => currentReport;
-    public System.Collections.Generic.IReadOnlyList<InvasionCombatReport> ReportHistory => reportHistory;
+    public InvasionCombatReportSnapshot CurrentReport => currentReportView;
+    public System.Collections.Generic.IReadOnlyList<InvasionCombatReportSnapshot> ReportHistory
+    {
+        get
+        {
+            if (reportHistoryView == null)
+            {
+                reportHistoryView = reportHistory.AsReadOnly();
+            }
+
+            return reportHistoryView;
+        }
+    }
 
     public void OnTriggerEvent(InvasionStartedEvent eventType)
     {
         currentReport = new InvasionCombatReport(eventType.snapshot);
         isRecording = true;
+        RefreshCurrentReportView();
     }
 
     public void OnTriggerEvent(InvasionSpawnedEvent eventType)
     {
         EnsureReport(eventType.threatSnapshot).SetIntruder(eventType.intruderActor);
         isRecording = true;
+        RefreshCurrentReportView();
     }
 
     public void OnTriggerEvent(DefenseFacilityTriggeredEvent eventType)
@@ -40,6 +55,7 @@ public class InvasionCombatReportRuntime : MonoBehaviour,
         }
 
         currentReport.RecordDefenseActivation(eventType.report);
+        RefreshCurrentReportView();
         string message = InvasionCombatReportFormatter.FormatActivation(eventType.report);
         InvasionCombatFeedbackEvent.Trigger(message, eventType.report);
 
@@ -57,6 +73,7 @@ public class InvasionCombatReportRuntime : MonoBehaviour,
         }
 
         currentReport.RecordFacilityDamage(eventType.facility);
+        RefreshCurrentReportView();
     }
 
     public void OnTriggerEvent(InvasionFinalCombatStartedEvent eventType)
@@ -67,6 +84,7 @@ public class InvasionCombatReportRuntime : MonoBehaviour,
         }
 
         currentReport.RecordFinalCombat(eventType.ownerActor);
+        RefreshCurrentReportView();
     }
 
     public void OnTriggerEvent(InvasionResolvedEvent eventType)
@@ -78,16 +96,19 @@ public class InvasionCombatReportRuntime : MonoBehaviour,
 
         currentReport.Resolve(eventType.defended, eventType.residualRisk);
         isRecording = false;
-        reportHistory.Insert(0, currentReport);
+        InvasionCombatReportSnapshot completedReport = currentReport.CreateSnapshot();
+        currentReportView = completedReport;
+        reportHistory.Insert(0, completedReport);
         if (reportHistory.Count > MaxReportHistory)
         {
             reportHistory.RemoveRange(MaxReportHistory, reportHistory.Count - MaxReportHistory);
         }
 
-        InvasionCombatReportReadyEvent.Trigger(currentReport);
+        InvasionCombatReportReadyEvent.Trigger(completedReport);
         EventAlertService.RaiseInvasionResult(
-            currentReport.ToDetailText(),
+            completedReport.ToDetailText(),
             eventType.defended ? EventAlertImportance.Medium : EventAlertImportance.High);
+        currentReport = null;
     }
 
     private void OnEnable()
@@ -114,6 +135,11 @@ public class InvasionCombatReportRuntime : MonoBehaviour,
     {
         currentReport ??= new InvasionCombatReport(snapshot);
         return currentReport;
+    }
+
+    private void RefreshCurrentReportView()
+    {
+        currentReportView = currentReport != null ? currentReport.CreateSnapshot() : currentReportView;
     }
 
     private string ClampLine(string message)

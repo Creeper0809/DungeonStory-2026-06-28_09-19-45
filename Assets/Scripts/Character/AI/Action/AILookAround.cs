@@ -6,6 +6,12 @@ using Random = UnityEngine.Random;
 [CreateAssetMenu(menuName = "DungeonStory/AI/Action/LookAround", order = 0)]
 public class AILookAround : AIActionSet
 {
+    private static readonly CharacterAiActionDescriptor ActionDescriptor = new CharacterAiActionDescriptor(
+        CharacterAiBranch.LookAround,
+        "둘러보기",
+        CharacterAiActionTags.Curiosity);
+
+    public override CharacterAiActionDescriptor Descriptor => ActionDescriptor;
     private const float FallbackScore = 0.05f;
 
     [SerializeField] private float minWaitDuration = 0.5f;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -23,9 +24,13 @@ public static class RegularCustomerDebugScenarios
         RunScenario("방문 횟수와 평균 만족도 기록", VerifyVisitCountAndAverageSatisfaction, errors);
         RunScenario("단골 기준 달성", VerifyRegularThreshold, errors);
         RunScenario("영입 후보 기준 달성", VerifyRecruitCandidateThreshold, errors);
+        RunScenario("기본 던전 만족도로 영입 루프 도달", VerifyDefaultRecruitmentThreshold, errors);
         RunScenario("영입 결과와 소비 고객 제외", VerifyRecruitmentConsumesCustomer, errors);
         RunScenario("낮은 만족도는 단골 제외", VerifyLowSatisfactionDoesNotBecomeRegular, errors);
         RunScenario("방문 이벤트 런타임 연결", VerifyRuntimeEvents, errors);
+
+        RunScenario("offense reward promotes known visitors into recruit candidates", VerifyOffenseRewardPromotesCandidates, errors);
+        RunScenario("visit event keeps an immutable customer snapshot", VerifyVisitEventSnapshotDoesNotDrift, errors);
 
         if (errors.Count > 0)
         {
@@ -128,7 +133,8 @@ public static class RegularCustomerDebugScenarios
             state.RecordVisit(CharacterActor.From(customer), rules);
         }
 
-        bool recruited = state.TryRecruit(customer.data.id, out RegularCustomerRecruitResult result);
+        string customerId = RegularCustomerService.GetCustomerId(customer);
+        bool recruited = state.TryRecruit(customerId, out RegularCustomerRecruitResult result);
         bool canSpawnAgain = RegularCustomerService.CanSpawnAsCustomer(customer.data, state);
         bool valid = recruited
             && result.Success
@@ -137,7 +143,8 @@ public static class RegularCustomerDebugScenarios
             && (result.Capabilities & RecruitCapability.Defense) != 0
             && (result.Capabilities & RecruitCapability.Expedition) != 0
             && state.RecruitedCharacters.Count == 1
-            && !canSpawnAgain;
+            && state.IsRecruited(customerId)
+            && canSpawnAgain;
 
         DestroyCustomer(customer);
         return valid;
@@ -166,6 +173,7 @@ public static class RegularCustomerDebugScenarios
     {
         GameObject runtimeObject = new GameObject("RegularCustomerRuntime_Test");
         RegularCustomerRuntime runtime = runtimeObject.AddComponent<RegularCustomerRuntime>();
+        runtime.ConstructRecruitmentRuntime(new FakeRecruitActivationService());
         CharacterActor customer = CreateCustomer(106, "Runtime Candidate", "Orc", 85f);
         BuildableObject facility = CreateFacility();
 
@@ -177,18 +185,104 @@ public static class RegularCustomerDebugScenarios
             runtime.OnTriggerEvent(new FacilityVisitEvent(CharacterActor.From(customer), facility));
         }
 
-        bool recruitSuccess = runtime.TryRecruit(customer.data.id, out RegularCustomerRecruitResult recruitResult);
+        string customerId = RegularCustomerService.GetCustomerId(customer);
+        bool recruitSuccess = runtime.TryRecruit(customerId, out RegularCustomerRecruitResult recruitResult);
         bool valid = regularListener.Count == 1
             && candidateListener.Count == 1
             && recruitSuccess
             && recruitResult.Success
-            && runtime.State.IsRecruited(customer.data.id);
+            && runtime.State.IsRecruited(customerId);
 
         Object.DestroyImmediate(facility.BuildingData);
         Object.DestroyImmediate(facility.gameObject);
         DestroyCustomer(customer);
         Object.DestroyImmediate(runtimeObject);
         return valid;
+    }
+
+    private static bool VerifyVisitEventSnapshotDoesNotDrift()
+    {
+        RegularCustomerState state = new RegularCustomerState();
+        RegularCustomerRules rules = CreateTestRules();
+        CharacterActor customer = CreateCustomer(107, "Snapshot Customer", "Slime", 80f);
+        try
+        {
+            RegularCustomerVisitResult first = state.RecordVisit(CharacterActor.From(customer), rules);
+            RegularCustomerUpdatedEvent published = new RegularCustomerUpdatedEvent(first);
+            state.RecordVisit(CharacterActor.From(customer), rules);
+
+            return published.result.customer != null
+                && published.result.customer.visitCount == 1
+                && first.Record.VisitCount == 2;
+        }
+        finally
+        {
+            DestroyCustomer(customer);
+        }
+    }
+
+    private static bool VerifyDefaultRecruitmentThreshold()
+    {
+        RegularCustomerState state = new RegularCustomerState();
+        RegularCustomerRules rules = RegularCustomerRules.CreateDefault();
+        CharacterActor customer = CreateCustomer(108, "Starter Dungeon Recruit", "Slime", 65f);
+
+        for (int i = 0; i < rules.recruitCandidateVisitThreshold; i++)
+        {
+            state.RecordVisit(CharacterActor.From(customer), rules);
+        }
+
+        bool valid = state.TryGetRecord(RegularCustomerService.GetCustomerId(customer), out RegularCustomerRecord record)
+            && record.Status == RegularCustomerStatus.RecruitCandidate;
+        DestroyCustomer(customer);
+        return valid;
+    }
+
+    private static bool VerifyOffenseRewardPromotesCandidates()
+    {
+        GameObject runtimeObject = new GameObject("RegularCustomerRewardPromotion_Test");
+        RegularCustomerRuntime runtime = runtimeObject.AddComponent<RegularCustomerRuntime>();
+        RegularCustomerRules rules = RegularCustomerRules.CreateDefault();
+        CharacterActor first = CreateCustomer(109, "Reward Visitor A", "Slime", 92f);
+        CharacterActor second = CreateCustomer(110, "Reward Visitor B", "Slime", 74f);
+        CharacterActor third = CreateCustomer(111, "Reward Visitor C", "Slime", 55f);
+
+        try
+        {
+            runtime.State.RecordVisit(CharacterActor.From(first), rules);
+            runtime.State.RecordVisit(CharacterActor.From(second), rules);
+            runtime.State.RecordVisit(CharacterActor.From(third), rules);
+
+            using CountingCandidateListener candidateListener = new CountingCandidateListener();
+            runtime.OnTriggerEvent(new OffenseRewardGrantedEvent(
+                null,
+                new[]
+                {
+                    new OffenseRewardGrantResult(
+                        OffenseRewardCategory.RecruitCandidate,
+                        "Reward recruits",
+                        2,
+                        2,
+                        true,
+                        "test")
+                }));
+
+            IReadOnlyList<RegularCustomerRecord> candidates = runtime.State.Records
+                .Where(record => record.IsRecruitCandidate)
+                .OrderByDescending(record => record.AverageSatisfaction)
+                .ToArray();
+            return candidates.Count == 2
+                && candidates[0].CustomerId == RegularCustomerService.GetCustomerId(first)
+                && candidates[1].CustomerId == RegularCustomerService.GetCustomerId(second)
+                && candidateListener.Count == 2;
+        }
+        finally
+        {
+            DestroyCustomer(first);
+            DestroyCustomer(second);
+            DestroyCustomer(third);
+            Object.DestroyImmediate(runtimeObject);
+        }
     }
 
     private static RegularCustomerRules CreateTestRules()
@@ -218,6 +312,7 @@ public static class RegularCustomerDebugScenarios
 
         character.data = data;
         character.characterType = CharacterType.Customer;
+        character.Identity.SetPersistentId($"world:test:{id:D6}");
         character.stats ??= new Dictionary<CharacterCondition, float>();
         character.stats[CharacterCondition.HUNGER] = 100f;
         character.stats[CharacterCondition.SLEEP] = 100f;
@@ -236,7 +331,7 @@ public static class RegularCustomerDebugScenarios
         data.width = 1;
         data.height = 1;
         data.category = BuildingCategory.Shop;
-        data.facility = new FacilityData
+        data.Facility = new FacilityData
         {
             roles = FacilityRole.Meal,
             capacity = 1,
@@ -295,6 +390,31 @@ public static class RegularCustomerDebugScenarios
         public void Dispose()
         {
             this.EventStopListening<RecruitCandidateDiscoveredEvent>();
+        }
+    }
+
+    private sealed class FakeRecruitActivationService : IRecruitedCharacterActivationService
+    {
+        public bool TryActivate(
+            RegularCustomerRecord record,
+            out CharacterActor actor,
+            out string message)
+        {
+            actor = record?.ActiveActor;
+            if (actor != null)
+            {
+                actor.characterType = CharacterType.NPC;
+                actor.SetLifecycleState(CharacterLifecycleState.Active);
+                if (actor.GetComponent<AbilityWork>() == null)
+                {
+                    actor.gameObject.AddComponent<AbilityWork>();
+                }
+
+                actor.RefreshAbilityCache();
+            }
+
+            message = "activated";
+            return actor != null;
         }
     }
 }

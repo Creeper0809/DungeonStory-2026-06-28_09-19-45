@@ -18,8 +18,10 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
     private IGridTextureProvider gridTextureProvider;
     private IObjectResolver objectResolver;
     private IGameDataProvider gameDataProvider;
+    private IBlueprintResearchRuntimeProvider researchRuntimeProvider;
     private IGridBuildingObjectFactory gridBuildingObjectFactory;
     private IUiPointerBlocker uiPointerBlocker;
+    private IPlayerInputReader inputReader;
     private GridBuildingPlacementService placementService;
     private bool initialized;
     private bool resetGridModeAtEndOfFrame;
@@ -39,8 +41,10 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         IGridTextureProvider gridTextureProvider,
         IObjectResolver objectResolver,
         IGameDataProvider gameDataProvider,
+        IBlueprintResearchRuntimeProvider researchRuntimeProvider,
         IGridBuildingObjectFactory gridBuildingObjectFactory,
-        IUiPointerBlocker uiPointerBlocker)
+        IUiPointerBlocker uiPointerBlocker,
+        IPlayerInputReader inputReader)
     {
         this.gridSystemProvider = gridSystemProvider
             ?? throw new ArgumentNullException(nameof(gridSystemProvider));
@@ -54,10 +58,14 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
             ?? throw new ArgumentNullException(nameof(objectResolver));
         this.gameDataProvider = gameDataProvider
             ?? throw new ArgumentNullException(nameof(gameDataProvider));
+        this.researchRuntimeProvider = researchRuntimeProvider
+            ?? throw new ArgumentNullException(nameof(researchRuntimeProvider));
         this.gridBuildingObjectFactory = gridBuildingObjectFactory
             ?? throw new ArgumentNullException(nameof(gridBuildingObjectFactory));
         this.uiPointerBlocker = uiPointerBlocker
             ?? throw new ArgumentNullException(nameof(uiPointerBlocker));
+        this.inputReader = inputReader
+            ?? throw new ArgumentNullException(nameof(inputReader));
     }
 
     private void Awake()
@@ -115,6 +123,15 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
     private void Update()
     {
         if (gridSystem == null || gridSystem.grid == null) return;
+
+        if (inputReader != null
+            && inputReader.GetMouseButtonDown(0)
+            && lastPlacementInputFrame != Time.frameCount)
+        {
+            TriggerPlaceBuilding();
+            TriggerDestroyBuildableObject();
+        }
+
         if (!gridSystem.isDragging || SelectedBuilding == null) return;
 
         gridSystem.UpdateDragSelection(
@@ -401,7 +418,11 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
     private BuildingConditionContext CreateBuildingConditionContext()
     {
         ResolveGameDataProvider().TryGetGameData(out GameData gameData);
-        return new BuildingConditionContext(gameData);
+        BlueprintResearchState researchState = researchRuntimeProvider != null
+            && researchRuntimeProvider.TryGetRuntime(out BlueprintResearchRuntime runtime)
+                ? runtime.State
+                : null;
+        return new BuildingConditionContext(gameData, researchState);
     }
 
     private void ConfigurePlacedBuilding(BuildableObject building)

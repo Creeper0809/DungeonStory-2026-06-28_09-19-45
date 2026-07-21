@@ -180,9 +180,7 @@ public class FacilityEvolutionPanel :
 
     public void OnTriggerEvent(InfoFeedEvent eventType)
     {
-        if (eventType.infoable != null
-            && eventType.infoable.GetInfoType() == InfoFeedEvent.Type.BUILDING
-            && eventType.infoable is BuildingInfoTarget target)
+        if (eventType.Target is BuildingInfoTarget target)
         {
             SelectFacility(target.Building);
         }

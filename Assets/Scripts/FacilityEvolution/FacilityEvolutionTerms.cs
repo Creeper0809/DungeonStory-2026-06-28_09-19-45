@@ -111,6 +111,52 @@ public static class FacilityEvolutionTerms
     public const string HighTurnoverService = "HighTurnoverService";
 }
 
+public static class FacilityEvolutionMetricOwnership
+{
+    private static readonly HashSet<string> StructureOwnedMetrics = new HashSet<string>(StringComparer.Ordinal)
+    {
+        FacilityEvolutionTerms.RoomArea,
+        FacilityEvolutionTerms.DoorCount,
+        FacilityEvolutionTerms.SeatCount,
+        FacilityEvolutionTerms.TableCount,
+        FacilityEvolutionTerms.LargeTableCount,
+        FacilityEvolutionTerms.CounterCount,
+        FacilityEvolutionTerms.PrivateSeatCount
+    };
+
+    private static readonly HashSet<string> DerivedRoomMetrics = new HashSet<string>(StringComparer.Ordinal)
+    {
+        FacilityEvolutionTerms.FurnitureCount,
+        FacilityEvolutionTerms.SeatDensity,
+        FacilityEvolutionTerms.TableDensity,
+        FacilityEvolutionTerms.SeatPerTable,
+        FacilityEvolutionTerms.LargeTableRatio,
+        FacilityEvolutionTerms.CounterRatio,
+        FacilityEvolutionTerms.PrivateSeatRatio,
+        FacilityEvolutionTerms.AverageSeatSpacing,
+        FacilityEvolutionTerms.LuxuryPerSeat,
+        FacilityEvolutionTerms.ServiceScorePerSeat,
+        FacilityEvolutionTerms.CookingScorePerSeat,
+        FacilityEvolutionTerms.DecorToUtilityRatio,
+        FacilityEvolutionTerms.ClutterScore
+    };
+
+    public static bool IsStructureOwned(string key)
+    {
+        return !string.IsNullOrWhiteSpace(key) && StructureOwnedMetrics.Contains(key);
+    }
+
+    public static bool IsDerivedRoomMetric(string key)
+    {
+        return !string.IsNullOrWhiteSpace(key) && DerivedRoomMetrics.Contains(key);
+    }
+
+    public static bool IsRoomOwned(string key)
+    {
+        return IsStructureOwned(key) || IsDerivedRoomMetric(key);
+    }
+}
+
 [Serializable]
 public struct FacilityEvolutionValue
 {

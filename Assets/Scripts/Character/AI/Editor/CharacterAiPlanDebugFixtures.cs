@@ -11,11 +11,14 @@ internal static class CharacterAiPlanDebugFixtures
         AiDirectorRuntime existing = FindPlayModeAiDirector();
         if (existing != null)
         {
+            CharacterAiEditorTestDependencies.Inject(existing);
             return existing;
         }
 
         createdObject = new GameObject("PlayLlmProbeAiDirector", typeof(AiDirectorRuntime));
-        return createdObject.GetComponent<AiDirectorRuntime>();
+        AiDirectorRuntime created = createdObject.GetComponent<AiDirectorRuntime>();
+        CharacterAiEditorTestDependencies.Inject(created);
+        return created;
     }
 
     public static AiDirectorRuntime FindPlayModeAiDirector()
@@ -124,6 +127,7 @@ internal static class CharacterAiPlanDebugFixtures
         SocialReputationRuntime existing = FindSocialRuntimeInstance();
         if (existing != null)
         {
+            CharacterAiEditorTestDependencies.Inject(existing);
             typeof(SocialReputationRuntime)
                 .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.Invoke(existing, null);
@@ -132,6 +136,7 @@ internal static class CharacterAiPlanDebugFixtures
 
         createdObject = new GameObject("PlanScenarioSocialReputationRuntime", typeof(SocialReputationRuntime));
         SocialReputationRuntime runtime = createdObject.GetComponent<SocialReputationRuntime>();
+        CharacterAiEditorTestDependencies.Inject(runtime);
         typeof(SocialReputationRuntime)
             .GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.Invoke(runtime, null);
@@ -219,7 +224,7 @@ internal static class CharacterAiPlanDebugFixtures
         data.height = 1;
         data.layer = GridLayer.Building;
         data.category = BuildingCategory.Shop;
-        data.facility = new FacilityData
+        data.Facility = new FacilityData
         {
             roles = FacilityRole.Rest,
             capacity = 1,
@@ -245,6 +250,12 @@ internal static class CharacterAiPlanDebugFixtures
         EnsureLocalComponent<CustomerPersonaRuntime>(actorObject);
         EnsureLocalComponent<CharacterDialogueRuntime>(actorObject);
         EnsureLocalComponent<CharacterSocialMemory>(actorObject);
+        CharacterIdentity identity = actorObject.GetComponent<CharacterIdentity>();
+        if (identity != null && string.IsNullOrWhiteSpace(identity.PersistentId))
+        {
+            identity.SetPersistentId($"plan-debug:{SanitizeId(actorObject.name)}");
+        }
+
         CharacterAiEditorTestDependencies.Inject(actorObject);
     }
 
@@ -253,5 +264,18 @@ internal static class CharacterAiPlanDebugFixtures
     {
         T component = target.GetComponent<T>();
         return component != null ? component : target.AddComponent<T>();
+    }
+
+    private static string SanitizeId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "actor";
+        }
+
+        return new string(value
+            .Select(character => char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : '-')
+            .ToArray())
+            .Trim('-');
     }
 }

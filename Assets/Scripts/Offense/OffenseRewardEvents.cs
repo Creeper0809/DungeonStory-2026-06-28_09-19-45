@@ -1,27 +1,22 @@
-using System;
 using System.Collections.Generic;
 
-public struct OffenseRewardGrantedEvent
+public readonly struct OffenseRewardGrantedEvent
 {
-    public OffenseExpeditionResult expeditionResult;
-    public IReadOnlyList<OffenseRewardGrantResult> grantResults;
-
     public OffenseRewardGrantedEvent(
         OffenseExpeditionResult expeditionResult,
         IReadOnlyList<OffenseRewardGrantResult> grantResults)
     {
         this.expeditionResult = expeditionResult;
-        this.grantResults = grantResults ?? Array.Empty<OffenseRewardGrantResult>();
+        this.grantResults = EventPayloadSnapshot.Copy(grantResults);
     }
 
-    private static OffenseRewardGrantedEvent e;
+    public OffenseExpeditionResult expeditionResult { get; }
+    public IReadOnlyList<OffenseRewardGrantResult> grantResults { get; }
 
     public static void Trigger(
         OffenseExpeditionResult expeditionResult,
         IReadOnlyList<OffenseRewardGrantResult> grantResults)
     {
-        e.expeditionResult = expeditionResult;
-        e.grantResults = grantResults ?? Array.Empty<OffenseRewardGrantResult>();
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new OffenseRewardGrantedEvent(expeditionResult, grantResults));
     }
 }

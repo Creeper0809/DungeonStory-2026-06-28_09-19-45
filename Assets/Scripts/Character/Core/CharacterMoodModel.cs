@@ -131,16 +131,15 @@ public static class CharacterMoodRules
         IReadOnlyDictionary<CharacterCondition, float> stats)
     {
         List<CharacterMoodFactorSnapshot> factors = new List<CharacterMoodFactorSnapshot>();
-        AddNeedFactor(factors, stats, CharacterCondition.HUNGER,
-            "need:hunger", "굶주림", -18f, "허기짐", -9f, "배가 든든함", 4f);
-        AddNeedFactor(factors, stats, CharacterCondition.SLEEP,
-            "need:sleep", "완전히 지침", -15f, "피곤함", -8f, "푹 쉼", 4f);
-        AddNeedFactor(factors, stats, CharacterCondition.FUN,
-            "need:fun", "몹시 지루함", -12f, "재미 부족", -6f, "즐거움 충족", 4f);
-        AddNeedFactor(factors, stats, CharacterCondition.EXCRETION,
-            "need:excretion", "용변이 매우 급함", -12f, "화장실이 필요함", -6f, "개운함", 2f);
-        AddNeedFactor(factors, stats, CharacterCondition.HYGIENE,
-            "need:hygiene", "매우 지저분함", -10f, "씻고 싶음", -5f, "깨끗함", 3f);
+        foreach (CharacterNeedDefinition definition in CharacterNeedCatalog.All)
+        {
+            if (definition.HasTag(CharacterNeedTag.MoodInteraction)
+                && definition.TryCreateMoodFactor(stats, out CharacterMoodFactorSnapshot factor))
+            {
+                factors.Add(factor);
+            }
+        }
+
         return factors;
     }
 
@@ -154,35 +153,4 @@ public static class CharacterMoodRules
         return "아주 좋음";
     }
 
-    private static void AddNeedFactor(
-        ICollection<CharacterMoodFactorSnapshot> factors,
-        IReadOnlyDictionary<CharacterCondition, float> stats,
-        CharacterCondition condition,
-        string id,
-        string criticalLabel,
-        float criticalValue,
-        string lowLabel,
-        float lowValue,
-        string highLabel,
-        float highValue)
-    {
-        float value = stats != null && stats.TryGetValue(condition, out float current)
-            ? Mathf.Clamp(current, 0f, 100f)
-            : 50f;
-        if (value <= 15f)
-        {
-            factors.Add(new CharacterMoodFactorSnapshot(
-                id, criticalLabel, criticalValue, CharacterMoodFactorKind.Need, 0f));
-        }
-        else if (value <= 35f)
-        {
-            factors.Add(new CharacterMoodFactorSnapshot(
-                id, lowLabel, lowValue, CharacterMoodFactorKind.Need, 0f));
-        }
-        else if (value >= 85f)
-        {
-            factors.Add(new CharacterMoodFactorSnapshot(
-                id, highLabel, highValue, CharacterMoodFactorKind.Need, 0f));
-        }
-    }
 }

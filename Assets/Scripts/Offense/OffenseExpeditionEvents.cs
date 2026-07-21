@@ -1,35 +1,56 @@
-public struct OffenseExpeditionStartedEvent
-{
-    public OffenseExpeditionRun expedition;
+using System.Collections.Generic;
+using System.Linq;
 
-    public OffenseExpeditionStartedEvent(OffenseExpeditionRun expedition)
+public sealed class OffenseExpeditionStartedSnapshot
+{
+    public OffenseExpeditionStartedSnapshot(OffenseExpeditionRun expedition)
     {
-        this.expedition = expedition;
+        expeditionId = expedition?.ExpeditionId ?? string.Empty;
+        targetId = expedition?.Target?.id ?? string.Empty;
+        targetTitle = expedition?.Target?.title ?? string.Empty;
+        totalPower = expedition?.TotalPower ?? 0f;
+        durationSeconds = expedition?.TotalDurationSeconds ?? 0f;
+        memberNames = EventPayloadSnapshot.Copy(
+            expedition?.MemberActors
+                .Where((member) => member != null)
+                .Select((member) => member.Identity != null ? member.Identity.DisplayName : member.name)
+                .ToArray());
     }
 
-    private static OffenseExpeditionStartedEvent e;
+    public string expeditionId { get; }
+    public string targetId { get; }
+    public string targetTitle { get; }
+    public float totalPower { get; }
+    public float durationSeconds { get; }
+    public IReadOnlyList<string> memberNames { get; }
+}
+
+public readonly struct OffenseExpeditionStartedEvent
+{
+    public OffenseExpeditionStartedEvent(OffenseExpeditionRun expedition)
+    {
+        this.expedition = new OffenseExpeditionStartedSnapshot(expedition);
+    }
+
+    public OffenseExpeditionStartedSnapshot expedition { get; }
 
     public static void Trigger(OffenseExpeditionRun expedition)
     {
-        e.expedition = expedition;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new OffenseExpeditionStartedEvent(expedition));
     }
 }
 
-public struct OffenseExpeditionCompletedEvent
+public readonly struct OffenseExpeditionCompletedEvent
 {
-    public OffenseExpeditionResult result;
-
     public OffenseExpeditionCompletedEvent(OffenseExpeditionResult result)
     {
         this.result = result;
     }
 
-    private static OffenseExpeditionCompletedEvent e;
+    public OffenseExpeditionResult result { get; }
 
     public static void Trigger(OffenseExpeditionResult result)
     {
-        e.result = result;
-        EventObserver.TriggerEvent(e);
+        EventObserver.TriggerEvent(new OffenseExpeditionCompletedEvent(result));
     }
 }

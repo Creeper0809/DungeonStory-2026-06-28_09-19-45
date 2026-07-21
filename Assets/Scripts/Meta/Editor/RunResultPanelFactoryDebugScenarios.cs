@@ -12,7 +12,9 @@ public static class RunResultPanelFactoryDebugScenarios
     public static bool EnsureDungeonRuntimeScopeInActiveScene(out string report)
     {
         Scene activeScene = SceneManager.GetActiveScene();
-        DungeonRuntimeLifetimeScope existing = Object.FindObjectsOfType<DungeonRuntimeLifetimeScope>(true)
+        DungeonRuntimeLifetimeScope existing = Object.FindObjectsByType<DungeonRuntimeLifetimeScope>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None)
             .FirstOrDefault((scope) => scope.gameObject.scene == activeScene);
         if (existing != null)
         {
@@ -46,7 +48,7 @@ public static class RunResultPanelFactoryDebugScenarios
             return false;
         }
 
-        LifetimeScope scope = Object.FindObjectOfType<LifetimeScope>();
+        LifetimeScope scope = Object.FindFirstObjectByType<LifetimeScope>(FindObjectsInactive.Include);
         if (scope == null || scope.Container == null)
         {
             report = "No active LifetimeScope/container.";
@@ -68,22 +70,20 @@ public static class RunResultPanelFactoryDebugScenarios
             return false;
         }
 
-        RunResultSnapshot snapshot = new RunResultSnapshot
-        {
-            ownerName = "Smoke Owner",
-            endReason = "Factory Smoke",
-            survivalSeconds = 73f,
-            survivedOperatingDays = 2,
-            settlementCount = 1,
-            defendedInvasionCount = 1,
-            maxThreatStage = InvasionThreatStage.Warning,
-            finalInvasionThreat = 3f,
-            firstDiscoveredFacilityCount = 4,
-            firstUnlockedRecipeCount = 5,
-            offenseSuccessCount = 1,
-            difficultyMultiplier = 1.25f,
-            legacyCurrency = 9
-        };
+        RunResultSnapshot snapshot = new RunResultSnapshot(
+            ownerName: "Smoke Owner",
+            endReason: "Factory Smoke",
+            survivalSeconds: 73f,
+            survivedOperatingDays: 2,
+            settlementCount: 1,
+            defendedInvasionCount: 1,
+            maxThreatStage: InvasionThreatStage.Warning,
+            finalInvasionThreat: 3f,
+            firstDiscoveredFacilityCount: 4,
+            firstUnlockedRecipeCount: 5,
+            offenseSuccessCount: 1,
+            difficultyMultiplier: 1.25f,
+            legacyCurrency: 9);
 
         panel.Render(snapshot);
         TMP_Text text = panel.GetComponentInChildren<TMP_Text>(true);
@@ -93,7 +93,7 @@ public static class RunResultPanelFactoryDebugScenarios
         bool textContainsOwner = text != null && text.text.Contains("Smoke Owner");
         bool canvasConfigured = canvas != null
             && canvas.renderMode == RenderMode.ScreenSpaceOverlay
-            && canvas.sortingOrder == 500;
+            && canvas.sortingOrder == 1000;
 
         report = $"scope={scope.name}, factoryResolved=True, serviceResolved=True, panel={panel.name}, active={active}, text={hasText}, ownerText={textContainsOwner}, canvasConfigured={canvasConfigured}, textLength={(text != null ? text.text.Length : -1)}";
 

@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using VContainer;
 
-public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
+public class CharacterSummeryInfo : UIPopUp,
+    UtilEventListener<InfoFeedEvent>,
+    UtilEventListener<CharacterGrowthTabRequestedEvent>
 {
     public GameObject UI;
     public TMP_Text ObjectName;
@@ -21,19 +24,29 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
     private CharacterActor actor;
     private CharacterStats characterStats;
     private CharacterLog characterLog;
+    private CharacterProgression progression;
     private TMP_Text profileText;
     private Slider health;
+    private Slider experience;
+    private TMP_Text progressionSummaryText;
+    private Button[] skillButtons = Array.Empty<Button>();
     private TMP_Text moodSummaryText;
     private TMP_Text moodFactorsText;
+    private TMP_Text carrySummaryText;
     private GameObject statusTabContent;
+    private GameObject growthTabContent;
     private GameObject moodTabContent;
     private GameObject recordsTabContent;
     private Button statusTabButton;
+    private Button growthTabButton;
     private Button moodTabButton;
     private Button recordsTabButton;
     private float nextVitalsRefreshAt;
+    private int pendingCandidateConfirmation = -1;
+    private int pendingCandidateUnlockLevel = -1;
     private IUiPopupService popupService;
     private ICharacterSummaryRuntimeLogFactory runtimeLogFactory;
+    private IExpeditionEquipmentRuntime equipmentRuntime;
 
     [Inject]
     public void Construct(
@@ -64,15 +77,14 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
 
         nextVitalsRefreshAt = Time.unscaledTime + 0.25f;
         RefreshProfileAndVitals();
+        RefreshCarrySummary();
+        RefreshProgression();
         RefreshMoodDetails();
     }
 
     public void OnTriggerEvent(InfoFeedEvent eventType)
     {
-        if (eventType.infoable == null || eventType.infoable.GetInfoType() != InfoFeedEvent.Type.CHARACTER) return;
-
-        CharacterActor nextActor = eventType.infoable as CharacterActor;
-        if (nextActor == null)
+        if (eventType.Target is not CharacterActor nextActor || nextActor == null)
         {
             return;
         }
@@ -84,6 +96,7 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         GameObject targetObject = actor.gameObject;
         characterStats = targetObject.GetComponent<CharacterStats>();
         characterLog = targetObject.GetComponent<CharacterLog>();
+        progression = actor.Progression;
 
         GameObject uiRoot = RequireUiRoot();
         ICharacterSummaryRuntimeLogFactory viewFactory = ResolveRuntimeLogFactory();
@@ -93,10 +106,12 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         ResolvePopupService().Open(this);
         ObjectName.text = GetDisplayName(targetObject);
         RefreshProfileAndVitals();
+        RefreshCarrySummary();
+        RefreshProgression();
 
         if (characterStats != null)
         {
-            OnStatChange(characterStats.Stats);
+            OnStatChange(characterStats.StatSnapshot);
             characterStats.OnStatChange += OnStatChange;
         }
 
@@ -104,6 +119,11 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         {
             characterLog.OnLogAdded += OnLogAdded;
             characterLog.OnLogDisplayChanged += RefreshLogText;
+        }
+
+        if (progression != null)
+        {
+            progression.Changed += RefreshProgression;
         }
 
         RefreshLogText();
@@ -115,7 +135,7 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         UnbindCharacter();
     }
 
-    public void OnStatChange(Dictionary<CharacterCondition, float> stats)
+    public void OnStatChange(IReadOnlyDictionary<CharacterCondition, float> stats)
     {
         SetSlider(fun, stats, CharacterCondition.FUN);
         SetSlider(hunger, stats, CharacterCondition.HUNGER);
@@ -127,7 +147,7 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
 
     private static void SetSlider(
         Slider slider,
-        Dictionary<CharacterCondition, float> stats,
+        IReadOnlyDictionary<CharacterCondition, float> stats,
         CharacterCondition condition)
     {
         if (slider == null || stats == null)
@@ -151,6 +171,7 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         Slider hygieneSlider,
         TMP_Text generatedMoodSummaryText,
         TMP_Text generatedMoodFactorsText,
+        TMP_Text generatedCarrySummaryText,
         TMP_Text generatedLogText)
     {
         ObjectName = nameText;
@@ -164,24 +185,40 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         hygiene = hygieneSlider;
         moodSummaryText = generatedMoodSummaryText;
         moodFactorsText = generatedMoodFactorsText;
+        carrySummaryText = generatedCarrySummaryText;
         logText = generatedLogText;
     }
 
     public void BindGeneratedTabs(
         GameObject generatedStatusTabContent,
+        GameObject generatedGrowthTabContent,
         GameObject generatedMoodTabContent,
         GameObject generatedRecordsTabContent,
         Button generatedStatusTabButton,
+        Button generatedGrowthTabButton,
         Button generatedMoodTabButton,
         Button generatedRecordsTabButton)
     {
         statusTabContent = generatedStatusTabContent;
+        growthTabContent = generatedGrowthTabContent;
         moodTabContent = generatedMoodTabContent;
         recordsTabContent = generatedRecordsTabContent;
         statusTabButton = generatedStatusTabButton;
+        growthTabButton = generatedGrowthTabButton;
         moodTabButton = generatedMoodTabButton;
         recordsTabButton = generatedRecordsTabButton;
         ShowStatusTab();
+    }
+
+    public void BindGeneratedGrowth(
+        Slider generatedExperience,
+        TMP_Text generatedSummary,
+        Button[] generatedSkillButtons)
+    {
+        experience = generatedExperience;
+        progressionSummaryText = generatedSummary;
+        skillButtons = generatedSkillButtons ?? Array.Empty<Button>();
+        RefreshProgression();
     }
 
     public void ShowStatusTab()
@@ -195,6 +232,56 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         RefreshMoodDetails();
     }
 
+    public void ShowGrowthTab()
+    {
+        SetActiveTab(CharacterSummaryTab.Growth);
+        RefreshProgression();
+    }
+
+    public void ToggleSkillAt(int index)
+    {
+        if (actor == null || progression == null)
+        {
+            return;
+        }
+
+        if (index < 7 || index >= 10)
+        {
+            return;
+        }
+
+        CharacterSkillDraft draft = GetCurrentActiveDraft();
+        int candidateIndex = index - 7;
+        if (draft == null || candidateIndex >= draft.candidates.Count)
+        {
+            return;
+        }
+
+        bool confirmed = pendingCandidateUnlockLevel == draft.unlockLevel
+            && pendingCandidateConfirmation == candidateIndex;
+        if (!confirmed)
+        {
+            pendingCandidateUnlockLevel = draft.unlockLevel;
+            pendingCandidateConfirmation = candidateIndex;
+            NoticeFeedEvent.Trigger(
+                $"{draft.candidates[candidateIndex].displayName}: 다시 누르면 영구 확정",
+                NoticeFeedEvent.Grade.WARNING);
+        }
+        else
+        {
+            progression.TryChooseActiveSkill(
+                draft.unlockLevel,
+                candidateIndex,
+                confirmed: true,
+                out string message);
+            NoticeFeedEvent.Trigger(message, NoticeFeedEvent.Grade.NONE);
+            pendingCandidateUnlockLevel = -1;
+            pendingCandidateConfirmation = -1;
+        }
+
+        RefreshProgression();
+    }
+
     public void ShowRecordsTab()
     {
         SetActiveTab(CharacterSummaryTab.Records);
@@ -203,12 +290,279 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
 
     private void SetActiveTab(CharacterSummaryTab tab)
     {
-        statusTabContent?.SetActive(tab == CharacterSummaryTab.Status);
-        moodTabContent?.SetActive(tab == CharacterSummaryTab.Mood);
-        recordsTabContent?.SetActive(tab == CharacterSummaryTab.Records);
+        if (statusTabContent != null)
+        {
+            statusTabContent.SetActive(tab == CharacterSummaryTab.Status);
+        }
+
+        if (growthTabContent != null)
+        {
+            growthTabContent.SetActive(tab == CharacterSummaryTab.Growth);
+        }
+
+        if (moodTabContent != null)
+        {
+            moodTabContent.SetActive(tab == CharacterSummaryTab.Mood);
+        }
+
+        if (recordsTabContent != null)
+        {
+            recordsTabContent.SetActive(tab == CharacterSummaryTab.Records);
+        }
+
         DungeonUiTheme.StyleButton(statusTabButton, selected: tab == CharacterSummaryTab.Status);
+        DungeonUiTheme.StyleButton(growthTabButton, selected: tab == CharacterSummaryTab.Growth);
         DungeonUiTheme.StyleButton(moodTabButton, selected: tab == CharacterSummaryTab.Mood);
         DungeonUiTheme.StyleButton(recordsTabButton, selected: tab == CharacterSummaryTab.Records);
+    }
+
+    public void RefreshProgression()
+    {
+        if (progression == null || actor == null)
+        {
+            SetMeter(experience, 0f, "--");
+            if (progressionSummaryText != null)
+            {
+                progressionSummaryText.text = "성장 정보가 없습니다.";
+            }
+            return;
+        }
+
+        string experienceText = progression.Level >= CharacterProgression.MaxLevel
+            ? "MAX"
+            : $"{progression.CurrentExperience}/{progression.ExperienceToNextLevel}";
+        SetMeter(experience, progression.ExperienceRatio, experienceText);
+        if (progressionSummaryText != null)
+        {
+            string traits = string.Join(", ", progression.ResolveSelectedTraits()
+                .Where(trait => trait != null)
+                .Select(trait => trait.traitName));
+            progressionSummaryText.text = BuildProgressionSummary(traits);
+        }
+
+        for (int i = 0; i < skillButtons.Length; i++)
+        {
+            Button button = skillButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            TMP_Text label = button.transform.Find("Label")?.GetComponent<TMP_Text>();
+            button.gameObject.SetActive(true);
+            button.interactable = false;
+            bool selected = false;
+            string text;
+            if (i == 0)
+            {
+                CharacterCombatAbilityDefinition species =
+                    CharacterCombatAbilityCatalog.GetSpeciesAbilities(actor).FirstOrDefault();
+                text = species != null
+                    ? $"종족기  {species.DisplayName}  ·  {species.Description}"
+                    : "종족기  없음";
+            }
+            else if (i <= 3)
+            {
+                int slot = i - 1;
+                CharacterSkillInstance skill = slot < progression.ActiveSkills.Count
+                    ? progression.ActiveSkills[slot]
+                    : null;
+                int unlockLevel = new[] { 1, 5, 30 }[slot];
+                text = skill != null
+                    ? $"액티브 {slot + 1}  [{CharacterSkillDisplay.Rarity(skill.rarity)}] {skill.displayName}  ·  {skill.description}"
+                    : $"액티브 {slot + 1}  Lv.{unlockLevel} 선택 대기";
+            }
+            else if (i <= 5)
+            {
+                int slot = i - 4;
+                CharacterSkillInstance skill = slot < progression.PassiveSkills.Count
+                    ? progression.PassiveSkills[slot]
+                    : null;
+                text = skill != null
+                    ? $"패시브 {slot + 1}  [{CharacterSkillDisplay.Rarity(skill.rarity)}] {skill.displayName}  ·  {skill.description}"
+                    : $"패시브 {slot + 1}  {(slot == 0 ? "정체성 기술 대기" : "Lv.25 서사 조건")}";
+            }
+            else if (i == 6)
+            {
+                CharacterSkillInstance skill = progression.Ultimate;
+                text = skill != null
+                    ? $"궁극기  [{skill.ultimateDomain}] {skill.displayName}  ·  {skill.description}"
+                    : "궁극기  Lv.50 서사 완성 시 획득";
+            }
+            else
+            {
+                CharacterSkillDraft draft = GetCurrentActiveDraft();
+                int candidateIndex = i - 7;
+                CharacterSkillInstance candidate = draft != null && candidateIndex < draft.candidates.Count
+                    ? draft.candidates[candidateIndex]
+                    : null;
+                bool visible = candidate != null;
+                button.gameObject.SetActive(visible);
+                if (!visible)
+                {
+                    continue;
+                }
+
+                selected = pendingCandidateUnlockLevel == draft.unlockLevel
+                    && pendingCandidateConfirmation == candidateIndex;
+                text = $"후보 {candidateIndex + 1}  [{CharacterSkillDisplay.Rarity(candidate.rarity)}] {candidate.displayName}  ·  {candidate.description}";
+                button.interactable = true;
+            }
+
+            if (label != null)
+            {
+                label.text = text;
+            }
+            DungeonUiTheme.StyleButton(button, selected);
+        }
+    }
+
+    private CharacterSkillDraft GetCurrentActiveDraft()
+    {
+        return progression?.Drafts
+            .Where(draft => draft != null
+                && draft.kind == CharacterSkillKind.Active
+                && draft.isReady
+                && !draft.permanentlyChosen)
+            .OrderBy(draft => draft.unlockLevel)
+            .FirstOrDefault();
+    }
+
+    private string BuildProgressionSummary(string traits)
+    {
+        StringBuilder builder = new StringBuilder(768);
+        builder.AppendLine(
+            $"Lv.{progression.Level}  ·  잠재력 {CharacterSkillDisplay.Potential(progression.PotentialGrade)}  ·  성장 +{progression.GrowthState.allocatedGrowthPoints}");
+        builder.AppendLine($"특성  {(string.IsNullOrWhiteSpace(traits) ? "없음" : traits)}");
+        builder.AppendLine("능력치  기본 | 종족·특성 | 레벨 | 장비 | 조건부 | 최종");
+
+        ExpeditionEquipmentStatBlock equipment = GetCurrentEquipmentBonuses();
+        foreach (CharacterStatDefinition definition in CharacterStatCatalog.All
+                     .Where(item => item.LegacyType.HasValue))
+        {
+            CharacterStatType statType = definition.LegacyType.Value;
+            CharacterStatBreakdown breakdown = progression.GetStatBreakdown(statType);
+            int equipmentBonus = GetEquipmentBonus(equipment, statType);
+            int finalValue = Mathf.Max(0, breakdown.FinalValue + equipmentBonus);
+            builder.AppendLine(
+                $"{definition.DisplayName}  {breakdown.BaseValue} | {FormatSigned(breakdown.SpeciesTraitValue)} | {FormatSigned(breakdown.LevelGrowthValue)} | {FormatSigned(equipmentBonus)} | {FormatSigned(breakdown.ConditionalPassiveValue)} | {finalValue}");
+        }
+
+        if (equipment != null && equipment.maxHealth != 0)
+        {
+            builder.AppendLine($"장비 체력 {FormatSigned(equipment.maxHealth)} · 장비 보정은 출정 전투에만 적용");
+        }
+        else
+        {
+            builder.AppendLine("장비 보정은 출정 전투에만 적용");
+        }
+
+        IReadOnlyList<CharacterGrowthAllocationRecord> records =
+            progression.GrowthState.allocationRecords;
+        if (records == null || records.Count == 0)
+        {
+            builder.Append("최근 성장  아직 레벨 성장 기록 없음");
+        }
+        else
+        {
+            builder.Append("최근 성장  ");
+            builder.Append(string.Join(" / ", records
+                .Where(record => record != null)
+                .OrderByDescending(record => record.level)
+                .Take(4)
+                .Select(FormatGrowthAllocationRecord)));
+        }
+
+        return builder.ToString();
+    }
+
+    private string FormatGrowthAllocationRecord(CharacterGrowthAllocationRecord record)
+    {
+        string statName = CharacterStatCatalog.TryGet(record.statType, out CharacterStatDefinition definition)
+            ? definition.DisplayName
+            : record.statType.ToString();
+        string reason = string.IsNullOrWhiteSpace(record.reason)
+            ? "성장 기록"
+            : record.reason;
+        return $"Lv.{record.level} {statName}+1({reason})";
+    }
+
+    private ExpeditionEquipmentStatBlock GetCurrentEquipmentBonuses()
+    {
+        string characterId = actor?.Identity?.PersistentId;
+        if (string.IsNullOrWhiteSpace(characterId))
+        {
+            return ExpeditionEquipmentStatBlock.Empty;
+        }
+
+        IExpeditionEquipmentRuntime runtime = ResolveEquipmentRuntime();
+        return runtime?.GetCombatBonuses(characterId) ?? ExpeditionEquipmentStatBlock.Empty;
+    }
+
+    private IExpeditionEquipmentRuntime ResolveEquipmentRuntime()
+    {
+        if (equipmentRuntime != null)
+        {
+            return equipmentRuntime;
+        }
+
+        DungeonRuntimeLifetimeScope scope =
+            FindFirstObjectByType<DungeonRuntimeLifetimeScope>(FindObjectsInactive.Include);
+        if (scope == null || scope.Container == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            equipmentRuntime = scope.Container.Resolve<IExpeditionEquipmentRuntime>();
+        }
+        catch
+        {
+            equipmentRuntime = null;
+        }
+
+        return equipmentRuntime;
+    }
+
+    private static int GetEquipmentBonus(
+        ExpeditionEquipmentStatBlock equipment,
+        CharacterStatType statType)
+    {
+        if (equipment == null)
+        {
+            return 0;
+        }
+
+        return statType switch
+        {
+            CharacterStatType.Attack => equipment.attack,
+            CharacterStatType.Strength => equipment.strength,
+            CharacterStatType.Toughness => equipment.toughness,
+            CharacterStatType.Dexterity => equipment.dexterity,
+            CharacterStatType.MoveSpeed => equipment.moveSpeed,
+            _ => 0
+        };
+    }
+
+    private static string FormatSigned(int value)
+    {
+        return value > 0 ? "+" + value : value.ToString();
+    }
+
+    public void OnTriggerEvent(CharacterGrowthTabRequestedEvent eventType)
+    {
+        if (eventType.Actor == null)
+        {
+            return;
+        }
+
+        if (actor != eventType.Actor)
+        {
+            OnTriggerEvent(new InfoFeedEvent(eventType.Actor));
+        }
+
+        ShowGrowthTab();
     }
 
     public void OnLogAdded(CharacterLogEntry entry)
@@ -334,12 +688,14 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         if (profileText != null)
         {
             string species = !string.IsNullOrWhiteSpace(actor.SpeciesTag) ? actor.SpeciesTag : "종족 미상";
-            profileText.text = $"{species} · {FormatRole(actor.Role)} · {FormatLifecycle(actor.CurrentLifecycleState)}";
+            int actorLevel = actor.Progression != null ? actor.Progression.Level : 1;
+            profileText.text = $"Lv.{actorLevel} · {species} · {FormatRole(actor.Role)} · {FormatLifecycle(actor.CurrentLifecycleState)}";
         }
 
         if (characterStats == null)
         {
             SetMeter(health, 0f, "--");
+            RefreshCarrySummary();
             return;
         }
 
@@ -352,6 +708,62 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
             injuryPercent > 0
                 ? $"{Mathf.RoundToInt(current)}/{Mathf.RoundToInt(maximum)} · 부상 {injuryPercent}%"
                 : $"{Mathf.RoundToInt(current)}/{Mathf.RoundToInt(maximum)}");
+    }
+
+    private void RefreshCarrySummary()
+    {
+        if (carrySummaryText == null)
+        {
+            return;
+        }
+
+        CharacterCarryInventory inventory = actor != null
+            ? actor.GetComponent<CharacterCarryInventory>()
+            : null;
+        if (inventory == null)
+        {
+            carrySummaryText.text = "소지품 없음\n운반 한도 정보 없음";
+            carrySummaryText.color = DungeonUiTheme.TextSecondary;
+            return;
+        }
+
+        IDungeonItemCatalogProvider catalogProvider = WorldItemStackRuntime.Active?.CatalogProvider;
+        float currentWeight = inventory.GetCurrentWeight(catalogProvider);
+        float baseLimit = inventory.GetBaseCarryLimit();
+        float maxAllowed = inventory.GetMaxAllowedWeight();
+        float speedMultiplier = inventory.GetMoveSpeedMultiplier(catalogProvider);
+        bool overloaded = currentWeight > baseLimit + 0.01f;
+
+        StringBuilder builder = new StringBuilder();
+        builder.AppendLine($"소지 무게 {FormatWeight(currentWeight)} / 기본 {FormatWeight(baseLimit)} / 최대 {FormatWeight(maxAllowed)}");
+        builder.AppendLine(overloaded
+            ? $"과적 중 · 이동 속도 {Mathf.RoundToInt(speedMultiplier * 100f)}%"
+            : "과적 없음 · 이동 속도 100%");
+
+        IReadOnlyList<CharacterCarriedItemSaveData> items = inventory.Items;
+        List<string> entries = items == null
+            ? new List<string>()
+            : items
+                .Where(item => item != null && item.quantity > 0)
+                .GroupBy(item => item.itemId ?? string.Empty)
+                .Select(group =>
+                {
+                    DungeonItemDefinition definition = catalogProvider != null
+                        ? catalogProvider.GetDefinition(group.Key)
+                        : new ResourceDungeonItemCatalogProvider().GetDefinition(group.Key);
+                    return $"{definition.DisplayName} x{group.Sum(item => item.quantity)}";
+                })
+                .Take(4)
+                .ToList();
+        builder.Append(entries.Count > 0 ? string.Join(" · ", entries) : "소지 아이템 없음");
+
+        carrySummaryText.text = builder.ToString();
+        carrySummaryText.color = overloaded ? DungeonUiTheme.Warning : DungeonUiTheme.TextSecondary;
+    }
+
+    private static string FormatWeight(float weight)
+    {
+        return $"{Mathf.Max(0f, weight):0.#}kg";
     }
 
     private static void SetMeter(Slider slider, float normalizedValue, string valueText)
@@ -424,12 +836,14 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
     public void OnEnable()
     {
         this.EventStartListening<InfoFeedEvent>();
+        this.EventStartListening<CharacterGrowthTabRequestedEvent>();
     }
 
     private void OnDisable()
     {
         UnbindCharacter();
         this.EventStopListening<InfoFeedEvent>();
+        this.EventStopListening<CharacterGrowthTabRequestedEvent>();
     }
 
     private void UnbindCharacter()
@@ -450,9 +864,17 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
             characterLog.OnLogDisplayChanged -= RefreshLogText;
         }
 
+        if (progression != null)
+        {
+            progression.Changed -= RefreshProgression;
+        }
+
         actor = null;
         characterStats = null;
         characterLog = null;
+        progression = null;
+        pendingCandidateConfirmation = -1;
+        pendingCandidateUnlockLevel = -1;
         nextVitalsRefreshAt = 0f;
     }
 
@@ -502,6 +924,7 @@ public class CharacterSummeryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
     private enum CharacterSummaryTab
     {
         Status,
+        Growth,
         Mood,
         Records
     }

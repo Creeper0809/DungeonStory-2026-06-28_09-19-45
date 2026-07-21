@@ -4,6 +4,7 @@ using Sirenix.OdinInspector;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using VContainer;
 public enum TimeOfDay
 {
     None,
@@ -23,16 +24,58 @@ public class GameManager : SerializedMonoBehaviour
     public Dictionary<NumberCondition,DamageNumber> numbers;
     public bool isPause;
 
+    private IOwnerRunManagerProvider ownerRunManagerProvider;
+    private OwnerRunManager ownerRunManager;
+    private Coroutine timerRoutine;
+
+    [Inject]
+    public void ConstructGameManager(IOwnerRunManagerProvider ownerRunManagerProvider)
+    {
+        this.ownerRunManagerProvider = ownerRunManagerProvider;
+    }
+
     private void Awake()
     {
         DOTween.Init();
     }
     void Start()
     {
-        StartCoroutine(Timer());
         gameData.gameSpeed.Initialize(1);
         gameData.holdingMoney.Initialize(5000);
         gameData.day.Initialize(1);
+
+        if (ownerRunManagerProvider != null
+            && ownerRunManagerProvider.TryGetManager(out ownerRunManager)
+            && ownerRunManager != null)
+        {
+            ownerRunManager.OnOwnerSelected += HandleOwnerSelected;
+            if (ownerRunManager.CurrentOwnerActor != null)
+            {
+                StartGameClock();
+            }
+
+            return;
+        }
+
+        StartGameClock();
+    }
+
+    private void HandleOwnerSelected(CharacterSO ownerData)
+    {
+        if (ownerData != null)
+        {
+            StartGameClock();
+        }
+    }
+
+    private void StartGameClock()
+    {
+        if (timerRoutine != null)
+        {
+            return;
+        }
+
+        timerRoutine = StartCoroutine(Timer());
         OperatingDayStartedEvent.Trigger(gameData.day.Value);
     }
     public void ConvertSecondsToGameTime()
@@ -100,6 +143,14 @@ public class GameManager : SerializedMonoBehaviour
             OperatingDayEndedEvent.Trigger(gameData.day.Value);
             gameData.day.Value++;
             OperatingDayStartedEvent.Trigger(gameData.day.Value);
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (ownerRunManager != null)
+        {
+            ownerRunManager.OnOwnerSelected -= HandleOwnerSelected;
         }
     }
 

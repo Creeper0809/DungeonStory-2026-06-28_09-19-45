@@ -56,8 +56,11 @@ public static class DefenseFacilityDebugScenarios
 
         List<string> errors = new List<string>();
         RunScenario("방어 시설 에셋", VerifyDefenseAssets, errors);
+        RunScenario("함정 위 통행 경로", VerifyWalkableTrapRoute, errors);
         RunScenario("SO Effect 적용", VerifyEffectAssetsDriveDamage, errors);
+        RunScenario("개방형 Effect 전략", VerifyOpenEffectStrategy, errors);
         RunScenario("진입 발동 피해와 이벤트", VerifyTriggerDamageAndEvent, errors);
+        RunScenario("발동 이벤트 스냅샷 격리", VerifyEventSnapshotIsolation, errors);
         RunScenario("파손 비활성화와 수리 복구", VerifyDamagedDisableAndRepair, errors);
         RunScenario("독 부식 피해 보정", VerifyPoisonCorrosion, errors);
         RunScenario("화염 연소 지속 피해", VerifyFireBurn, errors);
@@ -102,7 +105,6 @@ public static class DefenseFacilityDebugScenarios
         BuildingSO[] assets = DefenseAssetNames.Select(LoadDefense).ToArray();
         return assets.All((asset) => asset != null
             && asset.type == typeof(DefenseFacility)
-            && asset.layer == GridLayer.Building
             && asset.category == BuildingCategory.Special
             && asset.Facility != null
             && asset.Facility.disabledWhenDamaged
@@ -113,8 +115,36 @@ public static class DefenseFacilityDebugScenarios
             && asset.Defense.effectAssets != null
             && asset.Defense.effectAssets.Length > 0
             && asset.Defense.effectAssets.All((effect) => effect != null)
+            && asset.Defense.effectAssets.All((effect) => !string.IsNullOrWhiteSpace(effect.EffectId))
+            && asset.GetConstructionCost() > 0
+            && asset.GetMaintenanceCost() > 0
+            && asset.GetUnlockPhase() == 1
+            && Mathf.Approximately(asset.GetDemolitionRefundRate(), 0.5f)
             && asset.sprite != null)
+            && assets.Take(5).All((asset) => asset.layer == GridLayer.FloorOverlay)
+            && LoadDefense("P1_GuardRoom").layer == GridLayer.Building
+            && LoadDefense("P1_SpikeTrap").Defense.effectAssets.OfType<DefenseDamageEffectSO>().Any()
+            && LoadDefense("P1_PoisonPool").Defense.effectAssets.OfType<DefenseCorrosionEffectSO>().Any()
+            && LoadDefense("P1_FireVent").Defense.effectAssets.OfType<DefenseBurnEffectSO>().Any()
+            && LoadDefense("P1_LightningPillar").Defense.effectAssets.OfType<DefenseChargeEffectSO>().Any()
+            && LoadDefense("P1_IceVent").Defense.effectAssets.OfType<DefenseSlowEffectSO>().Any()
+            && LoadDefense("P1_GuardRoom").Defense.effectAssets.OfType<DefenseGuardAttackEffectSO>().Any()
             && LoadDefense("P1_GuardRoom").Facility.SupportsWork(FacilityWorkType.Guard);
+    }
+
+    private static bool VerifyWalkableTrapRoute()
+    {
+        using DefenseScenarioWorld world = new DefenseScenarioWorld();
+        DefenseFacility trap = world.PlaceDefense("P1_SpikeTrap", new Vector2Int(2, 0));
+        Queue<GridMoveStep> path = world.Grid.GetMovePath(
+            new Vector2Int(0, 0),
+            position => position == new Vector2Int(5, 0));
+        HashSet<Vector2Int> traversed = path.Select(step => step.To).ToHashSet();
+
+        return trap != null
+            && trap.BuildingData.layer == GridLayer.FloorOverlay
+            && trap.buildPoses.All(world.Grid.IsWalkable)
+            && trap.buildPoses.All(traversed.Contains);
     }
 
     private static bool VerifyEffectAssetsDriveDamage()
@@ -123,7 +153,7 @@ public static class DefenseFacilityDebugScenarios
         BuildingSO source = LoadDefense("P1_SpikeTrap");
         BuildingSO clone = Object.Instantiate(source);
         world.TrackScriptableObject(clone);
-        clone.defense = new DefenseFacilityData
+        clone.Defense = new DefenseFacilityData
         {
             enabled = source.Defense.enabled,
             concept = source.Defense.concept,
@@ -134,8 +164,7 @@ public static class DefenseFacilityDebugScenarios
             range = source.Defense.range,
             star = source.Defense.star,
             combatLogText = source.Defense.combatLogText,
-            effectAssets = source.Defense.effectAssets,
-            effects = Array.Empty<DefenseEffectData>()
+            effectAssets = source.Defense.effectAssets
         };
 
         world.PlaceDefense(clone, new Vector2Int(2, 0));
@@ -151,6 +180,46 @@ public static class DefenseFacilityDebugScenarios
         return reports.Count == 1
             && reports[0].TotalDamage > 0f
             && intruder.CurrentHealth < before;
+    }
+
+    private static bool VerifyOpenEffectStrategy()
+    {
+        using DefenseScenarioWorld world = new DefenseScenarioWorld();
+        BuildingSO source = LoadDefense("P1_SpikeTrap");
+        BuildingSO clone = Object.Instantiate(source);
+        DebugProbeDefenseEffectSO probe = ScriptableObject.CreateInstance<DebugProbeDefenseEffectSO>();
+        world.TrackScriptableObject(clone);
+        world.TrackScriptableObject(probe);
+        probe.Configure(7f, 0f, 1, "확장 전략");
+        clone.Defense = new DefenseFacilityData
+        {
+            enabled = source.Defense.enabled,
+            concept = source.Defense.concept,
+            triggerTimings = source.Defense.triggerTimings,
+            targetRule = source.Defense.targetRule,
+            cooldownSeconds = source.Defense.cooldownSeconds,
+            periodicIntervalSeconds = source.Defense.periodicIntervalSeconds,
+            range = source.Defense.range,
+            star = source.Defense.star,
+            combatLogText = source.Defense.combatLogText,
+            effectAssets = new DefenseEffectSO[] { probe }
+        };
+
+        world.PlaceDefense(clone, new Vector2Int(2, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        float before = intruder.CurrentHealth;
+        List<DefenseActivationReport> reports = DefenseFacilityResolver.TriggerAt(
+            world.Grid,
+            CharacterActor.From(intruder),
+            new Vector2Int(1, 0),
+            DefenseTriggerTiming.OnEnter,
+            StatusRuntimeService);
+        string summary = CodexTextFormatter.FormatDefenseEffects(clone.Defense).SingleOrDefault();
+
+        return reports.Count == 1
+            && Mathf.Approximately(before - intruder.CurrentHealth, 7f)
+            && reports[0].EffectTags.Contains("확장 전략")
+            && summary == "확장 효과 7";
     }
 
     private static bool VerifyTriggerDamageAndEvent()
@@ -244,7 +313,7 @@ public static class DefenseFacilityDebugScenarios
         DefenseFacilityResolver.TriggerAt(world.Grid, CharacterActor.From(intruder), new Vector2Int(4, 0), DefenseTriggerTiming.OnEnter, StatusRuntimeService);
         float totalDamage = before - intruder.CurrentHealth;
 
-        return totalDamage > 24f;
+        return Mathf.Approximately(totalDamage, 54f);
     }
 
     private static bool VerifyIceSlow()
@@ -417,7 +486,8 @@ public static class DefenseFacilityDebugScenarios
                 StaffDiscontentRuntimeService,
                 FloatingIconFeedbackService,
                 WorkGridResolver,
-                FacilityCandidateCache);
+                FacilityCandidateCache,
+                null);
             CharacterActor character = obj.GetComponent<CharacterActor>();
             InitializeCharacter(character, data, position);
             character.RefreshAbilityCache();
@@ -450,6 +520,7 @@ public static class DefenseFacilityDebugScenarios
 
         private void InitializeCharacter(CharacterActor character, CharacterSO data, Vector2Int position)
         {
+            CharacterAiEditorTestDependencies.Inject(character.gameObject);
             CharacterAwakeMethod?.Invoke(character, null);
             character.GetComponent<CharacterStats>()?.ConstructCharacterStats(
                 StaffDiscontentRuntimeService,
@@ -468,6 +539,31 @@ public static class DefenseFacilityDebugScenarios
         public bool IsGridDestroyed => false;
         public bool IsGridVisitable => false;
         public bool IsGridMovement => true;
+    }
+
+    private static bool VerifyEventSnapshotIsolation()
+    {
+        using DefenseScenarioWorld world = new DefenseScenarioWorld();
+        DefenseFacility facility = world.PlaceDefense("P1_SpikeTrap", new Vector2Int(2, 0));
+        CharacterActor intruder = world.CreateIntruder(new Vector2Int(1, 0));
+        DefenseActivationReport mutableReport = new DefenseActivationReport(
+            facility,
+            intruder,
+            DefenseTriggerTiming.OnEnter);
+        mutableReport.AddDamage(4f);
+        mutableReport.AddEffectTag("처음 효과");
+
+        using CountingDefenseTriggerListener listener = new CountingDefenseTriggerListener();
+        DefenseFacilityTriggeredEvent.Trigger(mutableReport);
+        mutableReport.AddDamage(99f);
+        mutableReport.AddEffectTag("나중 효과");
+
+        DefenseActivationSnapshot snapshot = listener.LastReport;
+        return listener.Count == 1
+            && snapshot != null
+            && Mathf.Approximately(snapshot.TotalDamage, 4f)
+            && snapshot.EffectTags.SequenceEqual(new[] { "처음 효과" })
+            && snapshot.SourceFacility == facility;
     }
 
     private sealed class NoopBlueprintResearchWorkService : IBlueprintResearchWorkService
@@ -620,6 +716,10 @@ public static class DefenseFacilityDebugScenarios
             return 1f;
         }
 
+        public float GetCommerceStockCostMultiplier(StockCategory category) => 1f;
+        public float GetFortressFacilityCostMultiplier(BuildingSO building) => 1f;
+        public float GetArcaneResearchWorkMultiplier() => 1f;
+
         public bool IsRecipePreserved(string recipeId)
         {
             return false;
@@ -634,6 +734,7 @@ public static class DefenseFacilityDebugScenarios
     private sealed class CountingDefenseTriggerListener : UtilEventListener<DefenseFacilityTriggeredEvent>, IDisposable
     {
         public int Count { get; private set; }
+        public DefenseActivationSnapshot LastReport { get; private set; }
 
         public CountingDefenseTriggerListener()
         {
@@ -643,11 +744,24 @@ public static class DefenseFacilityDebugScenarios
         public void OnTriggerEvent(DefenseFacilityTriggeredEvent eventType)
         {
             Count++;
+            LastReport = eventType.report;
         }
 
         public void Dispose()
         {
             this.EventStopListening<DefenseFacilityTriggeredEvent>();
         }
+    }
+}
+
+internal sealed class DebugProbeDefenseEffectSO : DefenseEffectSO
+{
+    public override string EffectId => "debug.custom-defense-effect";
+    public override string DisplayName => "확장 효과";
+
+    public override void Apply(DefenseEffectContext context)
+    {
+        context.ApplyDamage(Amount, DisplayName);
+        context.AddEffectTag(LogTag);
     }
 }

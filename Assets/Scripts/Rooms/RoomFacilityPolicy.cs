@@ -79,7 +79,7 @@ public sealed class RoomFacilityPolicyService : IRoomFacilityPolicy
             return true;
         }
 
-        if (!building.Facility.requiresRoomRole)
+        if (!building.BuildingData.RequiresRoomRole())
         {
             return true;
         }
@@ -168,55 +168,47 @@ public sealed class RoomFacilityPolicyService : IRoomFacilityPolicy
         int seats = 0;
         int tables = 0;
         int service = 0;
-        int foodSignals = 0;
-        int generalSignals = 0;
-        int weaponSignals = 0;
+        Dictionary<StockCategory, int> stockCategorySignals = new Dictionary<StockCategory, int>();
         Dictionary<StockCategory, int> storage = new Dictionary<StockCategory, int>();
 
         foreach (BuildableObject part in parts)
         {
-            FacilityOperationalData data = part?.Operational;
-            if (data == null)
+            if (part?.BuildingData == null)
             {
                 continue;
             }
 
-            seats += Mathf.Max(0, data.seatCapacity);
-            tables += Mathf.Max(0, data.tableCapacity);
-            service += Mathf.Max(0, data.serviceCapacity);
-            if (data.storageCapacity > 0)
+            seats += part.GetSeatCapacity();
+            tables += part.GetTableCapacity();
+            service += part.GetServiceCapacity();
+            int storageCapacity = part.GetStorageCapacity();
+            if (storageCapacity > 0)
             {
-                if (data.HasFunction(FacilityFunction.Logistics))
+                if (part.StoresAllCategories())
                 {
-                    foreach (StockCategory storageCategory in Enum.GetValues(typeof(StockCategory)))
+                    foreach (StockCategoryDefinition definition in StockCategoryCatalog.All)
                     {
+                        StockCategory storageCategory = definition.Category;
                         storage.TryGetValue(storageCategory, out int current);
-                        storage[storageCategory] = current + data.storageCapacity;
+                        storage[storageCategory] = current + storageCapacity;
                     }
                 }
                 else
                 {
-                    storage.TryGetValue(data.storageCategory, out int current);
-                    storage[data.storageCategory] = current + data.storageCapacity;
+                    StockCategory storageCategory = part.GetStorageCategory();
+                    storage.TryGetValue(storageCategory, out int current);
+                    storage[storageCategory] = current + storageCapacity;
                 }
             }
 
-            if (data.HasFunction(FacilityFunction.MealProduction)
-                || data.HasFunction(FacilityFunction.MeatProduction)
-                || data.HasFunction(FacilityFunction.MealService))
+            foreach (StockCategory signal in part.BuildingData.GetStockCategorySignals())
             {
-                foodSignals++;
-            }
-
-            if (data.HasFunction(FacilityFunction.RetailGeneral)) generalSignals++;
-            if (data.HasFunction(FacilityFunction.RetailWeapon)
-                || data.HasFunction(FacilityFunction.WeaponCrafting))
-            {
-                weaponSignals++;
+                stockCategorySignals.TryGetValue(signal, out int signalCount);
+                stockCategorySignals[signal] = signalCount + 1;
             }
         }
 
-        StockCategory category = ResolveRetailCategory(foodSignals, generalSignals, weaponSignals);
+        StockCategory category = ResolveRetailCategory(stockCategorySignals);
         return new FacilityRoomOperationalProfile(room, parts, seats, tables, service, category, storage);
     }
 
@@ -237,25 +229,30 @@ public sealed class RoomFacilityPolicyService : IRoomFacilityPolicy
             .ToList();
     }
 
-    private static StockCategory ResolveRetailCategory(int food, int general, int weapon)
+    private static StockCategory ResolveRetailCategory(IReadOnlyDictionary<StockCategory, int> signals)
     {
-        int highest = Mathf.Max(food, Mathf.Max(general, weapon));
+        if (signals == null || signals.Count == 0)
+        {
+            return StockCategory.General;
+        }
+
+        int highest = signals.Values.DefaultIfEmpty(0).Max();
         if (highest <= 0)
         {
             return StockCategory.General;
         }
 
-        int leaders = (food == highest ? 1 : 0)
-            + (general == highest ? 1 : 0)
-            + (weapon == highest ? 1 : 0);
-        if (leaders > 1)
+        StockCategory[] leaders = signals
+            .Where(pair => pair.Value == highest)
+            .Select(pair => pair.Key)
+            .OrderBy(category => Convert.ToInt32(category))
+            .ToArray();
+        if (leaders.Length != 1)
         {
             return StockCategory.General;
         }
 
-        if (weapon == highest) return StockCategory.Weapon;
-        if (food == highest) return StockCategory.Food;
-        return StockCategory.General;
+        return leaders[0];
     }
 
     private static FacilityRoomOperationalProfile EmptyProfile(BuildableObject building)

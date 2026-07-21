@@ -30,7 +30,13 @@ public sealed class WorkTaskExecutor
         if (move == null || grid == null)
         {
             WorkDebugLog.LogEnd(actor, "이동 정보 없음");
-            actor?.AddLog("작업 실패: 이동 정보 없음");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                work.AssignedWorkType,
+                CharacterActivityOutcomes.Failed,
+                "작업 실패: 이동 정보 없음",
+                work.assignedShop,
+                reasonCode: "missing-movement",
+                bubbleEligible: true));
             work.isWorking = false;
             EndAiAction(actor, currentAction);
             work.ClearActiveWorkRoutine(runId);
@@ -68,10 +74,15 @@ public sealed class WorkTaskExecutor
             }
 
             currentAction?.ReleaseReservation(actor);
+            FacilityWorkType workType = work.AssignedWorkType;
+            CharacterSkillRuntimeEffects.BeginWork(
+                actor,
+                assignedTarget,
+                workType,
+                $"work:{runId}:{assignedTarget.GetInstanceID()}:started");
             WorkDebugLog.LogStarted(actor);
             bool completedImmediately = false;
             bool completedSuccessfully = true;
-            FacilityWorkType workType = work.AssignedWorkType;
             if (workType == FacilityWorkType.Repair)
             {
                 yield return ExecuteRepairWork();
@@ -96,6 +107,22 @@ public sealed class WorkTaskExecutor
 
                 completedImmediately = true;
             }
+            else if (workType == FacilityWorkType.Craft)
+            {
+                completedSuccessfully = assignedTarget.HasPendingEquipmentCraftWork();
+                if (completedSuccessfully)
+                {
+                    yield return ExecuteCraftWork();
+                }
+
+                completedImmediately = true;
+            }
+            else if (workType == FacilityWorkType.Clean)
+            {
+                float cleaningSpeed = CharacterSkillRuntimeEffects.GetCleaningSpeedMultiplier(actor);
+                yield return new WaitForSeconds(1f / Mathf.Max(0.1f, cleaningSpeed));
+                completedImmediately = true;
+            }
 
             if (!completedImmediately)
             {
@@ -108,6 +135,7 @@ public sealed class WorkTaskExecutor
                 }
 
                 work.ClearActiveWorkCheckRoutine(runId);
+                completedSuccessfully = work.LastWorkRunCompleted;
             }
             else
             {
@@ -117,6 +145,12 @@ public sealed class WorkTaskExecutor
 
             if (completedSuccessfully)
             {
+                actor.Progression?.AddExperience(5);
+                CharacterSkillRuntimeEffects.TriggerWorkCompleted(
+                    actor,
+                    assignedTarget,
+                    workType,
+                    $"work:{runId}:{assignedTarget.GetInstanceID()}:completed");
                 ModularFacilityRuntimeEffects.ApplyWorkCompleted(
                     actor,
                     assignedTarget,
@@ -128,6 +162,7 @@ public sealed class WorkTaskExecutor
                     workType);
             }
 
+            CharacterSkillRuntimeEffects.EndWork(actor);
             bool wasPriorityTarget = work.assignedShop == work.PriorityWorkTarget;
             facility.DeallocateWorker(actor);
             currentAction?.ReleaseReservation(actor);
@@ -141,7 +176,13 @@ public sealed class WorkTaskExecutor
         {
             work.isWorking = false;
             WorkDebugLog.LogEnd(actor, "작업 도달 실패");
-            actor?.AddLog("작업 실패: 작업 도달 실패");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                work.AssignedWorkType,
+                CharacterActivityOutcomes.Failed,
+                "작업 실패: 작업 도달 실패",
+                assignedTarget,
+                reasonCode: "target-unreachable",
+                bubbleEligible: true));
             currentAction?.ReleaseReservation(actor);
         }
 
@@ -167,9 +208,23 @@ public sealed class WorkTaskExecutor
         Grid grid)
     {
         CharacterActor actor = work.WorkerActor;
-        if (work.assignedShop is not Shop shop)
+        BuildableObject restockTarget = work.assignedShop;
+        CharacterSkillRuntimeEffects.BeginWork(
+            actor,
+            restockTarget,
+            FacilityWorkType.Restock,
+            $"work:{runId}:{(restockTarget != null ? restockTarget.GetInstanceID() : 0)}:restock-started");
+        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(FacilityWorkType.Restock)
+            / Mathf.Max(0.1f, CharacterSkillRuntimeEffects.GetWorkSpeedMultiplier(actor));
+        if (restockTarget is not IRestockableFacility restockable)
         {
-            actor?.AddLog("보충 실패: 대상이 상점이 아님");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Restock,
+                CharacterActivityOutcomes.Failed,
+                "보충 실패: 재고를 받을 수 없는 시설",
+                restockTarget,
+                reasonCode: "target-not-restockable",
+                bubbleEligible: true));
             work.isWorking = false;
             yield break;
         }
@@ -177,7 +232,8 @@ public sealed class WorkTaskExecutor
         if (!TryCreateRestockHaulPlan(
             actor,
             grid,
-            shop,
+            restockTarget,
+            restockable,
             out BuildableObject warehouseBuilding,
             out IWarehouseFacility warehouse,
             out SaleItem saleItem,
@@ -185,12 +241,23 @@ public sealed class WorkTaskExecutor
             out Queue<GridMoveStep> pathToWarehouse,
             out string failureReason))
         {
-            actor?.AddLog($"보충 실패: {failureReason}");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Restock,
+                CharacterActivityOutcomes.Failed,
+                $"보충 실패: {failureReason}",
+                restockTarget,
+                reasonCode: failureReason,
+                bubbleEligible: true));
             work.isWorking = false;
             yield break;
         }
 
-        actor?.AddLog($"보충 이동: {warehouseBuilding.name} -> {shop.name}");
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Restock,
+            CharacterActivityOutcomes.Progress,
+            $"보충 이동: {warehouseBuilding.name} -> {restockTarget.name}",
+            restockTarget,
+            reasonCode: "moving-to-stock"));
         yield return move.MoveByPath(pathToWarehouse, currentAction);
         if (ShouldAbortWorkRun(runId, actor))
         {
@@ -217,9 +284,15 @@ public sealed class WorkTaskExecutor
             }
 
             carriedAmount += withdrawn;
-            actor?.AddLog($"보충 적재: {saleItem.itemName} {carriedAmount}/{loadAmount}");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Restock,
+                CharacterActivityOutcomes.Progress,
+                $"보충 적재: {saleItem.itemName} {carriedAmount}/{loadAmount}",
+                warehouseBuilding,
+                reasonCode: "loading-stock",
+                quantity: carriedAmount));
             work.FloatingIconFeedbackService.Show(actor, saleItem.itemSprite, FloatingIconFeedbackDefaults.DefaultMaxWorldSize);
-            yield return new WaitForSeconds(RestockPickupWaitSeconds);
+            yield return new WaitForSeconds(RestockPickupWaitSeconds * durationMultiplier);
             if (ShouldAbortWorkRun(runId, actor))
             {
                 ReturnCarriedStock(warehouse, saleItem, carriedAmount);
@@ -230,15 +303,27 @@ public sealed class WorkTaskExecutor
 
         if (carriedAmount <= 0)
         {
-            actor?.AddLog("보충 실패: 창고 재고 부족");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Restock,
+                CharacterActivityOutcomes.Failed,
+                "보충 실패: 창고 재고 부족",
+                warehouseBuilding,
+                reasonCode: "warehouse-stock-shortage",
+                bubbleEligible: true));
             work.isWorking = false;
             yield break;
         }
 
-        if (!TryGetPathToBuilding(grid, actor, shop, out Queue<GridMoveStep> pathToShop))
+        if (!TryGetPathToBuilding(grid, actor, restockTarget, out Queue<GridMoveStep> pathToShop))
         {
             ReturnCarriedStock(warehouse, saleItem, carriedAmount);
-            actor?.AddLog("보충 실패: 상점 경로 없음");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Restock,
+                CharacterActivityOutcomes.Blocked,
+                "보충 실패: 상점 경로 없음",
+                restockTarget,
+                reasonCode: "shop-path-missing",
+                bubbleEligible: true));
             work.isWorking = false;
             yield break;
         }
@@ -251,18 +336,37 @@ public sealed class WorkTaskExecutor
             yield break;
         }
 
-        int restocked = shop.ReceiveRestock(saleItem, carriedAmount, carriedAmount, out string resultMessage);
+        int restocked = restockable.ReceiveRestock(
+            saleItem,
+            carriedAmount,
+            carriedAmount,
+            out string resultMessage);
         int leftover = carriedAmount - restocked;
         if (leftover > 0)
         {
             ReturnCarriedStock(warehouse, saleItem, leftover);
         }
 
-        actor?.AddLog(restocked > 0
-            ? $"보충 완료: {shop.name} {resultMessage}"
-            : $"보충 실패: {resultMessage}");
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Restock,
+            restocked > 0 ? CharacterActivityOutcomes.Completed : CharacterActivityOutcomes.Failed,
+            restocked > 0
+                ? $"보충 완료: {restockTarget.name} {resultMessage}"
+                : $"보충 실패: {resultMessage}",
+            restockTarget,
+            reasonCode: resultMessage,
+            quantity: restocked,
+            bubbleEligible: restocked <= 0));
+        if (restocked > 0)
+        {
+            CharacterSkillRuntimeEffects.TriggerWorkCompleted(
+                actor,
+                restockTarget,
+                FacilityWorkType.Restock,
+                $"work:{runId}:{restockTarget.GetInstanceID()}:restock-completed");
+        }
 
-        yield return new WaitForSeconds(0.5f);
+        yield return new WaitForSeconds(0.5f * durationMultiplier);
         work.isWorking = false;
         WorkDebugLog.LogEnd(actor, "보충 완료");
     }
@@ -270,7 +374,8 @@ public sealed class WorkTaskExecutor
     private bool TryCreateRestockHaulPlan(
         CharacterActor actor,
         Grid grid,
-        Shop shop,
+        BuildableObject restockTarget,
+        IRestockableFacility restockable,
         out BuildableObject warehouseBuilding,
         out IWarehouseFacility warehouse,
         out SaleItem saleItem,
@@ -285,7 +390,7 @@ public sealed class WorkTaskExecutor
         pathToWarehouse = null;
         failureReason = string.Empty;
 
-        if (actor == null || grid == null || shop == null)
+        if (actor == null || grid == null || restockTarget == null || restockable == null)
         {
             failureReason = "보충 경로 정보 없음";
             return false;
@@ -299,9 +404,9 @@ public sealed class WorkTaskExecutor
             .Where((candidate) => candidate.HasWarehouseInventory && candidate.Inventory != null)
             .ToList();
 
-        if (!shop.TryFindRestockSource(
+        if (!restockable.TryFindRestockSource(
             reachableWarehouses,
-            shop.MissingStock,
+            restockable.MissingStock,
             out warehouse,
             out saleItem,
             out loadAmount,
@@ -400,19 +505,37 @@ public sealed class WorkTaskExecutor
     public IEnumerator ExecuteRestockWork()
     {
         CharacterActor actor = work.WorkerActor;
-        if (work.assignedShop is not Shop shop)
+        BuildableObject restockTarget = work.assignedShop;
+        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(FacilityWorkType.Restock);
+        if (restockTarget is not IRestockableFacility restockable)
         {
-            actor?.AddLog("보충 실패: 대상이 상점이 아님");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Restock,
+                CharacterActivityOutcomes.Failed,
+                "보충 실패: 재고를 받을 수 없는 시설",
+                restockTarget,
+                reasonCode: "target-not-restockable",
+                bubbleEligible: true));
             yield break;
         }
 
         IEnumerable<IWarehouseFacility> warehouses = targetSelector.FindReachableWarehouses();
-        int amount = shop.RestockFrom(warehouses, shop.MissingStock, out string resultMessage);
-        actor?.AddLog(amount > 0
-            ? $"보충 완료: {work.assignedShop.name} {resultMessage}"
-            : $"보충 실패: {resultMessage}");
+        int amount = restockable.RestockFrom(
+            warehouses,
+            restockable.MissingStock,
+            out string resultMessage);
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Restock,
+            amount > 0 ? CharacterActivityOutcomes.Completed : CharacterActivityOutcomes.Failed,
+            amount > 0
+                ? $"보충 완료: {restockTarget.name} {resultMessage}"
+                : $"보충 실패: {resultMessage}",
+            restockTarget,
+            reasonCode: resultMessage,
+            quantity: amount,
+            bubbleEligible: amount <= 0));
 
-        yield return new WaitForSeconds(0.5f);
+        yield return new WaitForSeconds(0.5f * durationMultiplier);
     }
 
     public IEnumerator ExecuteRepairWork()
@@ -420,21 +543,37 @@ public sealed class WorkTaskExecutor
         CharacterActor actor = work.WorkerActor;
         if (work.assignedShop == null)
         {
-            actor?.AddLog("수리 실패: 대상 없음");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Repair,
+                CharacterActivityOutcomes.Failed,
+                "수리 실패: 대상 없음",
+                reasonCode: "missing-target",
+                bubbleEligible: true));
             yield break;
         }
 
         float workSpeed = actor != null
             ? Mathf.Max(0.1f, actor.GetWorkSpeedMultiplier(FacilityWorkType.Repair))
             : 1f;
+        workSpeed *= CharacterSkillRuntimeEffects.GetRepairSpeedMultiplier(actor);
         yield return new WaitForSeconds(0.8f / workSpeed);
         work.assignedShop.SetDamaged(false);
-        actor?.AddLog($"수리 완료: {work.assignedShop.name}");
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Repair,
+            CharacterActivityOutcomes.Completed,
+            $"수리 완료: {work.assignedShop.name}",
+            work.assignedShop));
     }
 
     public IEnumerator ExecuteResearchWork()
     {
         yield return ExecuteResearchWork(null);
+    }
+
+    private IEnumerator ExecuteCraftWork()
+    {
+        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(FacilityWorkType.Craft);
+        yield return new WaitForSeconds(1f * durationMultiplier);
     }
 
     private IEnumerator ExecuteResearchWork(Action<bool> onCompleted)
@@ -443,6 +582,7 @@ public sealed class WorkTaskExecutor
         IBlueprintResearchWorkService researchWorkService = work.BlueprintResearchWorkService;
 
         const float workSeconds = 1f;
+        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(FacilityWorkType.Research);
         BlueprintResearchWorkResult result = researchWorkService.ApplyResearchWork(
             actor,
             work.assignedShop,
@@ -450,18 +590,30 @@ public sealed class WorkTaskExecutor
         if (!result.Success)
         {
             onCompleted?.Invoke(false);
-            actor?.AddLog($"연구 실패: {result.Message}");
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Research,
+                CharacterActivityOutcomes.Failed,
+                $"연구 실패: {result.Message}",
+                work.assignedShop,
+                reasonCode: result.Message,
+                bubbleEligible: true));
             yield return new WaitForSeconds(0.2f);
             yield break;
         }
 
         string blueprintName = result.Blueprint != null ? result.Blueprint.DisplayName : "설계도";
-        actor?.AddLog(result.Completed
-            ? $"연구 완료: {blueprintName}"
-            : $"연구 진행: {blueprintName} {Mathf.RoundToInt(result.ProgressRatio * 100f)}%");
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Research,
+            result.Completed ? CharacterActivityOutcomes.Completed : CharacterActivityOutcomes.Progress,
+            result.Completed
+                ? $"연구 완료: {blueprintName}"
+                : $"연구 진행: {blueprintName} {Mathf.RoundToInt(result.ProgressRatio * 100f)}%",
+            work.assignedShop,
+            reasonCode: result.Completed ? "blueprint-completed" : "research-progress",
+            value: result.ProgressRatio));
 
         onCompleted?.Invoke(true);
-        yield return new WaitForSeconds(workSeconds);
+        yield return new WaitForSeconds(workSeconds * durationMultiplier);
     }
 
     private static void EndAiAction(CharacterActor actor, AIAction currentAction)
@@ -475,6 +627,7 @@ public sealed class WorkTaskExecutor
 
     private void FinishWorkRun(CharacterActor actor, AIAction currentAction)
     {
+        CharacterSkillRuntimeEffects.EndWork(actor);
         bool wasPriorityTarget = work.assignedShop == work.PriorityWorkTarget;
         currentAction?.ReleaseReservation(actor);
         work.AssignWork(null, FacilityWorkType.None);
@@ -499,6 +652,7 @@ public sealed class WorkTaskExecutor
 
     private void AbortWorkRun(int runId, CharacterActor actor, AIAction currentAction)
     {
+        CharacterSkillRuntimeEffects.EndWork(actor);
         currentAction?.ReleaseReservation(actor);
         work.isWorking = false;
         if (work.IsActiveWorkRun(runId))

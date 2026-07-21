@@ -82,6 +82,17 @@ public sealed class DoorVisualPlayModeVerificationRunner : MonoBehaviour
         }
     }
 
+    private sealed class NoOpPlayerInputReader : IPlayerInputReader
+    {
+        public Vector3 MousePosition => Vector3.zero;
+        public float ScreenWidth => Screen.width;
+        public float ScreenHeight => Screen.height;
+        public bool GetKey(KeyCode keyCode) => false;
+        public bool GetKeyDown(KeyCode keyCode) => false;
+        public bool GetMouseButton(int button) => false;
+        public bool GetMouseButtonDown(int button) => false;
+    }
+
     private IEnumerator Start()
     {
         yield return null;
@@ -496,8 +507,10 @@ public sealed class DoorVisualPlayModeVerificationRunner : MonoBehaviour
             scope.Container.Resolve<IGridTextureProvider>(),
             scope.Container.Resolve<IObjectResolver>(),
             scope.Container.Resolve<IGameDataProvider>(),
+            scope.Container.Resolve<IBlueprintResearchRuntimeProvider>(),
             scope.Container.Resolve<IGridBuildingObjectFactory>(),
-            new NoUiPointerBlocker());
+            new NoUiPointerBlocker(),
+            new NoOpPlayerInputReader());
         ghostPresenter.Construct(
             scope.Container.Resolve<IGridSystemProvider>(),
             scope.Container.Resolve<IDungeonGridBuildingControllerProvider>(),

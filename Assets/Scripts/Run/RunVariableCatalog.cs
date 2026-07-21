@@ -1,168 +1,232 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
+
+public static class RunVariableIds
+{
+    public const string SlimeCrowdVisit = "run:operation:slime-crowd-visit";
+    public const string OrcFeast = "run:operation:orc-feast";
+    public const string VampireNightVisit = "run:operation:vampire-night-visit";
+    public const string FoodDeliveryDelay = "run:operation:food-delivery-delay";
+    public const string GeneralGoodsDiscount = "run:operation:general-goods-discount";
+    public const string ManaStockSurplus = "run:operation:mana-stock-surplus";
+    public const string VisitingMerchant = "run:operation:visiting-merchant";
+    public const string DefenseFacilityDiscount = "run:operation:defense-facility-discount";
+    public const string BlueprintRumor = "run:operation:blueprint-rumor";
+    public const string ScoutTraces = "run:invasion:scout-traces";
+    public const string Ambush = "run:invasion:ambush";
+    public const string ArmedIntruder = "run:invasion:armed-intruder";
+    public const string LootPriority = "run:invasion:loot-priority";
+    public const string TiredIntruder = "run:invasion:tired-intruder";
+}
 
 public static class RunVariableCatalog
 {
-    private static readonly Dictionary<RunVariableId, RunVariableDefinition> definitions = BuildDefinitions();
+    private static Dictionary<string, RunVariableDefinition> definitions = BuildDefinitions();
 
     public static IReadOnlyCollection<RunVariableDefinition> All => definitions.Values;
 
-    public static RunVariableDefinition Get(RunVariableId id)
+    public static RunVariableDefinition Get(string id)
     {
-        return definitions.TryGetValue(id, out RunVariableDefinition definition) ? definition : null;
+        return !string.IsNullOrWhiteSpace(id)
+            && definitions.TryGetValue(id, out RunVariableDefinition definition)
+                ? definition
+                : null;
     }
 
     public static IReadOnlyList<RunVariableDefinition> GetByCategory(RunVariableCategory category)
     {
         return definitions.Values
-            .Where((definition) => definition.category == category)
+            .Where(definition => definition.category == category)
+            .OrderBy(definition => definition.id, StringComparer.Ordinal)
             .ToList();
     }
 
-    private static Dictionary<RunVariableId, RunVariableDefinition> BuildDefinitions()
+    public static void Register(RunVariableDefinition definition, bool replace = false)
+    {
+        Validate(definition);
+        if (!replace && definitions.ContainsKey(definition.id))
+        {
+            throw new InvalidOperationException($"Run variable '{definition.id}' is already registered.");
+        }
+
+        definitions[definition.id] = definition;
+    }
+
+    public static void ResetToBuiltIns()
+    {
+        definitions = BuildDefinitions();
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetRuntimeCatalog()
+    {
+        ResetToBuiltIns();
+    }
+
+    private static Dictionary<string, RunVariableDefinition> BuildDefinitions()
     {
         RunVariableDefinition[] list =
         {
-            new RunVariableDefinition
-            {
-                id = RunVariableId.SlimeCrowdVisit,
-                category = RunVariableCategory.Operation,
-                title = "슬라임 단체 방문",
-                detail = "슬라임 손님 수요가 일시적으로 증가합니다.",
-                importance = EventAlertImportance.Low,
-                guestSpeciesTag = "Slime",
-                guestDemandMultiplier = 1.7f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.OrcFeast,
-                category = RunVariableCategory.Operation,
-                title = "오크 회식",
-                detail = "오크 손님 수요가 증가하고 고소비 시설 우선순위가 올라갑니다.",
-                importance = EventAlertImportance.Low,
-                guestSpeciesTag = "Orc",
-                guestDemandMultiplier = 1.6f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.VampireNightVisit,
-                category = RunVariableCategory.Operation,
-                title = "뱀파이어 야간 방문",
-                detail = "뱀파이어 손님 수요가 증가합니다.",
-                importance = EventAlertImportance.Low,
-                guestSpeciesTag = "Vampire",
-                guestDemandMultiplier = 1.55f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.FoodDeliveryDelay,
-                category = RunVariableCategory.Operation,
-                title = "식자재 배송 지연",
-                detail = "식자재 상품 가격이 올라갑니다.",
-                importance = EventAlertImportance.Medium,
-                stockCategory = StockCategory.Food,
-                hasStockCostModifier = true,
-                stockCostMultiplier = 1.5f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.GeneralGoodsDiscount,
-                category = RunVariableCategory.Operation,
-                title = "잡화 할인",
-                detail = "잡화 상품 가격이 내려갑니다.",
-                importance = EventAlertImportance.Low,
-                stockCategory = StockCategory.General,
-                hasStockCostModifier = true,
-                stockCostMultiplier = 0.75f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.ManaStockSurplus,
-                category = RunVariableCategory.Operation,
-                title = "마력 재고 과잉",
-                detail = "마력 상품 가격이 크게 내려갑니다.",
-                importance = EventAlertImportance.Low,
-                stockCategory = StockCategory.Mana,
-                hasStockCostModifier = true,
-                stockCostMultiplier = 0.65f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.VisitingMerchant,
-                category = RunVariableCategory.Operation,
-                title = "방문 상인",
-                detail = "시설과 설계도 가격이 조금 내려갑니다.",
-                importance = EventAlertImportance.Medium,
-                shopCostMultiplier = 0.85f,
-                blueprintCostMultiplier = 0.9f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.DefenseFacilityDiscount,
-                category = RunVariableCategory.Operation,
-                title = "방어 시설 할인",
-                detail = "방어 시설 가격이 내려갑니다.",
-                importance = EventAlertImportance.Low,
-                defenseShopCostMultiplier = 0.7f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.BlueprintRumor,
-                category = RunVariableCategory.Operation,
-                title = "설계도 소문",
-                detail = "설계도 가격이 내려가고 연구 목표를 뽑기 쉬워집니다.",
-                importance = EventAlertImportance.Medium,
-                blueprintCostMultiplier = 0.8f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.ScoutTraces,
-                category = RunVariableCategory.Invasion,
-                title = "정찰 흔적",
-                detail = "침입자가 사장 위치를 더 빨리 좁혀 옵니다.",
-                importance = EventAlertImportance.Medium,
-                secondsToFullFocusMultiplier = 0.8f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.Ambush,
-                category = RunVariableCategory.Invasion,
-                title = "급습",
-                detail = "침입자의 경로 재탐색이 빨라집니다.",
-                importance = EventAlertImportance.High,
-                repathIntervalMultiplier = 0.75f,
-                finalCombatDamageMultiplier = 0.9f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.ArmedIntruder,
-                category = RunVariableCategory.Invasion,
-                title = "무장한 침입자",
-                detail = "최종 교전 피해가 증가합니다.",
-                importance = EventAlertImportance.High,
-                finalCombatDamageMultiplier = 1.35f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.LootPriority,
-                category = RunVariableCategory.Invasion,
-                title = "약탈 우선",
-                detail = "침입자가 주요 시설을 더 자주 훼손합니다.",
-                importance = EventAlertImportance.Medium,
-                facilityDamageIntervalMultiplier = 0.55f
-            },
-            new RunVariableDefinition
-            {
-                id = RunVariableId.TiredIntruder,
-                category = RunVariableCategory.Invasion,
-                title = "지친 침입자",
-                detail = "최종 교전 피해가 낮아지지만 경로 탐색은 조금 느려집니다.",
-                importance = EventAlertImportance.Low,
-                secondsToFullFocusMultiplier = 1.15f,
-                finalCombatDamageMultiplier = 0.7f
-            }
+            Definition(
+                RunVariableIds.SlimeCrowdVisit,
+                RunVariableCategory.Operation,
+                "슬라임 단체 방문",
+                "슬라임 손님 수요가 일시적으로 증가합니다.",
+                EventAlertImportance.Low,
+                new RunGuestDemandEffect("Slime", 1.7f)),
+            Definition(
+                RunVariableIds.OrcFeast,
+                RunVariableCategory.Operation,
+                "오크 회식",
+                "오크 손님 수요가 증가하고 고소비 시설 우선순위가 올라갑니다.",
+                EventAlertImportance.Low,
+                new RunGuestDemandEffect("Orc", 1.6f)),
+            Definition(
+                RunVariableIds.VampireNightVisit,
+                RunVariableCategory.Operation,
+                "뱀파이어 야간 방문",
+                "뱀파이어 손님 수요가 증가합니다.",
+                EventAlertImportance.Low,
+                new RunGuestDemandEffect("Vampire", 1.55f)),
+            Definition(
+                RunVariableIds.FoodDeliveryDelay,
+                RunVariableCategory.Operation,
+                "식자재 배송 지연",
+                "식자재 상품 가격이 올라갑니다.",
+                EventAlertImportance.Medium,
+                new RunStockCostEffect(StockCategory.Food, 1.5f)),
+            Definition(
+                RunVariableIds.GeneralGoodsDiscount,
+                RunVariableCategory.Operation,
+                "잡화 할인",
+                "잡화 상품 가격이 내려갑니다.",
+                EventAlertImportance.Low,
+                new RunStockCostEffect(StockCategory.General, 0.75f)),
+            Definition(
+                RunVariableIds.ManaStockSurplus,
+                RunVariableCategory.Operation,
+                "마력 재고 과잉",
+                "마력 상품 가격이 크게 내려갑니다.",
+                EventAlertImportance.Low,
+                new RunStockCostEffect(StockCategory.Mana, 0.65f)),
+            Definition(
+                RunVariableIds.VisitingMerchant,
+                RunVariableCategory.Operation,
+                "방문 상인",
+                "시설과 설계도 가격이 조금 내려갑니다.",
+                EventAlertImportance.Medium,
+                new RunFacilityShopCostEffect(0.85f),
+                new RunBlueprintCostEffect(0.9f)),
+            Definition(
+                RunVariableIds.DefenseFacilityDiscount,
+                RunVariableCategory.Operation,
+                "방어 시설 할인",
+                "방어 시설 가격이 내려갑니다.",
+                EventAlertImportance.Low,
+                new RunFacilityShopCostEffect(0.7f, defenseOnly: true)),
+            Definition(
+                RunVariableIds.BlueprintRumor,
+                RunVariableCategory.Operation,
+                "설계도 소문",
+                "설계도 가격이 내려가고 연구 목표를 뽑기 쉬워집니다.",
+                EventAlertImportance.Medium,
+                new RunBlueprintCostEffect(0.8f)),
+            Definition(
+                RunVariableIds.ScoutTraces,
+                RunVariableCategory.Invasion,
+                "정찰 흔적",
+                "추적자가 탐색을 짧게 끝내고 사장 위치를 빠르게 좁혀 옵니다.",
+                EventAlertImportance.Medium,
+                new RunIntruderPatternEffect(InvasionIntruderPatternIds.Hunter),
+                new RunFocusTimeEffect(0.8f)),
+            Definition(
+                RunVariableIds.Ambush,
+                RunVariableCategory.Invasion,
+                "급습",
+                "급습자가 긴 탐색 없이 사장에게 향하고 경로 재탐색도 빨라집니다.",
+                EventAlertImportance.High,
+                new RunIntruderPatternEffect(InvasionIntruderPatternIds.Ambusher),
+                new RunRepathIntervalEffect(0.75f),
+                new RunFinalCombatDamageEffect(0.9f)),
+            Definition(
+                RunVariableIds.ArmedIntruder,
+                RunVariableCategory.Invasion,
+                "무장한 침입자",
+                "파괴자가 방어 시설부터 노리며 최종 교전 피해도 증가합니다.",
+                EventAlertImportance.High,
+                new RunIntruderPatternEffect(InvasionIntruderPatternIds.Breaker),
+                new RunFinalCombatDamageEffect(1.35f)),
+            Definition(
+                RunVariableIds.LootPriority,
+                RunVariableCategory.Invasion,
+                "약탈 우선",
+                "약탈자가 값비싼 운영 시설을 찾아 더 자주 훼손합니다.",
+                EventAlertImportance.Medium,
+                new RunIntruderPatternEffect(InvasionIntruderPatternIds.Plunderer),
+                new RunFacilityDamageIntervalEffect(0.55f)),
+            Definition(
+                RunVariableIds.TiredIntruder,
+                RunVariableCategory.Invasion,
+                "지친 침입자",
+                "낙오자가 오래 헤매며 최종 교전 피해도 낮습니다.",
+                EventAlertImportance.Low,
+                new RunIntruderPatternEffect(InvasionIntruderPatternIds.Straggler),
+                new RunFocusTimeEffect(1.15f),
+                new RunFinalCombatDamageEffect(0.7f))
         };
 
-        return list.ToDictionary((definition) => definition.id, (definition) => definition);
+        Dictionary<string, RunVariableDefinition> result = new Dictionary<string, RunVariableDefinition>(
+            StringComparer.Ordinal);
+        foreach (RunVariableDefinition definition in list)
+        {
+            Validate(definition);
+            result.Add(definition.id, definition);
+        }
+
+        return result;
+    }
+
+    private static RunVariableDefinition Definition(
+        string id,
+        RunVariableCategory category,
+        string title,
+        string detail,
+        EventAlertImportance importance,
+        params IRunVariableEffect[] effects)
+    {
+        return new RunVariableDefinition(
+            id,
+            category,
+            title,
+            detail,
+            importance,
+            1,
+            effects ?? Array.Empty<IRunVariableEffect>());
+    }
+
+    private static void Validate(RunVariableDefinition definition)
+    {
+        if (definition == null)
+        {
+            throw new ArgumentNullException(nameof(definition));
+        }
+
+        if (string.IsNullOrWhiteSpace(definition.id))
+        {
+            throw new InvalidOperationException("Run variable definitions require a stable id.");
+        }
+
+        if (definition.effects == null || definition.effects.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Run variable '{definition.id}' must declare at least one effect.");
+        }
+
+        if (definition.effects.Any(effect => effect == null))
+        {
+            throw new InvalidOperationException($"Run variable '{definition.id}' contains a null effect.");
+        }
     }
 }

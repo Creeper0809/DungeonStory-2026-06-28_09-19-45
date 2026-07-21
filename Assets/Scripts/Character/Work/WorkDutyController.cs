@@ -16,6 +16,7 @@ public sealed class WorkDutyController
 
     public AbilityWork.DutyState CurrentState => dutyState;
     public bool IsOffDuty => dutyState == AbilityWork.DutyState.OffDuty;
+    public bool LastWorkRunCompleted { get; private set; }
 
     public void InitializeWorkerCondition(CharacterSO data)
     {
@@ -24,12 +25,12 @@ public sealed class WorkDutyController
             return;
         }
 
-        EnsureStatAtLeast(CharacterCondition.SLEEP, 85f);
+        foreach (CharacterNeedDefinition definition in CharacterNeedCatalog.All)
+        {
+            EnsureStatAtLeast(definition.Condition, definition.WorkerInitialValue);
+        }
+
         EnsureStatAtLeast(CharacterCondition.MOOD, 75f);
-        EnsureStatAtLeast(CharacterCondition.FUN, 70f);
-        EnsureStatAtLeast(CharacterCondition.HUNGER, 80f);
-        EnsureStatAtLeast(CharacterCondition.EXCRETION, 85f);
-        EnsureStatAtLeast(CharacterCondition.HYGIENE, 80f);
     }
 
     public bool ShouldUseRestProtection()
@@ -94,7 +95,11 @@ public sealed class WorkDutyController
             if (IsOffDuty)
             {
                 SetDutyState(AbilityWork.DutyState.OnDuty);
-                actor?.AddLog("비번 중 제압 명령 대응");
+                actor?.AddActivity(CharacterActivityEvent.Create(
+                    CharacterActivityKinds.Duty,
+                    CharacterActivityOutcomes.Responded,
+                    "비번 중 제압 명령 대응",
+                    actionId: "command:suppress"));
             }
 
             return true;
@@ -105,7 +110,11 @@ public sealed class WorkDutyController
             if (IsOffDuty)
             {
                 SetDutyState(AbilityWork.DutyState.OnDuty);
-                actor?.AddLog("비번 중 우선 작업 대응");
+                actor?.AddActivity(CharacterActivityEvent.Create(
+                    CharacterActivityKinds.Duty,
+                    CharacterActivityOutcomes.Responded,
+                    "비번 중 우선 작업 대응",
+                    actionId: "command:priority-work"));
             }
 
             return true;
@@ -124,7 +133,12 @@ public sealed class WorkDutyController
             if (ShouldReturnToWork())
             {
                 SetDutyState(AbilityWork.DutyState.OnDuty);
-                actor?.AddLog("근무 복귀");
+                actor?.AddActivity(CharacterActivityEvent.Create(
+                    CharacterActivityKinds.Duty,
+                    CharacterActivityOutcomes.Returned,
+                    "근무 복귀",
+                    reasonCode: "condition-recovered",
+                    sentiment: 0.3f));
                 return true;
             }
 
@@ -198,9 +212,14 @@ public sealed class WorkDutyController
         SetDutyState(AbilityWork.DutyState.OffDuty);
         if (!wasOffDuty)
         {
-            actor.AddLog(string.IsNullOrWhiteSpace(reason)
-                ? "비번 시작"
-                : $"비번 시작: {reason}");
+            actor.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Duty,
+                CharacterActivityOutcomes.Departed,
+                string.IsNullOrWhiteSpace(reason)
+                    ? "비번 시작"
+                    : $"비번 시작: {reason}",
+                reasonCode: reason,
+                sentiment: -0.2f));
         }
 
         if (!wasOffDuty && actor.TryGetAbility(out AbilityShopping shopping))
@@ -214,7 +233,11 @@ public sealed class WorkDutyController
         work.ReleaseAssignedWorkTarget();
         work.ClearPriorityWorkTarget();
         SetDutyState(AbilityWork.DutyState.OnDuty);
-        work.WorkerActor?.AddLog("원정 준비: 작업 해제");
+        work.WorkerActor?.AddActivity(CharacterActivityEvent.Create(
+            CharacterActivityKinds.Duty,
+            CharacterActivityOutcomes.Changed,
+            "원정 준비: 작업 해제",
+            reasonCode: "expedition-preparation"));
     }
 
     public void SetDutyState(AbilityWork.DutyState nextState)
@@ -287,6 +310,9 @@ public sealed class WorkDutyController
         CharacterActor actor = work.WorkerActor;
         string endReason = string.Empty;
         float startedAt = Time.time;
+        float routineShiftSeconds = work.RoutineOperateShiftSeconds
+            * work.GetWorkEnvironmentDurationMultiplier(work.AssignedWorkType);
+        LastWorkRunCompleted = false;
         while (work.CanContinueWorkRun(runId) && actor != null && actor.Brain != null)
         {
             ApplyWorkFatigueTick();
@@ -304,11 +330,16 @@ public sealed class WorkDutyController
                 break;
             }
 
-            if (ShouldEndRoutineWorkShift(startedAt, out string routineShiftReason))
+            if (ShouldEndRoutineWorkShift(startedAt, routineShiftSeconds, out string routineShiftReason))
             {
+                LastWorkRunCompleted = true;
                 endReason = routineShiftReason;
                 WorkDebugLog.LogEnd(actor, $"근무 교대 · {routineShiftReason}");
-                actor.AddLog($"근무 교대: {routineShiftReason}");
+                actor.AddActivity(CharacterActivityEvent.Create(
+                    CharacterActivityKinds.Duty,
+                    CharacterActivityOutcomes.Changed,
+                    $"근무 교대: {routineShiftReason}",
+                    reasonCode: routineShiftReason));
                 work.BeginRoutineWorkCooldown(work.AssignedWorkType);
                 break;
             }
@@ -369,10 +400,11 @@ public sealed class WorkDutyController
         return false;
     }
 
-    private bool ShouldEndRoutineWorkShift(float startedAt, out string reason)
+    private bool ShouldEndRoutineWorkShift(float startedAt, float routineShiftSeconds, out string reason)
     {
         reason = string.Empty;
-        if (work.AssignedWorkType != FacilityWorkType.Operate)
+        if (work.AssignedWorkType != FacilityWorkType.Operate
+            && work.AssignedWorkType != FacilityWorkType.Guard)
         {
             return false;
         }
@@ -382,12 +414,14 @@ public sealed class WorkDutyController
             return false;
         }
 
-        if (Time.time - startedAt < work.RoutineOperateShiftSeconds)
+        if (Time.time - startedAt < Mathf.Max(0.5f, routineShiftSeconds))
         {
             return false;
         }
 
-        reason = "운영 교대";
+        reason = work.AssignedWorkType == FacilityWorkType.Guard
+            ? "경비 교대"
+            : "운영 교대";
         return true;
     }
 

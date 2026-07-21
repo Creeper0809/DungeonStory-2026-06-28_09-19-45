@@ -7,4 +7,5 @@ public class CharacterTraitSO : DataScriptableObject
     [TextArea] public string description;
     public CharacterStatBlock statBonus = new CharacterStatBlock();
     public CharacterModelModifiers modifiers = new CharacterModelModifiers();
+    public CharacterCombatAbilityCollection combatAbilities = new CharacterCombatAbilityCollection();
 }
