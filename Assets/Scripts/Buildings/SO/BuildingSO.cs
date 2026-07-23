@@ -46,7 +46,15 @@ public enum FacilityWorkType
     Rescue = 1 << 6,
     Rest = 1 << 7,
     Craft = 1 << 8,
-    Haul = 1 << 9
+    Haul = 1 << 9,
+    Reception = 1 << 10,
+    Hunt = 1 << 11,
+    Butcher = 1 << 12,
+    DrawWater = 1 << 13,
+    Cook = 1 << 14,
+    Treat = 1 << 15,
+    Refuel = 1 << 16,
+    Construct = 1 << 17
 }
 
 public static class FacilityAnchorPurposeIds

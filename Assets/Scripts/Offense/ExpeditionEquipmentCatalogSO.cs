@@ -21,6 +21,76 @@ public sealed class ExpeditionEquipmentCatalogSO : ScriptableObject
         return definition != null;
     }
 
+    public void EnsureCombatCompatibilityDefinitions()
+    {
+        EnsureAmmoRecipe(
+            CombatItemDefinitions.ArrowBundleRecipeId,
+            "화살 묶음",
+            amount: 1,
+            craftSeconds: 5f);
+        EnsureAmmoRecipe(
+            CombatItemDefinitions.BoltBundleRecipeId,
+            "볼트 묶음",
+            amount: 2,
+            craftSeconds: 7f);
+
+        CombatEquipmentDefinitionSO[] combatDefinitions =
+            Resources.LoadAll<CombatEquipmentDefinitionSO>(
+                ResourceCombatEquipmentCatalog.ResourcePath);
+        foreach (CombatEquipmentDefinitionSO combat in combatDefinitions)
+        {
+            if (combat == null
+                || string.IsNullOrWhiteSpace(combat.EquipmentId)
+                || equipment.Any(candidate => candidate != null
+                    && string.Equals(
+                        candidate.id,
+                        combat.EquipmentId,
+                        StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            equipment.Add(new ExpeditionEquipmentDefinition
+            {
+                id = combat.EquipmentId,
+                displayName = combat.DisplayName,
+                slot = combat.Kind == CombatEquipmentKind.Armor
+                    || combat.Kind == CombatEquipmentKind.Shield
+                    ? ExpeditionEquipmentSlot.Armor
+                    : ExpeditionEquipmentSlot.Weapon,
+                stats = new ExpeditionEquipmentStatBlock(),
+                craftCosts = Cost(Mathf.Clamp(
+                    Mathf.CeilToInt(combat.Weight),
+                    1,
+                    8)),
+                craftSeconds = Mathf.Clamp(4f + combat.Weight * 2f, 5f, 22f)
+            });
+        }
+    }
+
+    private void EnsureAmmoRecipe(
+        string id,
+        string displayName,
+        int amount,
+        float craftSeconds)
+    {
+        if (equipment.Any(candidate => candidate != null
+            && string.Equals(candidate.id, id, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        equipment.Add(new ExpeditionEquipmentDefinition
+        {
+            id = id,
+            displayName = displayName,
+            slot = ExpeditionEquipmentSlot.Weapon,
+            stats = new ExpeditionEquipmentStatBlock(),
+            craftCosts = Cost(amount),
+            craftSeconds = craftSeconds
+        });
+    }
+
     public static ExpeditionEquipmentCatalogSO CreateRuntimeDefaults()
     {
         ExpeditionEquipmentCatalogSO catalog = CreateInstance<ExpeditionEquipmentCatalogSO>();

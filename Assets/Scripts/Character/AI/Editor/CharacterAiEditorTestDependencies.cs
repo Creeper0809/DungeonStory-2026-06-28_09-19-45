@@ -135,7 +135,8 @@ internal static class CharacterAiEditorTestDependencies
             scheduling,
             WorldInfo,
             SocialMemoryFactory,
-            FeedbackBubbles);
+            FeedbackBubbles,
+            MainCamera);
     }
 
     public static void Inject(SocialReputationRuntime runtime)

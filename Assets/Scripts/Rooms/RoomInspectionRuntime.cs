@@ -508,6 +508,10 @@ internal sealed class RoomInspectionView : IDisposable
     private readonly MetricRow beautyRow;
     private readonly MetricRow cleanlinessRow;
     private readonly MetricRow impressivenessRow;
+    private readonly MetricRow shelterRow;
+    private readonly MetricRow temperatureRow;
+    private readonly MetricRow ventilationRow;
+    private readonly MetricRow lightingRow;
 
     public RoomInspectionView(
         Canvas canvas,
@@ -532,7 +536,7 @@ internal sealed class RoomInspectionView : IDisposable
         panelRect.anchorMax = Vector2.one;
         panelRect.pivot = Vector2.one;
         panelRect.anchoredPosition = new Vector2(-16f, -140f);
-        panelRect.sizeDelta = new Vector2(390f, 440f);
+        panelRect.sizeDelta = new Vector2(390f, 600f);
         Image panelImage = PanelObject.AddComponent<Image>();
         panelImage.color = DungeonUiTheme.Panel;
         panelImage.raycastTarget = true;
@@ -552,14 +556,18 @@ internal sealed class RoomInspectionView : IDisposable
         beautyRow = CreateMetricRow(panelRect, fontService, "미관", 190f);
         cleanlinessRow = CreateMetricRow(panelRect, fontService, "청결", 242f);
         impressivenessRow = CreateMetricRow(panelRect, fontService, "인상도", 294f);
+        shelterRow = CreateMetricRow(panelRect, fontService, "쉼터", 342f);
+        temperatureRow = CreateMetricRow(panelRect, fontService, "온도", 388f);
+        ventilationRow = CreateMetricRow(panelRect, fontService, "환기", 434f);
+        lightingRow = CreateMetricRow(panelRect, fontService, "조명", 480f);
 
         TMP_Text contributorHeader = CreateText(panelRect, "ContributorHeader", fontService, 15f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         contributorHeader.text = "성향을 만든 시설";
-        SetTopRect(contributorHeader.rectTransform, 16f, 350f, 16f, 22f);
+        SetTopRect(contributorHeader.rectTransform, 16f, 528f, 16f, 22f);
         contributorsText = CreateText(panelRect, "RoomContributors", fontService, 14f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
         contributorsText.textWrappingMode = TextWrappingModes.Normal;
         contributorsText.overflowMode = TextOverflowModes.Truncate;
-        SetTopRect(contributorsText.rectTransform, 16f, 374f, 16f, 52f);
+        SetTopRect(contributorsText.rectTransform, 16f, 550f, 16f, 38f);
         PanelObject.SetActive(false);
     }
 
@@ -605,6 +613,10 @@ internal sealed class RoomInspectionView : IDisposable
         RenderMetric(beautyRow, snapshot.Beauty);
         RenderMetric(cleanlinessRow, snapshot.Cleanliness);
         RenderMetric(impressivenessRow, snapshot.Impressiveness);
+        RenderMetric(shelterRow, snapshot.Shelter);
+        RenderMetric(temperatureRow, snapshot.Temperature);
+        RenderMetric(ventilationRow, snapshot.Ventilation);
+        RenderMetric(lightingRow, snapshot.Lighting);
         contributorsText.text = BuildContributorText(snapshot);
     }
 

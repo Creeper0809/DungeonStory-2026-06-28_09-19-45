@@ -384,9 +384,22 @@ public sealed class WorkDutyController
             return false;
         }
 
+        float hunger = GetStat(CharacterCondition.HUNGER, 100f);
+        if (hunger <= work.HungerWorkInterruptThreshold)
+        {
+            interruptReason = "식사 필요";
+            return true;
+        }
+
         if (ShouldUseRestProtection())
         {
             interruptReason = "휴식 필요";
+            return true;
+        }
+
+        if (CharacterMoodImpulseUtility.GetMood01(work.WorkerActor) <= 0.18f)
+        {
+            interruptReason = "기분이 바닥나 일을 내팽개침";
             return true;
         }
 

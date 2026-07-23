@@ -181,6 +181,7 @@ public sealed class RoomEnvironmentExperienceService :
             return eventType.WorkType switch
             {
                 FacilityWorkType.Research => "연구함",
+                FacilityWorkType.Construct => "건설함",
                 FacilityWorkType.Repair => "수리함",
                 FacilityWorkType.Clean => "청소함",
                 FacilityWorkType.Guard => "근무함",

@@ -15,6 +15,19 @@ public interface IBuildingWorkCompletedRuntimeAbility
     int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType);
 }
 
+public interface IBuildingExteriorWorkRuntimeAbility
+{
+    bool SupportsExteriorWork(FacilityWorkType workType);
+    bool IsExteriorWorkAvailable(CharacterActor actor, BuildableObject building, FacilityWorkType workType);
+    float GetExteriorWorkSeconds(CharacterActor actor, BuildableObject building, FacilityWorkType workType);
+    float GetExteriorWorkUrgency(CharacterActor actor, BuildableObject building, FacilityWorkType workType);
+}
+
+public interface IBuildingWorkAmountRuntimeAbility
+{
+    float GetRequiredWork(BuildableObject building, FacilityWorkType workType);
+}
+
 public interface IBuildingRuntimeStateAbility
 {
     IBuildingStateModule CreateStateModule(BuildableObject building);

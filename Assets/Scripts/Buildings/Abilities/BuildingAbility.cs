@@ -286,6 +286,35 @@ public sealed class BuildingDefenseAbility : BuildingAbility
 }
 
 [Serializable]
+[BuildingAbilityDisplayName("엄폐")]
+public sealed class BuildingCoverAbility :
+    BuildingAbility,
+    IBuildingRuntimeStateAbility,
+    IBuildingVisualRuntimeAbility
+{
+    [InspectorName("엄폐 높이")]
+    public CombatCoverHeight height = CombatCoverHeight.Low;
+    [Range(0f, 1f), InspectorName("기본 차단 확률")]
+    public float blockChance = 0.35f;
+    [InspectorName("보호 방향")]
+    public Vector2Int facingDirection = Vector2Int.left;
+    [InspectorName("모서리 사격 허용")]
+    public bool allowsCornerPeek;
+    [Min(1f), InspectorName("엄폐 내구")]
+    public float coverHitPoints = 60f;
+
+    public IBuildingStateModule CreateStateModule(BuildableObject building)
+    {
+        return CombatCoverDurability.Ensure(building, this);
+    }
+
+    public void ConfigureVisual(BuildableObject building)
+    {
+        CombatCoverDurability.Ensure(building, this);
+    }
+}
+
+[Serializable]
 [BuildingAbilityDisplayName("진화 기여")]
 public sealed class BuildingEvolutionAbility : BuildingAbility
 {
@@ -423,6 +452,149 @@ public sealed class BuildingLightingAbility : BuildingAbility, IBuildingVisualRu
 }
 
 [Serializable]
+[BuildingAbilityDisplayName("작업량")]
+public sealed class BuildingWorkAmountAbility : BuildingAbility, IBuildingWorkAmountRuntimeAbility
+{
+    [Min(0.1f), InspectorName("건설 작업량")] public float constructionWorkRequired = 30f;
+    [Min(0.1f), InspectorName("수리 작업량")] public float repairWorkRequired = 8f;
+    [Min(0.1f), InspectorName("청소 작업량")] public float cleanWorkRequired = 6f;
+    [Min(0.1f), InspectorName("연구 작업량")] public float researchWorkRequired = 6f;
+    [Min(0.1f), InspectorName("기본 운영 작업량")] public float operateWorkRequired = 10f;
+    [InspectorName("건설 재료 분류")] public StockCategory constructionMaterialCategory = StockCategory.General;
+    [Min(0), InspectorName("건설 재료 수량")] public int constructionMaterialAmount;
+    [Min(0f), InspectorName("비용 대비 기본 재료 비율")] public float materialUnitsPerConstructionCost = 0.05f;
+
+    public float GetRequiredWork(BuildableObject building, FacilityWorkType workType)
+    {
+        return workType switch
+        {
+            FacilityWorkType.Construct => Mathf.Max(0.1f, constructionWorkRequired),
+            FacilityWorkType.Repair => Mathf.Max(0.1f, repairWorkRequired),
+            FacilityWorkType.Clean => Mathf.Max(0.1f, cleanWorkRequired),
+            FacilityWorkType.Research => Mathf.Max(0.1f, researchWorkRequired),
+            FacilityWorkType.Operate => Mathf.Max(0.1f, operateWorkRequired),
+            _ => 0f
+        };
+    }
+
+    public Dictionary<StockCategory, int> GetConstructionMaterials(BuildingSO building)
+    {
+        Dictionary<StockCategory, int> result = new Dictionary<StockCategory, int>();
+        int amount = constructionMaterialAmount;
+        if (amount <= 0 && building != null && materialUnitsPerConstructionCost > 0f)
+        {
+            amount = Mathf.CeilToInt(building.GetConstructionCost() * materialUnitsPerConstructionCost);
+        }
+
+        if (amount > 0)
+        {
+            result[constructionMaterialCategory] = amount;
+        }
+
+        return result;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Water Source")]
+public sealed class BuildingWaterSourceAbility : BuildingAbility, IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(1)] public int waterPerWork = 4;
+    [Min(0.1f)] public float workSeconds = 1f;
+    public bool blockedByFreezingWeather = true;
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.DrawWater
+            && SurvivalFoodRuntime.Active != null
+            && SurvivalFoodRuntime.Active.TryApplySurvivalWork(actor, building, workType, out int amount, out _)
+            ? amount
+            : 0;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Cooking")]
+public sealed class BuildingCookingAbility : BuildingAbility, IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(1)] public int inputFood = 1;
+    [Min(1)] public int cookedMeals = 2;
+    [Min(0.1f)] public float workSeconds = 1.2f;
+    public bool requiresFuel = true;
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Cook
+            && SurvivalFoodRuntime.Active != null
+            && SurvivalFoodRuntime.Active.TryApplySurvivalWork(actor, building, workType, out int amount, out _)
+            ? amount
+            : 0;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Preservation")]
+public sealed class BuildingPreservationAbility : BuildingAbility
+{
+    [Range(1f, 8f)] public float freshnessMultiplier = 4f;
+    [Min(1)] public int preservedMealsPerCook = 1;
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Medical")]
+public sealed class BuildingMedicalAbility : BuildingAbility, IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(0.1f)] public float workSeconds = 1.4f;
+    [Min(0f)] public float severityReduction = 0.45f;
+    public bool requiresMedicine = true;
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Treat
+            && SurvivalFoodRuntime.Active != null
+            && SurvivalFoodRuntime.Active.TryApplySurvivalWork(actor, building, workType, out int amount, out _)
+            ? amount
+            : 0;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Fuel Consumer")]
+public sealed class BuildingFuelConsumerAbility : BuildingAbility, IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(1)] public int fuelPerRefuel = 1;
+    [Min(0.1f)] public float workSeconds = 0.8f;
+    [Min(0f)] public float warmth = 8f;
+    [Min(0f)] public float lightSafety = 10f;
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Refuel
+            && SurvivalFoodRuntime.Active != null
+            && SurvivalFoodRuntime.Active.TryApplySurvivalWork(actor, building, workType, out int amount, out _)
+            ? amount
+            : 0;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Temperature")]
+public sealed class BuildingTemperatureAbility : BuildingAbility
+{
+    public float roomTemperatureOffset = 4f;
+    [Min(0f)] public float coldProtection = 8f;
+    [Min(0f)] public float heatProtection = 4f;
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Ventilation")]
+public sealed class BuildingVentilationAbility : BuildingAbility
+{
+    [Range(0f, 100f)] public float hygieneRiskReduction = 10f;
+    [Range(0f, 100f)] public float smokeRiskReduction = 20f;
+}
+
+[Serializable]
 [BuildingAbilityDisplayName("원정 지원")]
 public sealed class BuildingExpeditionSupportAbility : BuildingAbility
 {
@@ -463,6 +635,37 @@ public sealed class BuildingEquipmentCraftingAbility : BuildingAbility, IBuildin
 }
 
 [Serializable]
+[BuildingAbilityDisplayName("Equipment Maintenance")]
+public sealed class BuildingEquipmentMaintenanceAbility : BuildingAbility
+{
+    [Min(0.1f)] public float workSpeedMultiplier = 1f;
+    [Min(1)] public int simultaneousRepairSlots = 1;
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Butchery")]
+public sealed class BuildingButcherAbility : BuildingAbility, IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(0.1f)] public float workSeconds = 1f;
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (workType != FacilityWorkType.Butcher || WildlifeRuntime.Active == null)
+        {
+            return 0;
+        }
+
+        return WildlifeRuntime.Active.TryButcherNextCarcass(
+            actor,
+            building,
+            out int produced,
+            out _)
+            ? produced
+            : 0;
+    }
+}
+
+[Serializable]
 [BuildingAbilityDisplayName("Expedition Recovery")]
 public sealed class BuildingExpeditionRecoveryAbility : BuildingAbility, IBuildingUseCompletedRuntimeAbility
 {
@@ -476,6 +679,287 @@ public sealed class BuildingExpeditionRecoveryAbility : BuildingAbility, IBuildi
             healthHealRatio,
             injuryReduction,
             stressRecovery);
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Entrance Reception")]
+public sealed class BuildingReceptionAbility : BuildingAbility,
+    IBuildingExteriorWorkRuntimeAbility,
+    IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(0.1f)] public float workSeconds = 1.2f;
+    [Range(0f, 100f)] public float readinessGain = 35f;
+    [Min(0f)] public float firstImpressionBonus = 4f;
+    public float moodBonus = 1.5f;
+    [Min(0f)] public float moodDurationSeconds = 120f;
+
+    public bool SupportsExteriorWork(FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Reception;
+    }
+
+    public bool IsExteriorWorkAvailable(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return SupportsExteriorWork(workType)
+            && building is ExteriorZoneMarker marker
+            && marker.CanRunReceptionWork;
+    }
+
+    public float GetExteriorWorkSeconds(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return SupportsExteriorWork(workType) ? Mathf.Max(0.1f, workSeconds) : 0f;
+    }
+
+    public float GetExteriorWorkUrgency(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!IsExteriorWorkAvailable(actor, building, workType)
+            || building is not ExteriorZoneMarker marker)
+        {
+            return 0f;
+        }
+
+        return marker.GetReceptionUrgency();
+    }
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!SupportsExteriorWork(workType) || building is not ExteriorZoneMarker marker)
+        {
+            return 0;
+        }
+
+        marker.ApplyReceptionWork(readinessGain, firstImpressionBonus);
+        if (actor != null && !Mathf.Approximately(moodBonus, 0f))
+        {
+            actor.ApplyMoodFactor(
+                $"exterior:reception:{marker.ZoneId}",
+                "입구 응대를 마침",
+                moodBonus,
+                moodDurationSeconds,
+                1);
+        }
+
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Reception,
+            CharacterActivityOutcomes.Completed,
+            $"{marker.DisplayName}에서 방문객 맞이 준비를 정돈했다.",
+            marker,
+            reasonCode: "exterior-reception",
+            value: marker.ReceptionReadiness));
+        return 0;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Exterior Patrol")]
+public sealed class BuildingPatrolPostAbility : BuildingAbility,
+    IBuildingExteriorWorkRuntimeAbility,
+    IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(0.1f)] public float workSeconds = 1.6f;
+    [Range(0f, 100f)] public float patrolReadinessGain = 30f;
+    [Range(0f, 1f)] public float incidentDetectionBonus = 0.15f;
+
+    public bool SupportsExteriorWork(FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Guard;
+    }
+
+    public bool IsExteriorWorkAvailable(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return SupportsExteriorWork(workType)
+            && building is ExteriorZoneMarker marker
+            && marker.CanRunPatrolWork;
+    }
+
+    public float GetExteriorWorkSeconds(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return SupportsExteriorWork(workType) ? Mathf.Max(0.1f, workSeconds) : 0f;
+    }
+
+    public float GetExteriorWorkUrgency(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!IsExteriorWorkAvailable(actor, building, workType)
+            || building is not ExteriorZoneMarker marker)
+        {
+            return 0f;
+        }
+
+        return marker.GetPatrolUrgency();
+    }
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!SupportsExteriorWork(workType) || building is not ExteriorZoneMarker marker)
+        {
+            return 0;
+        }
+
+        marker.ApplyPatrolWork(patrolReadinessGain, incidentDetectionBonus);
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Guard,
+            CharacterActivityOutcomes.Completed,
+            $"{marker.DisplayName} 순찰을 마쳐 외부 동선이 한결 안전해졌다.",
+            marker,
+            reasonCode: "exterior-patrol",
+            value: marker.PatrolReadiness));
+        return 0;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Outdoor Rest")]
+public sealed class BuildingOutdoorRestAbility : BuildingAbility,
+    IBuildingExteriorWorkRuntimeAbility,
+    IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(0.1f)] public float workSeconds = 1.4f;
+    public float moodBonus = 4f;
+    [Min(0f)] public float stressRecovery = 8f;
+    [Min(0f)] public float moodDurationSeconds = 180f;
+
+    public bool SupportsExteriorWork(FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Rest;
+    }
+
+    public bool IsExteriorWorkAvailable(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!SupportsExteriorWork(workType)
+            || actor == null
+            || building is not ExteriorZoneMarker marker
+            || !marker.IsOutdoorRestSpot)
+        {
+            return false;
+        }
+
+        return actor.Mood.Value < 85f
+            || (actor.Lifecycle != null && actor.Lifecycle.ExpeditionRecovery.stress > 0f);
+    }
+
+    public float GetExteriorWorkSeconds(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return SupportsExteriorWork(workType) ? Mathf.Max(0.1f, workSeconds) : 0f;
+    }
+
+    public float GetExteriorWorkUrgency(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!IsExteriorWorkAvailable(actor, building, workType))
+        {
+            return 0f;
+        }
+
+        float moodNeed = Mathf.Clamp(85f - actor.Mood.Value, 0f, 85f);
+        float stress = actor.Lifecycle != null ? actor.Lifecycle.ExpeditionRecovery.stress : 0f;
+        return Mathf.Clamp(moodNeed * 0.75f + stress * 0.45f, 15f, 80f);
+    }
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!SupportsExteriorWork(workType) || building is not ExteriorZoneMarker marker)
+        {
+            return 0;
+        }
+
+        actor?.ApplyMoodFactor(
+            $"exterior:rest:{marker.ZoneId}",
+            "바깥 공기를 쐼",
+            moodBonus,
+            moodDurationSeconds,
+            1);
+        actor?.Lifecycle?.ApplyExpeditionRecovery(0f, 0f, stressRecovery);
+        marker.RecordOutdoorRest();
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Rest,
+            CharacterActivityOutcomes.Completed,
+            $"{marker.DisplayName}에서 잠깐 숨을 돌렸다.",
+            marker,
+            reasonCode: "exterior-rest",
+            value: moodBonus));
+        return 0;
+    }
+}
+
+[Serializable]
+[BuildingAbilityDisplayName("Exterior Maintenance")]
+public sealed class BuildingExteriorMaintenanceAbility : BuildingAbility,
+    IBuildingExteriorWorkRuntimeAbility,
+    IBuildingWorkCompletedRuntimeAbility
+{
+    [Min(0.1f)] public float cleanWorkSeconds = 1.1f;
+    [Min(0.1f)] public float repairWorkSeconds = 1.3f;
+    [Range(0f, 100f)] public float cleanlinessGain = 35f;
+    [Range(0f, 100f)] public float damageReduction = 35f;
+
+    public bool SupportsExteriorWork(FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Clean || workType == FacilityWorkType.Repair;
+    }
+
+    public bool IsExteriorWorkAvailable(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!SupportsExteriorWork(workType) || building is not ExteriorZoneMarker marker)
+        {
+            return false;
+        }
+
+        return workType == FacilityWorkType.Clean
+            ? marker.CanRunExteriorCleanWork
+            : marker.CanRunExteriorRepairWork;
+    }
+
+    public float GetExteriorWorkSeconds(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        return workType == FacilityWorkType.Clean
+            ? Mathf.Max(0.1f, cleanWorkSeconds)
+            : SupportsExteriorWork(workType)
+                ? Mathf.Max(0.1f, repairWorkSeconds)
+                : 0f;
+    }
+
+    public float GetExteriorWorkUrgency(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!IsExteriorWorkAvailable(actor, building, workType)
+            || building is not ExteriorZoneMarker marker)
+        {
+            return 0f;
+        }
+
+        return workType == FacilityWorkType.Clean
+            ? marker.GetCleanUrgency()
+            : marker.GetRepairUrgency();
+    }
+
+    public int ApplyWorkCompleted(CharacterActor actor, BuildableObject building, FacilityWorkType workType)
+    {
+        if (!SupportsExteriorWork(workType) || building is not ExteriorZoneMarker marker)
+        {
+            return 0;
+        }
+
+        if (workType == FacilityWorkType.Clean)
+        {
+            marker.ApplyExteriorCleanWork(cleanlinessGain);
+            actor?.AddActivity(CharacterActivityEvent.Work(
+                FacilityWorkType.Clean,
+                CharacterActivityOutcomes.Completed,
+                $"{marker.DisplayName} 주변을 치워 외부 동선이 깔끔해졌다.",
+                marker,
+                reasonCode: "exterior-clean",
+                value: marker.Cleanliness));
+            return 0;
+        }
+
+        marker.ApplyExteriorRepairWork(damageReduction);
+        actor?.AddActivity(CharacterActivityEvent.Work(
+            FacilityWorkType.Repair,
+            CharacterActivityOutcomes.Completed,
+            $"{marker.DisplayName} 주변 손상을 보수했다.",
+            marker,
+            reasonCode: "exterior-repair",
+            value: marker.Damage));
+        return 0;
     }
 }
 

@@ -47,7 +47,7 @@ MonoBehaviour:
     - rid: 7302562985835495609
     - rid: 7302562987322638437
     - rid: 7302562987322638828
-    - rid: 7302563076257874035
+    - rid: 7302563133342875889
   width: 3
   height: 1
   layer: 1
@@ -107,7 +107,7 @@ MonoBehaviour:
           - key: Luxury
             value: 8
           metrics: []
-    - rid: 7302563076257874035
+    - rid: 7302563133342875889
       type: {class: BuildingExpeditionRecoveryAbility, ns: , asm: Assembly-CSharp}
       data:
         abilityId: BuildingExpeditionRecoveryAbility

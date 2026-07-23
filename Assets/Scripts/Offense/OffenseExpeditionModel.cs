@@ -560,6 +560,8 @@ public sealed class OffenseExpeditionRun
     private static string GetMemberName(CharacterActor actor)
     {
         actor?.EnsureRuntimeState();
-        return actor?.Identity != null ? actor.Identity.DisplayName : actor?.name ?? "대원";
+        return actor != null && actor.Identity != null
+            ? actor.Identity.DisplayName
+            : actor != null ? actor.name : "대원";
     }
 }

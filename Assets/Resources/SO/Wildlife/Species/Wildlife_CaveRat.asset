@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3cd719baf9d04ed9954c2d0940108e41, type: 3}
+  m_Name: Wildlife_CaveRat
+  m_EditorClassIdentifier: Assembly-CSharp::WildlifeSpeciesSO
+  speciesId: cave_rat
+  displayName: "\uB3D9\uAD74\uC950"
+  description: "\uB358\uC804 \uC678\uACFD\uC758 \uD2C8 \uC0AC\uC774\uB97C \uBE60\uB974\uAC8C
+    \uAE30\uC5B4 \uB2E4\uB2C8\uB294 \uC791\uC740 \uC124\uCE58\uB958. \uACE0\uAE30\uB294
+    \uC801\uC9C0\uB9CC \uCD08\uBC18 \uC2DD\uB7C9\uC73C\uB85C \uC4F8 \uC218 \uC788\uB2E4."
+  sprite: {fileID: 20389294166434833, guid: 651f8a1a994f8a840b4fb1a5d8b1c2e3, type: 3}
+  maxHealth: 10
+  moveSpeed: 1.25
+  fearSensitivity: 1.45
+  aggression: 0.05
+  retaliationDamage: 0
+  spawnWeight: 4.5
+  herdSize: 2
+  canEnterDungeon: 0
+  carcassWeight: 2.5
+  butcherYields:
+  - itemId: stock-item:0
+    amount: 1

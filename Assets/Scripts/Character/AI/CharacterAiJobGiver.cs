@@ -33,7 +33,8 @@ public readonly struct CharacterAiJobCandidate
         CharacterAiActionCandidate actionCandidate,
         float domainScore,
         float utility,
-        string reason)
+        string reason,
+        string breakdownSummary = "")
     {
         Branch = branch;
         JobGiverName = jobGiverName ?? string.Empty;
@@ -41,6 +42,7 @@ public readonly struct CharacterAiJobCandidate
         DomainScore = Mathf.Clamp01(domainScore);
         Utility = Mathf.Clamp01(utility);
         Reason = reason ?? string.Empty;
+        BreakdownSummary = breakdownSummary ?? string.Empty;
     }
 
     public CharacterAiBranch Branch { get; }
@@ -49,9 +51,10 @@ public readonly struct CharacterAiJobCandidate
     public float DomainScore { get; }
     public float Utility { get; }
     public string Reason { get; }
+    public string BreakdownSummary { get; }
     public bool IsValid => Utility > 0f && ActionCandidate.HasAction;
     public string DebugSummary =>
-        $"{JobGiverName} domain={DomainScore:0.###} action={ActionCandidate.Score:0.###} utility={Utility:0.###} {Reason}".Trim();
+        $"{JobGiverName} domain={DomainScore:0.###} action={ActionCandidate.Score:0.###} utility={Utility:0.###} {Reason} {BreakdownSummary}".Trim();
 }
 
 public abstract class CharacterAiJobGiver
@@ -61,6 +64,8 @@ public abstract class CharacterAiJobGiver
 
     public bool TryEvaluate(CharacterActor actor, out CharacterAiJobCandidate candidate)
     {
+        CharacterAiDecisionContext context = CharacterAiDecisionContext.Capture(actor, Branch);
+        actor?.Blackboard?.RecordDecisionContext(context);
         float domainScore = GetDomainScore(actor, out string domainReason);
         domainScore = CharacterMoodImpulseUtility.ApplyJobGiverBias(
             actor,
@@ -71,6 +76,7 @@ public abstract class CharacterAiJobGiver
         if (domainScore <= 0f)
         {
             candidate = CreateRejected(domainScore, domainReason);
+            RecordRejectedBreakdown(actor, context, domainReason);
             return false;
         }
 
@@ -78,6 +84,7 @@ public abstract class CharacterAiJobGiver
         if (brain == null)
         {
             candidate = CreateRejected(domainScore, "AIBrain is missing.");
+            RecordRejectedBreakdown(actor, context, "AIBrain is missing.");
             return false;
         }
 
@@ -88,17 +95,29 @@ public abstract class CharacterAiJobGiver
                 string.IsNullOrWhiteSpace(actionCandidate.DebugLabel)
                     ? actionCandidate.Failure.ToString()
                     : actionCandidate.DebugLabel);
+            RecordRejectedBreakdown(actor, context, candidate.Reason);
             return false;
         }
 
+        CharacterAiUtilityBreakdown breakdown = CreateBreakdown(
+            actor,
+            context,
+            domainScore,
+            actionCandidate.Score,
+            actionCandidate.ActionSet);
+        float contextScore = breakdown.CalculateWeighted01();
         float utility = CombineUtility(domainScore, actionCandidate.Score);
+        utility = Mathf.Clamp01(utility * Mathf.Lerp(0.88f, 1.12f, contextScore));
+        breakdown.SetFinalScore(utility);
+        actor?.Blackboard?.RecordUtilityBreakdown(breakdown);
         candidate = new CharacterAiJobCandidate(
             Branch,
             Name,
             actionCandidate,
             domainScore,
             utility,
-            domainReason);
+            domainReason,
+            breakdown.ToCompactString());
         return candidate.IsValid;
     }
 
@@ -160,6 +179,50 @@ public abstract class CharacterAiJobGiver
             0f,
             reason);
     }
+
+    private CharacterAiUtilityBreakdown CreateBreakdown(
+        CharacterActor actor,
+        CharacterAiDecisionContext context,
+        float domainScore,
+        float actionScore,
+        AIActionSet actionSet)
+    {
+        CharacterAiUtilityBreakdown breakdown = new CharacterAiUtilityBreakdown(
+            CharacterAiUtilityText.GetIntention(Branch),
+            CharacterAiUtilityText.GetBranchLabel(Branch));
+        float memoryScore = actor != null && actor.AiMemory != null
+            ? Mathf.Clamp01(0.5f + actor.AiMemory.GetMomentumScore(Branch))
+            : 0.5f;
+        breakdown.Add(CharacterAiUtilityFactorKind.Need, domainScore, 0.28f, "욕구 강도");
+        breakdown.Add(CharacterAiUtilityFactorKind.Priority, context.GetPriorityScore(Branch), 0.18f, "현재 우선순위");
+        breakdown.Add(CharacterAiUtilityFactorKind.Personality, context.GetPersonalityScore(Branch), 0.13f, "성격 영향");
+        breakdown.Add(CharacterAiUtilityFactorKind.Memory, memoryScore, 0.12f, "최근 행동");
+        breakdown.Add(CharacterAiUtilityFactorKind.Reservation, actionScore, 0.2f, "실행 가능성");
+        breakdown.Add(CharacterAiUtilityFactorKind.Queue, Mathf.Clamp01(1f - context.QueuePressure), 0.04f, "혼잡 회피");
+        breakdown.Add(CharacterAiUtilityFactorKind.Weather, Mathf.Clamp01(1f - context.WeatherPressure), 0.03f, "날씨 부담");
+        breakdown.Add(CharacterAiUtilityFactorKind.PathConfidence, context.PathConfidence, 0.04f, "경로 신뢰");
+        breakdown.Add(CharacterAiUtilityFactorKind.Schedule, context.ScheduleScore, 0.04f, "일정 흐름");
+        breakdown.Add(CharacterAiUtilityFactorKind.Fatigue, Mathf.Clamp01(1f - context.RecentFailurePressure), 0.03f, "최근 실패");
+        breakdown.Add(
+            CharacterAiUtilityFactorKind.Momentum,
+            actionSet != null && actor?.Blackboard?.CommittedAction == actionSet ? 1f : 0.5f,
+            0.09f,
+            "유지 보너스");
+        return breakdown;
+    }
+
+    private void RecordRejectedBreakdown(
+        CharacterActor actor,
+        CharacterAiDecisionContext context,
+        string reason)
+    {
+        CharacterAiUtilityBreakdown breakdown = new CharacterAiUtilityBreakdown(
+            CharacterAiUtilityText.GetIntention(Branch),
+            CharacterAiUtilityText.GetBranchLabel(Branch));
+        breakdown.Add(CharacterAiUtilityFactorKind.Need, context.GetPriorityScore(Branch), 0.5f, "기본 욕구");
+        breakdown.Reject(reason);
+        actor?.Blackboard?.RecordUtilityBreakdown(breakdown);
+    }
 }
 
 public static class CharacterAiRoutinePriority
@@ -193,16 +256,23 @@ public static class CharacterAiRoutinePriority
             priority,
             out string moodReason);
         reason = CharacterMoodImpulseUtility.AppendReason(reason, moodReason);
+        CharacterAiDecisionContext context = CharacterAiDecisionContext.Capture(actor, routineBranch);
+        CharacterAiUtilityBreakdown breakdown = context.CreateRoutineBreakdown(
+            routineBranch,
+            Mathf.Clamp01(priority / 100f));
+        priority = Mathf.Lerp(priority, breakdown.FinalScore01 * 100f, 0.25f);
+        actor.Blackboard?.RecordUtilityBreakdown(breakdown);
+        reason = CharacterMoodImpulseUtility.AppendReason(reason, breakdown.ToCompactString(3));
         return priority;
     }
 
     private static float GetSurvivalPriority(CharacterActor actor, out string reason)
     {
         IReadOnlyList<CharacterNeedDefinition> survivalNeeds = CharacterNeedCatalog.All
-            .Where((definition) => definition.HasTag(CharacterNeedTag.Survival))
+            .Where(definition => definition.HasTag(CharacterNeedTag.Survival))
             .ToArray();
         float registeredNeed = survivalNeeds
-            .Select((definition) => definition.GetUrgency(actor))
+            .Select(definition => definition.GetUrgency(actor))
             .DefaultIfEmpty(0f)
             .Max();
         float restNeed = FacilityCandidateScorer.GetNeedScore(actor, FacilityRole.Rest);
@@ -215,7 +285,7 @@ public static class CharacterAiRoutinePriority
             recoveryNeed);
         string needDetails = string.Join(
             " ",
-            survivalNeeds.Select((definition) =>
+            survivalNeeds.Select(definition =>
                 $"{definition.Id}={definition.GetUrgency(actor):0.###}"));
         reason = $"need={strongestNeed:0.###} {needDetails} rest={restNeed:0.###} exit={exitNeed:0.###}";
         if (strongestNeed <= 0.05f)

@@ -46,6 +46,8 @@ MonoBehaviour:
     - rid: 7302562995605602384
     - rid: 7302562995605602385
     - rid: 7302562995605602386
+    - rid: 7302563106683093088
+    - rid: 7302563106683093089
   width: 2
   height: 1
   layer: 1
@@ -95,3 +97,22 @@ MonoBehaviour:
         capacity: 1
         contributesStockCategory: 1
         stockCategory: 0
+    - rid: 7302563106683093088
+      type: {class: BuildingCookingAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingCookingAbility
+        inputFood: 1
+        cookedMeals: 1
+        workSeconds: 1
+        requiresFuel: 0
+    - rid: 7302563106683093089
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 0
+          capacity: 1
+          useDuration: 1
+          requiredWorkers: 1
+          supportedWorkTypes: 16384
+          disabledWhenDamaged: 1

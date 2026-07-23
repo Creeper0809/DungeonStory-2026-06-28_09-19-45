@@ -98,13 +98,27 @@ public static class WorkCommandResolver
             return false;
         }
 
+        if (target is ConstructionSite constructionSite)
+        {
+            if (!constructionSite.CanAssignWorker(actor, out failureReason))
+            {
+                return false;
+            }
+
+            workType = FacilityWorkType.Construct;
+            return true;
+        }
+
         if (target.isDestroy || target.Facility == null)
         {
             failureReason = "작업 가능한 시설이 아닙니다";
             return false;
         }
 
-        FacilityWorkType supportedTypes = target.Facility.supportedWorkTypes;
+        FacilityWorkType supportedTypes = WildlifeButcherFacilityUtility.AddFallbackWorkTypes(
+            target,
+            target.Facility.supportedWorkTypes);
+        supportedTypes = SurvivalFacilityUtility.AddFallbackWorkTypes(target, supportedTypes);
         if (supportedTypes == FacilityWorkType.None)
         {
             failureReason = "지원하는 작업이 없습니다";
@@ -157,7 +171,8 @@ public static class WorkCommandResolver
         CharacterIdentity identity = target != null ? target.Identity : null;
         return target != null
             && ((identity != null && identity.CharacterType == CharacterType.Intruder)
-                || (isRebellionTarget != null && isRebellionTarget(target)));
+                || (isRebellionTarget != null && isRebellionTarget(target))
+                || (CharacterDeprivationRuntime.Active?.IsSuppressible(target) ?? false));
     }
 
     public static bool TryResolveSuppressCommand(
@@ -269,7 +284,7 @@ public sealed class WorkPriorityEntry
 [Serializable]
 public class WorkPriorityProfile : ISerializationCallbackReceiver
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
 
     [SerializeField] private int schemaVersion;
     [SerializeField] private List<WorkPriorityEntry> priorities = new List<WorkPriorityEntry>();
@@ -410,6 +425,18 @@ public class WorkPriorityProfile : ISerializationCallbackReceiver
                 priorities.Add(new WorkPriorityEntry(
                     definition.Id,
                     GetLegacyPriority(definition.Type, definition.DefaultPriority)));
+            }
+        }
+        else
+        {
+            foreach (WorkTypeDefinition definition in WorkTypeCatalog.All)
+            {
+                if (FindEntry(definition.Id) == null)
+                {
+                    priorities.Add(new WorkPriorityEntry(
+                        definition.Id,
+                        GetLegacyPriority(definition.Type, definition.DefaultPriority)));
+                }
             }
         }
 

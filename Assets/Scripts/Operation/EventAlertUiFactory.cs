@@ -122,6 +122,7 @@ public static class EventAlertUiFactory
         tmp.fontSize = fontSize;
         tmp.color = Color.white;
         tmp.alignment = alignment;
+        tmp.raycastTarget = false;
         return tmp;
     }
 

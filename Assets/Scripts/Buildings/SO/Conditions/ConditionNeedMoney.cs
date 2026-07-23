@@ -7,6 +7,12 @@ public class ConditionNeedMoney : IBuildingCondition
 
     public void OnBuild(BuildingConditionContext context)
     {
+        if (DungeonDebugRuntimeRules.ShouldSkipCosts()
+            || DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.FreeConstruction))
+        {
+            return;
+        }
+
         GameData gameData = context.GameData;
         if (gameData == null) return;
 
@@ -19,6 +25,13 @@ public class ConditionNeedMoney : IBuildingCondition
         BuildingConditionContext context,
         out string errorMessage)
     {
+        if (DungeonDebugRuntimeRules.ShouldSkipCosts()
+            || DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.FreeConstruction))
+        {
+            errorMessage = string.Empty;
+            return true;
+        }
+
         GameData gameData = context.GameData;
         if (gameData == null)
         {

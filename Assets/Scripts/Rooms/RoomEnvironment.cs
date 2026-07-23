@@ -42,7 +42,11 @@ public sealed class RoomEnvironmentSnapshot
         float spaciousness,
         float beauty,
         float cleanliness,
-        float impressiveness)
+        float impressiveness,
+        float shelter = 50f,
+        float temperature = 50f,
+        float ventilation = 50f,
+        float lighting = 50f)
     {
         Grid = grid;
         Room = room;
@@ -60,6 +64,10 @@ public sealed class RoomEnvironmentSnapshot
         Beauty = Mathf.Clamp(beauty, 0f, 100f);
         Cleanliness = Mathf.Clamp(cleanliness, 0f, 100f);
         Impressiveness = Mathf.Clamp(impressiveness, 0f, 100f);
+        Shelter = Mathf.Clamp(shelter, 0f, 100f);
+        Temperature = Mathf.Clamp(temperature, 0f, 100f);
+        Ventilation = Mathf.Clamp(ventilation, 0f, 100f);
+        Lighting = Mathf.Clamp(lighting, 0f, 100f);
     }
 
     public Grid Grid { get; }
@@ -78,6 +86,10 @@ public sealed class RoomEnvironmentSnapshot
     public float Beauty { get; }
     public float Cleanliness { get; }
     public float Impressiveness { get; }
+    public float Shelter { get; }
+    public float Temperature { get; }
+    public float Ventilation { get; }
+    public float Lighting { get; }
     public int Area => Room?.Cells.Count ?? 0;
     public int FreeCells => Mathf.Max(0, Area - OccupiedCells);
     public int DoorCount => Room?.Doors.Count ?? 0;
@@ -105,6 +117,7 @@ public sealed class RoomEnvironmentQuery : IRoomEnvironmentQuery
     {
         public int GridVersion = -1;
         public int FacilityStateVersion = -1;
+        public int FilthVersion = -1;
         public RoomEnvironmentSnapshot Snapshot;
     }
 
@@ -155,12 +168,15 @@ public sealed class RoomEnvironmentQuery : IRoomEnvironmentQuery
 
         int gridVersion = facility.Grid.version;
         int stateVersion = facilityCandidateCache.DynamicStateVersion;
+        int filthVersion = WorldFilthRuntime.Active != null ? WorldFilthRuntime.Active.StateVersion : 0;
         if (cache.Snapshot == null
             || cache.GridVersion != gridVersion
-            || cache.FacilityStateVersion != stateVersion)
+            || cache.FacilityStateVersion != stateVersion
+            || cache.FilthVersion != filthVersion)
         {
             cache.GridVersion = gridVersion;
             cache.FacilityStateVersion = stateVersion;
+            cache.FilthVersion = filthVersion;
             cache.Snapshot = evaluator.Evaluate(facility.Grid, room);
         }
 
@@ -256,6 +272,9 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
         int cleanStreak = 0;
         int damagedFixtures = 0;
         float operationalCleanlinessTotal = 0f;
+        float temperatureSupport = 0f;
+        float ventilationSupport = 0f;
+        float lightingSupport = 0f;
         foreach (BuildableObject fixture in fixtures)
         {
             luxury += GetEvolutionScore(fixture, FacilityEvolutionTerms.Luxury);
@@ -275,6 +294,26 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
             }
 
             operationalCleanlinessTotal += fixture.FacilityState.cleanliness;
+            BuildingTemperatureAbility temperatureAbility = fixture.BuildingData.GetAbility<BuildingTemperatureAbility>();
+            if (temperatureAbility != null)
+            {
+                temperatureSupport += Mathf.Abs(temperatureAbility.roomTemperatureOffset)
+                    + temperatureAbility.coldProtection
+                    + temperatureAbility.heatProtection;
+            }
+
+            BuildingVentilationAbility ventilationAbility = fixture.BuildingData.GetAbility<BuildingVentilationAbility>();
+            if (ventilationAbility != null)
+            {
+                ventilationSupport += ventilationAbility.hygieneRiskReduction
+                    + ventilationAbility.smokeRiskReduction * 0.5f;
+            }
+
+            BuildingLightingAbility lightingAbility = fixture.BuildingData.GetAbility<BuildingLightingAbility>();
+            if (lightingAbility != null)
+            {
+                lightingSupport += lightingAbility.intensity * lightingAbility.radius * 12f;
+            }
         }
 
         int area = Mathf.Max(1, room.Cells.Count);
@@ -286,6 +325,21 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
         float operationalCleanliness = fixtures.Count > 0
             ? operationalCleanlinessTotal / fixtures.Count
             : 100f;
+        float averageFilth = 0f;
+        float peakFilth = 0f;
+        if (WorldFilthRuntime.Active != null && room.Cells.Count > 0)
+        {
+            foreach (Vector2Int cell in room.Cells)
+            {
+                float cellFilth = WorldFilthRuntime.Active.GetCleanlinessPenalty(cell);
+                averageFilth += cellFilth;
+                peakFilth = Mathf.Max(peakFilth, cellFilth);
+            }
+
+            averageFilth /= room.Cells.Count;
+        }
+
+        float worldFilthPenalty = Mathf.Clamp(averageFilth * 0.65f + peakFilth * 0.35f, 0f, 70f);
         float normalizedArea = Mathf.InverseLerp(
             settings.SpaciousAreaMinimum,
             settings.SpaciousAreaMaximum,
@@ -306,16 +360,40 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
             - damagedRatio * settings.CleanlinessDamagePenalty
             - Mathf.Max(0f, occupiedRatio - settings.CleanlinessCrowdingThreshold)
                 * settings.CleanlinessCrowdingPenalty
-            + (operationalCleanliness - 50f) * 0.2f;
+            + (operationalCleanliness - 50f) * 0.2f
+            - worldFilthPenalty;
         float impressiveness = beauty * settings.ImpressivenessBeautyWeight
             + spaciousness * settings.ImpressivenessSpaciousnessWeight
             + cleanliness * settings.ImpressivenessCleanlinessWeight
             + room.GetQualityScore() * 100f * settings.ImpressivenessQualityWeight;
+        RoomEnvironmentStatus status = GetStatus(room);
+        float shelter = status switch
+        {
+            RoomEnvironmentStatus.Usable => 92f,
+            RoomEnvironmentStatus.MissingDoor => 58f,
+            RoomEnvironmentStatus.OpenBoundary => 25f,
+            _ => 45f
+        };
+        SurvivalFoodOverview survival = SurvivalFoodRuntime.Active != null
+            ? SurvivalFoodRuntime.Active.GetOverview()
+            : new SurvivalFoodOverview(0, 0, 0, 0, 0, 0);
+        float weatherTemperaturePenalty = survival.Weather switch
+        {
+            SurvivalWeatherType.ColdSnap => 24f,
+            SurvivalWeatherType.HeatWave => 20f,
+            SurvivalWeatherType.Storm => 10f,
+            _ => 0f
+        };
+        float temperature = 70f + temperatureSupport - weatherTemperaturePenalty;
+        float ventilation = 55f + ventilationSupport
+            - Mathf.Max(0f, occupiedRatio - 0.65f) * 35f
+            - worldFilthPenalty * 0.25f;
+        float lighting = 35f + lightingSupport;
 
         return new RoomEnvironmentSnapshot(
             grid,
             room,
-            GetStatus(room),
+            status,
             fixtures,
             contributions,
             primaryRole,
@@ -328,7 +406,11 @@ public sealed class RoomEnvironmentEvaluator : IRoomEnvironmentEvaluator
             Mathf.Clamp(spaciousness, 0f, 100f),
             Mathf.Clamp(beauty, 0f, 100f),
             Mathf.Clamp(cleanliness, 0f, 100f),
-            Mathf.Clamp(impressiveness, 0f, 100f));
+            Mathf.Clamp(impressiveness, 0f, 100f),
+            Mathf.Clamp(shelter, 0f, 100f),
+            Mathf.Clamp(temperature, 0f, 100f),
+            Mathf.Clamp(ventilation, 0f, 100f),
+            Mathf.Clamp(lighting, 0f, 100f));
     }
 
     private static List<BuildableObject> CollectInteriorFixtures(Grid grid, RoomInstance room)

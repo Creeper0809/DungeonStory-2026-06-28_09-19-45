@@ -238,3 +238,234 @@
 - Clean `commerce` natural run now reports `NATURAL_RUN PASS strategy=commerce`. Stage 6 logs show `final:maxLevel=3/3`, camp `useSupply=True`, medicine before boss, `OFFENSE_STAGE_6_BATTLE_COMPLETE outcome=Victory`, and `OFFENSE_CAMPAIGN_FINISH completed=6/6; truth=True; outcome=Victory`.
 - Evidence artifacts: `Temp/natural-run-commerce-report.txt`, final-result HUD `Temp/natural-run-commerce.png`, 1600x900 HUD `Temp/natural-run-commerce-1600x900.png`, 900x1600 HUD `Temp/natural-run-commerce-900x1600.png`, and MCP `Unity_Camera_Capture` from Main Camera instance `65154`.
 - Final Unity Console check after captures and stopping PlayMode is `Error 0 / Warning 0`.
+
+## 2026-07-22 Start preparation scene split
+
+- Began implementing the approved `TitleScene -> StartPreparationScene -> SampleScene` preparation flow.
+- Confirmed the current product flow still routes new games directly to `SampleScene`, where gameplay UI opens `OwnerSelectionPanel`.
+- Confirmed `CharacterProgression` still hard-codes three normal active slots and two passive slots, so owner-only extra skill display/validation needs a role-based slot profile rather than a UI-only change.
+- Added phases 35-38 and the new owner/preparation product decisions to `task_plan.md`.
+- Added `PreparedStartPartySnapshot`, role-based `CharacterSkillSlotProfile`, and owner fixed skill support. Owners now expose four fixed owner-skill slots separate from generated active/passive/ultimate growth slots, and those fixed skills run through the existing skill effect path without becoming LLM-generated or rerollable.
+- Split the scene flow so title new-game requests open `StartPreparationScene`; prepared runs then enter `SampleScene` with a handoff snapshot. Direct `SampleScene` opens still keep the old owner-selection fallback for QA.
+- Added `DungeonPreparationLifetimeScope` and generated `StartPartyPreparationUiController`: owner selection shows owner portraits, large focus area, fixed skills, traits, and doctrine summary; party preparation shows one locked owner, two selected staff, four reserves, detail tabs, reroll buttons, reserve swaps, team summary, and gated start.
+- Added `PreparedStartPartyGameplayApplier` so prepared starts spawn exactly the selected owner plus two staff, restore growth state/selected skills, assign persistent IDs, and suppress the gameplay owner-selection panel in the product path.
+- Unity compile/refresh succeeded through MCP with Console `Error 0 / Warning 0`. Build settings now include `TitleScene`, `StartPreparationScene`, and `SampleScene`.
+- Editor service verification passed: same-species staff roster, 7 total members, 3 selected, 4 reserves, owner locked, owner swap rejected, staff/reserve swap accepted, owner fixed skills 4/4, and prepared snapshot valid with two staff.
+- PlayMode pointer verification passed from the title screen: clicked new game and normal difficulty, reached `StartPreparationScene`, advanced owner selection, selected a reserve, revealed swap buttons, prepared active skills through the runtime service, clicked start, and landed in `SampleScene` with one owner, two staff, three actors total, and zero active `OwnerSelectionPanel`s.
+- Visual evidence captured: `Artifacts/QA/start-preparation-owner-select-endframe.png`, `Artifacts/QA/start-preparation-party-prepare.png`, `Artifacts/QA/start-preparation-party-ready.png`, and `Artifacts/QA/start-preparation-sample-scene.png`. PlayMode save-protection snapshot was restored after the run.
+
+## 2026-07-22 Start preparation UX correction
+
+- Fixed the reported start-button blocker by treating the owner as start-ready through the four fixed owner skills. Selected staff still require first active selection and first passive readiness.
+- Added drag/drop roster swapping: selected staff and reserve staff cards now exchange through the existing `TrySwapWithReserve` service path, while the owner remains locked.
+- Reworked the staff detail page away from one flat text block into a RimWorld-style structured panel: portrait area, readiness label, section tabs, identity rows, trait cards, potential summary, stat bars, skill slots, and active candidate cards.
+- Removed the bottom reroll button row from the new preparation scene. Full/partial rerolls now appear as compact dot-dice buttons next to the relevant character or section.
+- Localized visible preparation status messages that still leaked English text, including drag-swap and start handoff failures.
+- Verified in PlayMode with a UI-event smoke runner: `members=3`, `reserves=4`, `drag_swapped=True`, selected staff readiness `3:True,2:True`, `owner_ready=True`, `start_interactable=True`, `final_scene=SampleScene`, and `owner_panels=0`.
+- Visual proof artifact: `Artifacts/QA/start-preparation-final-party.png`. Final Unity compile succeeded and Console is `Error 0 / Warning 0`.
+
+## 2026-07-22 RimWorld-style work amount and construction sites
+
+- Added the V9 work-order pipeline: player placement creates a `ConstructionSite` on `GridLayer.Construction`, tracks `WorkOrderId`, required/completed work, delivered materials, reserved worker, and status, then swaps to the final building only on completed work.
+- Routed work-unit execution through the shared work loop for construction, repair, research, equipment crafting, cooking/survival work, butchering, water, treatment, and refuel. Existing seed/new-run buildings still spawn completed.
+- Building static work requirements live in ability modules; runtime progress, delivery state, worker reservation, and save payloads stay out of shared SOs.
+- Updated world selection priority to include construction between item and building, and added construction-site info UI with target, status, material delivery, worker reservation, progress, and cancel action.
+- Extended BuildPlacement PlayMode verification from ghost-only UX to actual pointer placement: build tab/category/item click, visible grid/ghost, world click creates a construction site, final building is not present instantly, work order exists, progress reaches 45%, completion swaps to final building, and the construction layer clears.
+- Visual proof artifacts: `Temp/build-placement-ux.png`, `Temp/build-placement-construction-site-info.png`, and `Temp/build-placement-construction-progress.png`.
+- Regression results: `WorkPriorityDebugScenarios=True`; `ImplementedScenarioDebugRunner` reports `Suites: 30`, `Passed: 30`, `Failed: 0`, including `P1 Work amount` and `P1 Work priority`; BuildPlacement PlayMode batch reports `UI_REGRESSION_BATCH PASS`; Unity Console is `Error 0 / Warning 0`.
+
+## 2026-07-23 Wildlife ecosystem v1
+
+- Added the V10 wildlife ecosystem layer: exterior habitat patches, diet/intent fields, hunger/thirst-driven target choice, territory return, predator/prey behavior, habitat-gated respawn pressure, and ecosystem save data.
+- Wildlife now auto-generates grass, water, brush, burrow, and lair patches on usable exterior surface cells when no scene-authored `WildlifeHabitatMarker` exists.
+- The wildlife info panel now shows Korean player-facing state, intent reason, hunger, thirst, danger, territory, expected yields, and hunt controls.
+- The Operations survival section now includes wildlife abundance, food/water patch status, predator danger, respawn wait, and live wildlife rows.
+- Expanded `GameplayScene` and `SampleScene` physical grid width to restore a real exterior surface band; PlayMode inspection reports 30 exterior surface cells instead of animals being packed into the entrance sliver.
+- Verification: `WildlifeDebugScenarios.RunAll`, `RunPlayModeSnapshot`, and `RunPlayModeHuntLoop` all passed in the current PlayMode assemblies. Runtime inspection reports six active wildlife with `Drink`/`Rest` ecology intents and six habitat overlay renderers.
+- Visual check: `Unity_SceneView_Capture2DScene` captured the exterior band with habitat overlay visible on exterior ground. `ScreenCaptureAsTexture` returned a black GameView frame in this editor state, so that artifact was rejected rather than counted.
+- Current Unity Console after verification is `Error 0 / Warning 0`.
+## 2026-07-23 Nameplate, wildlife motion, and camera zoom follow-up
+
+- Started a focused follow-up for three player-reported regressions: world nameplates render behind dungeon art, wildlife visibly oscillates left/right, and mouse-wheel camera zoom has no effect.
+- Preserving the heavily modified worktree and limiting edits to the involved runtime/UI/AI paths plus focused verification coverage.
+- Moved world character name text and its backing line to the `UI` sorting layer while retaining actor-relative order. Runtime inspection reported every active nameplate at `UI:38`, and the gameplay capture shows names above dungeon floors, walls, furniture, and characters.
+- Replaced deterministic wildlife left/right selection with near-best weighted targets, direction momentum, reversal penalty, arrival dwell by intent, immediate threat interruption, sprite facing, and eased/bobbed locomotion. Same-cell habitat decisions now fall back to natural roaming instead of repeated no-op routes.
+- Restored zoom in `GameplayScene`, `SampleScene`, and `CharacterAiTestScene`, narrowed wheel blocking to actual `ScrollRect` UI, and made zoom cooperate with the URP Pixel Perfect Camera rather than being reset during rendering.
+- Focused contracts passed: `WorldCharacterNameplateDebugScenarios.RunAll=True` and `WildlifeDebugScenarios.RunAll=True`, including the new movement dwell/facing case.
+- Pointer-driven camera verification passed while paused, at 1x, and at 5x. Wheel zoom measured `8.438 -> 7.588 -> 8.438`; movement distances differed by only `0.0017`, and the verifier captured `Error 0 / Warning 0`.
+- PlayMode wildlife samples showed nine animals spread across `Rest`, `Forage`, `Drink`, `Wander`, and `ReturnToTerritory`; most were stationary at meaningful targets while only one was moving in each sample window.
+- Visual evidence: `Artifacts/QA/nameplate-wildlife-default.png`, `Artifacts/QA/nameplate-wildlife-zoomed-in.png`, and `Artifacts/QA/wildlife-natural-motion-exterior.png`. Final Unity state is idle, compiled, and Console `Error 0 / Warning 0`.
+- Unity MCP `Camera_Capture` also succeeded at 1920x1080 using the Main Camera GameObject ID and confirmed the world nameplate remains visible above the dungeon render layers.
+
+## 2026-07-23 Customer checkout patience
+
+- Audited the staffed checkout coroutine, shop work urgency, shopping visit bookkeeping, personality modifiers, mood factors, personal facility memory, activity logs, and event alerts.
+- Confirmed the root behavior gap: staffed checkout waits indefinitely and never branches by patience, while visit bookkeeping cannot distinguish purchase completion from queue abandonment.
+- Added `CustomerCheckoutPatienceRules`: personality patience and species/trait wait modifiers determine restless, service-request, and abandonment thresholds, with modest visible-queue pressure.
+- Staffed checkout now updates the character phase with queue position and elapsed seconds, applies a small restless mood factor, wakes idle workers again when called, and emits one-shot player alerts.
+- On timeout the customer receives a stronger mood penalty and personal facility complaint memory, releases the checkout queue, avoids only that shop, preserves the remaining visit, and lets existing Utility AI choose an alternative or leave.
+- EditMode customer AI contracts passed, including stage boundaries, alternate-shop handoff, memory persistence input, and the real checkout iterator reaching abandonment and releasing its queue.
+- PlayMode probe passed with `outcome=Abandoned`, `waiting=0`, `mood=70->64.5`, `sentiment=-0.28`, `alerts=2`, and visible phase `구매 포기`. Final Unity Console is `Error 0 / Warning 0`.
+# 2026-07-23 Paused stair and low-needs AI stabilization
+
+- Traced the paused stair appearance to the traversal visibility fail-safe using unscaled realtime, not to a world DOTween.
+- Traced combined low-need instability to leisure being treated as an emergency, single-need emergency fallback, missing owner self-care actions, and on-duty hunger being ineligible for eating.
+- Changed traversal visibility deadlines and delayed restoration to scaled game time. A PlayMode probe held `Time.timeScale=0` for 0.45 seconds: the actor stayed hidden, then restored only after simulation resumed.
+- Added survival-only strongest-need selection and emergency candidates for every urgent hunger, rest, toilet, and hygiene need. If the highest-scoring facility is unavailable, the next valid survival response can now run instead of falling through to wait.
+- Added owner Eat/Rest/Toilet/Hygiene actions and allowed sufficiently urgent hunger/rest to start during duty. Hunger interrupts current work with `식사 필요` but does not flip the worker into off-duty state.
+- Focused AI naturalness regressions passed, including leisure exclusion, combined low-need triage, owner self-care, and worker hunger interruption. The final PlayMode probe passed all 10 assertions for pause visibility and staff/owner low-needs behavior.
+- Removed the temporary PlayMode probe and recompiled the Editor assembly. The recent compiler-error scan is empty and `git diff --check` passes for the touched files.
+- Re-ran the complete staff-duty suite on the current assembly. The new low-needs scenarios pass; the suite remains red only on the separately tracked fixture failures `Emergency priority` (`Repair` candidate is rejected before assignment) and `Expedition return` (`AIWait` wins after return).
+
+## 2026-07-23 Stationary AI fallback follow-up
+
+- Started a focused audit after the runtime AI panel showed a character repeatedly selecting `Emergency -> WaitJobGiver` with every need action rejected and no target.
+- The target behavior is now explicit: ordinary waiting must become a short contextual micro-action or reachable roam, while low mood should produce a bounded self-directed impulse and later return to normal utility decisions.
+- Confirmed the repeat loop: urgent but currently unsatisfiable needs keep the BT in Emergency, while high recent movement pressure selects a nominal micro-action implemented as another static wait.
+- Converted inspection and generic idle fallbacks to actual reachable roaming, added a stronger mood-driven wander, and left only purposeful queue/chat/shelter waits as short stationary actions.
+- Low mood now suppresses ordinary work at both routine and final candidate selection. Critical mood also interrupts an active work coroutine with a visible player-facing reason.
+- Added focused regressions for low-mood movement without an LLM impulse and critical-mood work interruption. `CharacterAiNaturalnessDebugScenarios.RunAll` reports `FINAL_NATURALNESS_REGRESSION PASS`.
+- The actual GameplayScene PlayMode probe visited six cells while reporting `RoutineUtility: 대기 / 기분 내키는 대로 배회` at mood 17-20. Unity finished idle and compiled with Console `Error 0 / Warning 0`.
+
+## 2026-07-23 Dark fantasy deprivation and breakdown survival
+
+- Implemented V11 deprivation burdens for hunger, thirst, bladder damage, contamination, exhaustion, and mental instability, including health damage, breakdown probability, and guaranteed failure at sustained maximum burden.
+- Connected the new `DeprivationBreakdown` BT branch to dedicated desperate relief/drink/eat/collapse action sets, violent breakdown behavior, nonlethal guard suppression, humanoid deaths, corpses, cannibalism, and emergency butchery.
+- Added shared physical exterior water for humans and wildlife, water terrain/tile rendering, floor filth and wall stains, room/exterior cleanliness effects, and work-unit-based Clean targets with a player priority command.
+- Added the character Health tab, overhead breakdown warning, filth detail panel, V11 save/restore snapshots, source-character metadata, taboo memories, and nonmergeable humanoid corpses.
+- Verification passed: legacy survival scenarios `6/6`, dark-survival scenarios `9/9`, and pointer-driven PlayMode report `RESULT=PASS; failures=0` with captured `Error 0 / Warning 0`.
+- Visual evidence: `Artifacts/QA/dark-survival-world-water-and-filth.png`, `Artifacts/QA/dark-survival-health-and-filth.png`, plus a successful Unity MCP `Camera_Capture` of the live gameplay world.
+- Follow-up verification now proves clean-water facility priority, unsafe exterior-water fallback, personality-adjusted breakdown chance, permanent taboo relationship memory after restore, and nonlethal suppression (`118 -> 115.5 HP`, actor alive, breakdown ended).
+
+## 2026-07-23 Exterior flowers, trees, rocks, and grazing visuals
+
+- Added `WildlifeHabitatDecorationPaletteSO` and generated a single authored palette with 6 flower clusters, 3 summer trees, and 3 rock variants from the existing TINY FOREST pack.
+- Added `WildlifeHabitatDecorationRuntime`: Grass/Brush patches receive consumable flower clusters, Brush receives trees, Burrow/Lair receives rocks, and extra trees/rocks are deterministically scattered over valid exterior ground.
+- Flower visibility follows habitat resource in stages. Depleted patches hide every flower and regeneration restores clusters progressively; no decoration occupies the grid or alters movement.
+- Added forage-intent patch filtering and immediate visual refresh after an animal consumes a patch.
+- Wildlife contracts pass, including `full=5 -> depleted=0 -> regrown=3`; the clean PlayMode snapshot confirms one runtime root under `__Runtime/Exterior`, correct `OutsideObject` sorting, and populated flower/tree/rock visuals.
+- A live GameplayScene probe moved a herbivore onto the flower patch and measured `resource 8.781223 -> 0`, `flowers 5 -> 0`, then `resource 10`, `flowers 5` after regrowth. Unity MCP Camera Capture confirmed grounded trees/rocks, visible flower beds, and actors rendered in front.
+
+## 2026-07-23 Exterior pond visibility follow-up
+
+- Traced the missing water to two default source cells at the entrance/drop-zone edge plus a locked gray runtime Tile rendered one cell above the floor.
+- Default generation now uses only `ExteriorPath` surface cells and creates a four-cell pond at the outer end of the longest run: three walkable unsafe shallows and one blocked foul deep-water boundary cell.
+- Reworked the runtime visual into a point-filtered 16x8 water strip, enabled per-cell tint, aligned it to the floor, and kept it above exterior ground but below actors and decoration.
+- Live GameplayScene verification reports source cells `(56..59, 0)`, tile occupancy `4/4`, `Wall:2` sorting, a connected exterior path through the shallow edge, and `Error 0 / Warning 0`.
+- Unity MCP Camera Capture at 1920x1080 shows the blue/teal pond grounded at the far exterior edge. Focused dark-survival contracts remain green.
+
+## 2026-07-23 Zoom-responsive sky and centered dungeon
+
+- Extended `DungeonSceneBackdropFitter` to consume the injected main camera and fit the solid sky to the padded camera viewport in `LateUpdate`, including orthographic size and aspect changes.
+- Centered the physical dungeon interior within the 60-column world, shifted authored GameplayScene placements by `+13`, and moved the entrance/drop-zone area tags with the layout.
+- Added start-time dungeon centering to `CameraManager`; live verification reports camera X and dungeon center both at `-29.5`.
+- Confirmed both outer-wall boundary tiles, captured the maximum zoom-out frame, and verified no uncovered sky band remains.
+- Physical-world, background-lighting, and grid-foundation regression suites pass. Final Unity Console is `Error 0 / Warning 0`.
+
+## 2026-07-23 Entrance outer-wall adjacency
+
+- Traced the reported one-cell entrance gap to automatic wall generation treating three invisible exterior activity markers as structural occupants.
+- Limited automatic wall content to actual Building/Hallway layers and added a regression proving overlay/fixture markers cannot displace the wall.
+- Fresh GameplayScene verification changed the rendered wall from X `12` to the adjacent X `13`; Unity MCP Camera Capture confirms the arch and outer wall now touch.
+- Grid visual, foundation, and physical-world regressions pass. Final Unity Console is `Error 0 / Warning 0`.
+
+## 2026-07-23 Exact facility world click
+
+- Removed ordinary facility selection through the approximate grid occupant fallback. Facilities and construction sites now require an actual collider hit at the pointer position.
+- Limited collider-free grid selection to the exact `GridLayer.Building` cell for structural walls and interior doors, and explicitly excluded hallway/floor objects from physics-hit building selection.
+- Added a static classification regression for hallway, wall, interior door, dungeon door, and a normal facility.
+- Extended the Input System PlayMode verifier with an exact facility click and a collider-free bare hallway click. It also retains the character-over-building exclusivity checks.
+- Repaired the QA gameplay fallback so the shared start-party driver recognizes `StartPartyConfirm` and confirms generated legacy candidate skills before entering the world.
+- Final `CharacterClick` batch passed: `EXACT_BUILDING_CLICK=PASS`, `BARE_HALLWAY_NO_INFO=PASS`, overlap priority passed, `RESULT=PASS`, captured `Error 0 / Warning 0`.
+
+## 2026-07-23 Consecutive wildlife world click
+
+- Fixed the wildlife popup lifecycle order so `CloseAll()` cannot clear the newly clicked wildlife target when the same panel is already open.
+- Exposed read-only wildlife panel diagnostics and extended the wildlife PlayMode contract to send the same target twice.
+- Extended the actual world-info pointer verifier to click one wildlife collider twice consecutively without clicking another target between clicks.
+- Final report passed `WILDLIFE_FIRST_CLICK` and `WILDLIFE_CONSECUTIVE_CLICK`, retained character/building/floor priority checks, and ended with `RESULT=PASS; failures=0`.
+- `WildlifeDebugScenarios.RunAll` passed and Unity Console finished at `Error 0 / Warning 0`.
+
+## 2026-07-23 Wildlife horizontal facing
+
+- Fixed all wildlife reading logical Grid X as screen direction even though the world X axis is mirrored by `Grid.GetWorldPos`.
+- `WildlifeActor` now computes facing from movement endpoints in world space while preserving the authored right-facing source sprites.
+- Updated the natural-motion regression to cover world-left and world-right routes explicitly.
+- A paused fresh GameplayScene probe forced both directions for all four species currently spawned and reported `LIVE_SPECIES_FACING=PASS`; the shared path also covers the fifth catalog species.
+
+## 2026-07-23 Defense interception and engagement
+
+- Started implementation of the approved real-time dungeon-defense engagement plan.
+- Confirmed the current defect is structural: manual suppression overlaps cells and deals one-way damage while the intruder movement coroutine continues independently.
+- Locked product decisions: on-duty Guard workers only, one lead plus one replacement per intruder, named policies assigned per guard, and immediate owner evacuation to an Administration room with farthest-safe-cell fallback.
+- Preserving the existing dirty worktree and integrating with the current V11 invasion, AI, room, UI, and save systems without reverting prior work.
+
+## 2026-07-23 Defense interception and engagement completion
+
+- Added `DefenseEngagementRuntime`, adjacent-cell intercept planning, transient combat-cell reservations, reciprocal attack timing/damage, lead/reserve dispatch, policy retreat and replacement, owner final defense, and combat presentation tied to scaled game time.
+- Automatic dispatch now accepts only on-duty non-owner workers with Guard priority. Manual intruder suppression enters the same engagement pipeline, while nonlethal rebellion/deprivation suppression remains separate.
+- Added named defense policies with create, duplicate, edit, delete, and per-guard assignment; the defense UI shows live frontline state, lead/reserve guards, exchange count, and owner evacuation status.
+- Added immediate owner evacuation to the farthest valid Administration-room cell with a farthest-reachable interior fallback, and kept the owner out of ordinary guard selection until the frontline fully collapses.
+- Extended V12 persistence with policies, assignments, owner evacuation, active engagements, reserved cells, attack timers, and exchange counts. Active save round trip passed with no restore warnings.
+- Static regressions passed: `DEFENSE_SCENARIOS=True` and `INVASION_REGRESSION=True`.
+- Actual PlayMode combat passed: three reciprocal exchanges on distinct adjacent cells, intruder held, both sides damaged, facility damage locked, presentation visible, and save snapshot valid.
+- Actual policy switch passed: `state=Engaged`, `leadChanged=True`, cells remained `(1,0)/(2,0)`, facility remained locked, and the old lead resumed AI.
+- Actual UI pointer probe passed the Defense tab, policy creation, and guard assignment controls through `PointerDown/PointerUp/PointerClick` events.
+- Owner evacuation passed at `(41,2)`, then owner final defense passed at `(40,2)/(41,2)` with 20 exchanges, reciprocal damage, no reserve, and the intruder held.
+- Visual artifacts: `Temp/DefensePolicyAndEngagementScheduled.png`, `Temp/DefenseEngagementWorldFinal.png`, `Temp/DefenseGuardEngagementSpaced.png`, and `Temp/DefenseOwnerFinalVerified.png`.
+- After clearing Unity 6000.3.8's known startup-only UUM-133323 warning, the complete PlayMode defense verification finished with Console `Error 0 / Warning 0`.
+
+## 2026-07-23 Developer mode and debug palette
+
+- Added settings V2, runtime mode/cheat rules, save metadata/history, 112 modular commands, exact targeting, responsive palette UI, and pooled world overlays.
+- Connected cheat hooks to money/items, placement/unlocks, needs/damage, AI, breakdowns, work/construction/research, wildlife, survival, and defense services.
+- Added EditMode contracts and a pointer-driven PlayMode verifier for settings, palette tabs, exact spawn, repeat/cancel input, overlays, domain commands, invasions, save metadata, and transient reset.
+- Final report `Artifacts/QA/debug-mode-playmode-report.txt` is `RESULT=PASS`; desktop and portrait captures are `debug-palette-1600x900.png` and `debug-palette-900x1600.png`.
+- Unity Camera Capture verified overlay on/off rendering and the final Console audit is `Error 0 / Warning 0`.
+
+## 2026-07-23 Construction material physical delivery
+
+- Began tracing the yellow construction material marker reported after placement.
+- Confirmed construction-order creation immediately calls the facility-delivery request path and that work readiness later consumes only an actual facility buffer.
+- Confirmed the concrete defect: delivery request time withdraws aggregate warehouse stock, removes the stored physical stack, and respawns a visible loose stack at the warehouse cell.
+- Added source-storage ownership to physical stack save/runtime data without breaking nested V1 compatibility.
+- Facility requests now split warehouse materials into hidden outbound `Stored` reservations while keeping aggregate warehouse stock unchanged.
+- Outbound stored stock is haulable through the existing multi-haul planner; pickup now atomically withdraws warehouse stock and carry insertion failure rolls it back.
+- Work orders count outbound stored reservations as pending and cancellation returns them to ordinary warehouse storage.
+- Updated EditMode and PlayMode expectations so request-time loose piles and early warehouse withdrawal are regressions.
+- Unity completed the first recompilation with Console compile errors at 0.
+- `PhysicalItemDebugScenarios.RunAll` passed all 12 contracts. Request-time stock remained held, outbound storage reservations were hidden, and save/restore preserved total/reserved/available quantities.
+- The existing logistics PlayMode runner now asserts the corrected three-stage transition: unchanged warehouse stock and no loose marker after request, stock withdrawal during AI pickup, then facility-buffer creation after delivery.
+- First PlayMode attempt failed at pickup despite the worker reaching the source. The report showed both same-type warehouses shared `warehouse:1050`; the source warehouse lookup selected the wrong instance. This is now tracked as the next fix rather than extending the timeout.
+- Replaced shared warehouse type keys with position-qualified persistent keys and added legacy storage-ID normalization during item restore.
+- Recompiled and reran all 12 physical-item contracts after the warehouse-key change; all passed again.
+- The second request-file PlayMode launch did not auto-enter play and produced no report; the request remains intact, so the next attempt explicitly starts PlayMode instead of recreating the request.
+- Explicit PlayMode entry also produced no report, indicating the request callback did not create the verifier runner. The next diagnostic checks active scene and runner presence before invoking the component directly.
+- Console inspection found the actual blocker was `CS1503` in the legacy warehouse-ID normalizer. Fixed the narrowed type so the matched object remains an `IWarehouseFacility`.
+- Replaced request-time warehouse withdrawal and loose-stack spawning with destination-reserved hidden stored stacks.
+- Added position-qualified warehouse storage IDs and legacy-ID normalization so same-type warehouses cannot resolve to the wrong source inventory.
+- Added an actual `ConstructionSite + WorkOrderRuntime + AIHaul` PlayMode scenario. It passed with stock `18 -> 18` at request, no loose pile, hidden reservation quantity 2, stock `18 -> 16` at pickup, and the construction order becoming `Ready` after delivery.
+- `PhysicalItemDebugScenarios` passed all 12 contracts, including save/restore of ordinary, reserved, and available warehouse quantities.
+- `WorkAmountDebugScenarios` passed after correcting its stale V9 assertion to the current V12 save contract.
+- Pointer-driven build placement passed: construction site created, final building not instant, partial progress retained, final replacement succeeded, captured errors 0, captured warnings 0.
+- Visual inspection of `Temp/build-placement-construction-site-info.png` showed only the construction-site marker at the selected cell and no quantity-badged yellow item pile.
+- Final Unity state was stopped and not compiling; after clearing the Console, the audit returned `Error 0 / Warning 0`.
+
+## 2026-07-23 Medieval dark fantasy combat V13
+
+- Added the shared combat model, weapon/armor/shield definitions, individual equipment runtime, loadout policies, ammunition, line-of-sight/cover services, body-health runtime, projectile/melee presentation, and V13 persistence.
+- Added nine initial weapons, layered armor sets, two shields, arrow/bolt items, crafting recipes, and three destructible directional cover buildings.
+- Defense now gathers physical equipment during invasion warning, waits while intruders rally outside, dispatches after the breach, and combines ranged cover fire with the existing one-on-one interception line.
+- Offense now preserves body injuries, bleeding, suppression, ammunition, weapon switches, recoverable throws, and downed state through battle persistence and return to the dungeon.
+- Character combat UI exposes body condition, equipment, load, ammunition, cover, hit/evasion calculations, loadout presets, weapon switching, reload, fire mode, and hold fire.
+- Shift additive selection, drag selection, exact intruder interception, exact cover movement, and direct Grid movement are connected through `OwnerCommandController`.
+- Wildlife hunting now resolves through the same combat service. Ranged hunters choose a safe firing cell, reload from carried ammunition, launch pause-safe projectiles, and apply persistent simplified body injuries.
+- Fixed manual move cancellation so evacuation or another movement owner cannot leave AI permanently locked.
+- Roslyn runtime/editor compilation passed.
+- Static regression result: `combat=True; offense=True; defense=True; priority=True; wildlife=True`.
+- Wildlife PlayMode result: `wildlifeSnapshot=True; huntLoop=True`.
+- Defense PlayMode result: `exchanges=4; held=True; adjacent=True; bothDamaged=True; facilityLocked=True; save=True; presentation=True; rally=True; approachHeld=True; ownerEvac=True`.
+- Player command PlayMode result: movement completed and released its lock; immediate cancellation also reported `cancelReleased=True`.
+- Visual artifact: `Artifacts/QA/combat-v13-defense-final.png`; Game View inspection shows separate adjacent fighters, damage numbers, combat labels, and wounded-only health bars.
+- Unity MCP `Camera_Capture` failed twice with `Failed to render scene preview`; direct `ScreenCapture` succeeded.
+- Final Unity Console audit: `Error 0 / Warning 0`.

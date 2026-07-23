@@ -87,6 +87,7 @@ public sealed class DoorVisualPlayModeVerificationRunner : MonoBehaviour
         public Vector3 MousePosition => Vector3.zero;
         public float ScreenWidth => Screen.width;
         public float ScreenHeight => Screen.height;
+        public float ScrollDeltaY => 0f;
         public bool GetKey(KeyCode keyCode) => false;
         public bool GetKeyDown(KeyCode keyCode) => false;
         public bool GetMouseButton(int button) => false;

@@ -15,6 +15,9 @@ public sealed class DungeonInvasionSaveData
     public DungeonInvasionThreatSaveData threat = new DungeonInvasionThreatSaveData();
     public List<DungeonInvasionIntruderSaveData> activeIntruders =
         new List<DungeonInvasionIntruderSaveData>();
+    public DefenseResponsePolicySaveSnapshot responsePolicies = new DefenseResponsePolicySaveSnapshot();
+    public DefenseEngagementSaveSnapshot engagements = new DefenseEngagementSaveSnapshot();
+    public OwnerEvacuationSaveSnapshot ownerEvacuation = new OwnerEvacuationSaveSnapshot();
 }
 
 [Serializable]
@@ -37,6 +40,7 @@ public sealed class DungeonInvasionThreatSaveData
 [Serializable]
 public sealed class DungeonInvasionIntruderSaveData
 {
+    public string runtimeId = string.Empty;
     public int dataId = -1;
     public float worldX;
     public float worldY;
@@ -45,6 +49,8 @@ public sealed class DungeonInvasionIntruderSaveData
     public int gridY;
     public InvasionIntruderState state;
     public float elapsedSeconds;
+    public float rallyRemainingSeconds;
+    public bool hasBreachedDungeonInterior;
     public float damageDelayRemaining;
     public int facilityDamageCount;
     public float currentHealth;
@@ -62,12 +68,15 @@ public sealed class DungeonInvasionIntruderSaveData
 public sealed class DungeonInvasionIntruderSettingsSaveData
 {
     public string patternId = InvasionIntruderPatternIds.Hunter;
+    public float rallyDurationSeconds = 12f;
     public float secondsToFullFocus = 30f;
     public float repathIntervalSeconds = 1.5f;
     public float facilityDamageIntervalSeconds = 5f;
     public float finalCombatDamage = 45f;
     public float finalCombatWindupSeconds = 0.7f;
     public float healthMultiplier = 1f;
+    public float meleeDamageMultiplier = 1f;
+    public float attackSpeedMultiplier = 1f;
 }
 
 [Serializable]
@@ -84,11 +93,17 @@ public sealed class InvasionSaveService : IInvasionSaveService
     private readonly IInvasionThreatRuntimeProvider threatProvider;
     private readonly IInvasionDirectorRuntimeProvider directorProvider;
     private readonly IGridSystemProvider gridProvider;
+    private readonly IDefenseResponsePolicyRuntime responsePolicyRuntime;
+    private readonly IDefenseEngagementRuntime engagementRuntime;
+    private readonly IInvasionOwnerEvacuationService ownerEvacuationService;
 
     public InvasionSaveService(
         IInvasionThreatRuntimeProvider threatProvider,
         IInvasionDirectorRuntimeProvider directorProvider,
-        IGridSystemProvider gridProvider)
+        IGridSystemProvider gridProvider,
+        IDefenseResponsePolicyRuntime responsePolicyRuntime,
+        IDefenseEngagementRuntime engagementRuntime,
+        IInvasionOwnerEvacuationService ownerEvacuationService)
     {
         this.threatProvider = threatProvider
             ?? throw new ArgumentNullException(nameof(threatProvider));
@@ -96,6 +111,12 @@ public sealed class InvasionSaveService : IInvasionSaveService
             ?? throw new ArgumentNullException(nameof(directorProvider));
         this.gridProvider = gridProvider
             ?? throw new ArgumentNullException(nameof(gridProvider));
+        this.responsePolicyRuntime = responsePolicyRuntime
+            ?? throw new ArgumentNullException(nameof(responsePolicyRuntime));
+        this.engagementRuntime = engagementRuntime
+            ?? throw new ArgumentNullException(nameof(engagementRuntime));
+        this.ownerEvacuationService = ownerEvacuationService
+            ?? throw new ArgumentNullException(nameof(ownerEvacuationService));
     }
 
     public DungeonInvasionSaveData Capture()
@@ -128,6 +149,10 @@ public sealed class InvasionSaveService : IInvasionSaveService
                 .Select(ToSaveData)
                 .ToList();
         }
+
+        result.responsePolicies = responsePolicyRuntime.Capture();
+        result.engagements = engagementRuntime.Capture();
+        result.ownerEvacuation = ownerEvacuationService.Capture();
 
         return result;
     }
@@ -163,18 +188,26 @@ public sealed class InvasionSaveService : IInvasionSaveService
             report.AddWarning("Invasion threat runtime was not present; threat state was skipped.");
         }
 
+        List<string> warnings = new List<string>();
+        responsePolicyRuntime.Restore(source.responsePolicies, warnings);
+
         if (!directorProvider.TryGetRuntime(out InvasionDirectorRuntime director))
         {
             report.AddWarning("Invasion director runtime was not present; active intruders were skipped.");
+            foreach (string warning in warnings)
+            {
+                report.AddWarning(warning);
+            }
             return;
         }
 
-        List<string> warnings = new List<string>();
         report.RestoredIntruderCount = director.RestorePersistentState(
             (source.activeIntruders ?? new List<DungeonInvasionIntruderSaveData>())
                 .Where(saved => saved != null)
                 .Select(ToRuntimeState),
             warnings);
+        ownerEvacuationService.Restore(source.ownerEvacuation, warnings);
+        engagementRuntime.Restore(source.engagements, warnings);
         foreach (string warning in warnings)
         {
             report.AddWarning(warning);
@@ -186,6 +219,7 @@ public sealed class InvasionSaveService : IInvasionSaveService
         InvasionIntruderSettings settings = source.Settings ?? new InvasionIntruderSettings();
         return new DungeonInvasionIntruderSaveData
         {
+            runtimeId = source.RuntimeId,
             dataId = source.DataId,
             worldX = source.WorldPosition.x,
             worldY = source.WorldPosition.y,
@@ -194,6 +228,8 @@ public sealed class InvasionSaveService : IInvasionSaveService
             gridY = source.GridPosition.y,
             state = source.State,
             elapsedSeconds = source.ElapsedSeconds,
+            rallyRemainingSeconds = source.RallyRemainingSeconds,
+            hasBreachedDungeonInterior = source.HasBreachedDungeonInterior,
             damageDelayRemaining = source.DamageDelayRemaining,
             facilityDamageCount = source.FacilityDamageCount,
             currentHealth = source.CurrentHealth,
@@ -202,12 +238,15 @@ public sealed class InvasionSaveService : IInvasionSaveService
             settings = new DungeonInvasionIntruderSettingsSaveData
             {
                 patternId = settings.patternId,
+                rallyDurationSeconds = settings.rallyDurationSeconds,
                 secondsToFullFocus = settings.secondsToFullFocus,
                 repathIntervalSeconds = settings.repathIntervalSeconds,
                 facilityDamageIntervalSeconds = settings.facilityDamageIntervalSeconds,
                 finalCombatDamage = settings.finalCombatDamage,
                 finalCombatWindupSeconds = settings.finalCombatWindupSeconds,
-                healthMultiplier = settings.healthMultiplier
+                healthMultiplier = settings.healthMultiplier,
+                meleeDamageMultiplier = settings.meleeDamageMultiplier,
+                attackSpeedMultiplier = settings.attackSpeedMultiplier
             },
             conditions = source.Conditions
                 .OrderBy(pair => pair.Key)
@@ -253,12 +292,17 @@ public sealed class InvasionSaveService : IInvasionSaveService
             new InvasionIntruderSettings
             {
                 patternId = settings.patternId,
+                rallyDurationSeconds = settings.rallyDurationSeconds > 0f
+                    ? settings.rallyDurationSeconds
+                    : 12f,
                 secondsToFullFocus = settings.secondsToFullFocus,
                 repathIntervalSeconds = settings.repathIntervalSeconds,
                 facilityDamageIntervalSeconds = settings.facilityDamageIntervalSeconds,
                 finalCombatDamage = settings.finalCombatDamage,
                 finalCombatWindupSeconds = settings.finalCombatWindupSeconds,
-                healthMultiplier = settings.healthMultiplier > 0f ? settings.healthMultiplier : 1f
+                healthMultiplier = settings.healthMultiplier > 0f ? settings.healthMultiplier : 1f,
+                meleeDamageMultiplier = settings.meleeDamageMultiplier > 0f ? settings.meleeDamageMultiplier : 1f,
+                attackSpeedMultiplier = settings.attackSpeedMultiplier > 0f ? settings.attackSpeedMultiplier : 1f
             },
             (source.defenseStatuses ?? new List<DungeonDefenseStatusSaveData>())
                 .Where(status => status != null)
@@ -266,6 +310,9 @@ public sealed class InvasionSaveService : IInvasionSaveService
                     status.kind,
                     status.value,
                     status.remainingSeconds,
-                    status.stacks)));
+                    status.stacks)),
+            source.runtimeId,
+            source.rallyRemainingSeconds,
+            source.hasBreachedDungeonInterior);
     }
 }

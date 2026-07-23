@@ -88,6 +88,11 @@ public static class FacilityProgression
             return false;
         }
 
+        if (DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.IgnoreUnlocks))
+        {
+            return true;
+        }
+
         if (unlockState != null && unlockState.IsBuildingUnlocked(building.id))
         {
             return true;

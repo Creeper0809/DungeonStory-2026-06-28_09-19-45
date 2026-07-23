@@ -17,6 +17,7 @@ public class CharacterSummeryInfo : UIPopUp,
     public Slider mood;
     public Slider fun;
     public Slider hunger;
+    public Slider thirst;
     public Slider sleep;
     public Slider excretion;
     public Slider hygiene;
@@ -32,15 +33,30 @@ public class CharacterSummeryInfo : UIPopUp,
     private Button[] skillButtons = Array.Empty<Button>();
     private TMP_Text moodSummaryText;
     private TMP_Text moodFactorsText;
+    private TMP_Text aiSummaryText;
     private TMP_Text carrySummaryText;
+    private TMP_Text healthSummaryText;
+    private TMP_Text combatSummaryText;
     private GameObject statusTabContent;
+    private GameObject healthTabContent;
     private GameObject growthTabContent;
     private GameObject moodTabContent;
     private GameObject recordsTabContent;
+    private GameObject aiTabContent;
+    private GameObject combatTabContent;
     private Button statusTabButton;
+    private Button healthTabButton;
     private Button growthTabButton;
     private Button moodTabButton;
     private Button recordsTabButton;
+    private Button aiTabButton;
+    private Button combatTabButton;
+    private Button combatLoadoutButton;
+    private Button combatWeaponButton;
+    private Button combatReloadButton;
+    private Button combatFireModeButton;
+    private Button combatHoldFireButton;
+    private Button combatRepairButton;
     private float nextVitalsRefreshAt;
     private int pendingCandidateConfirmation = -1;
     private int pendingCandidateUnlockLevel = -1;
@@ -80,6 +96,9 @@ public class CharacterSummeryInfo : UIPopUp,
         RefreshCarrySummary();
         RefreshProgression();
         RefreshMoodDetails();
+        RefreshHealthDetails();
+        RefreshCombatDetails();
+        RefreshAiDetails();
     }
 
     public void OnTriggerEvent(InfoFeedEvent eventType)
@@ -105,9 +124,14 @@ public class CharacterSummeryInfo : UIPopUp,
         uiRoot.SetActive(true);
         ResolvePopupService().Open(this);
         ObjectName.text = GetDisplayName(targetObject);
+
         RefreshProfileAndVitals();
         RefreshCarrySummary();
         RefreshProgression();
+        RefreshMoodDetails();
+        RefreshHealthDetails();
+        RefreshCombatDetails();
+        RefreshAiDetails();
 
         if (characterStats != null)
         {
@@ -139,24 +163,11 @@ public class CharacterSummeryInfo : UIPopUp,
     {
         SetSlider(fun, stats, CharacterCondition.FUN);
         SetSlider(hunger, stats, CharacterCondition.HUNGER);
+        SetSlider(thirst, stats, CharacterCondition.THIRST);
         SetSlider(sleep, stats, CharacterCondition.SLEEP);
         SetSlider(excretion, stats, CharacterCondition.EXCRETION);
         SetSlider(hygiene, stats, CharacterCondition.HYGIENE);
         RefreshMoodDetails();
-    }
-
-    private static void SetSlider(
-        Slider slider,
-        IReadOnlyDictionary<CharacterCondition, float> stats,
-        CharacterCondition condition)
-    {
-        if (slider == null || stats == null)
-        {
-            return;
-        }
-
-        float rawValue = stats.TryGetValue(condition, out float value) ? value : 0f;
-        SetMeter(slider, rawValue / 100f, $"{Mathf.RoundToInt(rawValue)}");
     }
 
     public void BindGeneratedView(
@@ -171,6 +182,7 @@ public class CharacterSummeryInfo : UIPopUp,
         Slider hygieneSlider,
         TMP_Text generatedMoodSummaryText,
         TMP_Text generatedMoodFactorsText,
+        TMP_Text generatedAiSummaryText,
         TMP_Text generatedCarrySummaryText,
         TMP_Text generatedLogText)
     {
@@ -185,6 +197,7 @@ public class CharacterSummeryInfo : UIPopUp,
         hygiene = hygieneSlider;
         moodSummaryText = generatedMoodSummaryText;
         moodFactorsText = generatedMoodFactorsText;
+        aiSummaryText = generatedAiSummaryText;
         carrySummaryText = generatedCarrySummaryText;
         logText = generatedLogText;
     }
@@ -194,20 +207,60 @@ public class CharacterSummeryInfo : UIPopUp,
         GameObject generatedGrowthTabContent,
         GameObject generatedMoodTabContent,
         GameObject generatedRecordsTabContent,
+        GameObject generatedAiTabContent,
         Button generatedStatusTabButton,
         Button generatedGrowthTabButton,
         Button generatedMoodTabButton,
-        Button generatedRecordsTabButton)
+        Button generatedRecordsTabButton,
+        Button generatedAiTabButton)
     {
         statusTabContent = generatedStatusTabContent;
         growthTabContent = generatedGrowthTabContent;
         moodTabContent = generatedMoodTabContent;
         recordsTabContent = generatedRecordsTabContent;
+        aiTabContent = generatedAiTabContent;
         statusTabButton = generatedStatusTabButton;
         growthTabButton = generatedGrowthTabButton;
         moodTabButton = generatedMoodTabButton;
         recordsTabButton = generatedRecordsTabButton;
+        aiTabButton = generatedAiTabButton;
         ShowStatusTab();
+    }
+
+    public void BindGeneratedSurvival(
+        Slider generatedThirst,
+        TMP_Text generatedHealthSummaryText,
+        GameObject generatedHealthTabContent,
+        Button generatedHealthTabButton)
+    {
+        thirst = generatedThirst;
+        healthSummaryText = generatedHealthSummaryText;
+        healthTabContent = generatedHealthTabContent;
+        healthTabButton = generatedHealthTabButton;
+        RefreshHealthDetails();
+    }
+
+    public void BindGeneratedCombat(
+        TMP_Text generatedCombatSummaryText,
+        GameObject generatedCombatTabContent,
+        Button generatedCombatTabButton,
+        Button generatedLoadoutButton,
+        Button generatedWeaponButton,
+        Button generatedReloadButton,
+        Button generatedFireModeButton,
+        Button generatedHoldFireButton,
+        Button generatedRepairButton)
+    {
+        combatSummaryText = generatedCombatSummaryText;
+        combatTabContent = generatedCombatTabContent;
+        combatTabButton = generatedCombatTabButton;
+        combatLoadoutButton = generatedLoadoutButton;
+        combatWeaponButton = generatedWeaponButton;
+        combatReloadButton = generatedReloadButton;
+        combatFireModeButton = generatedFireModeButton;
+        combatHoldFireButton = generatedHoldFireButton;
+        combatRepairButton = generatedRepairButton;
+        RefreshCombatDetails();
     }
 
     public void BindGeneratedGrowth(
@@ -232,20 +285,267 @@ public class CharacterSummeryInfo : UIPopUp,
         RefreshMoodDetails();
     }
 
+    public void ShowHealthTab()
+    {
+        SetActiveTab(CharacterSummaryTab.Health);
+        RefreshHealthDetails();
+    }
+
     public void ShowGrowthTab()
     {
         SetActiveTab(CharacterSummaryTab.Growth);
         RefreshProgression();
     }
 
-    public void ToggleSkillAt(int index)
+    public void ShowRecordsTab()
     {
-        if (actor == null || progression == null)
+        SetActiveTab(CharacterSummaryTab.Records);
+        RefreshLogText();
+    }
+
+    public void ShowAiTab()
+    {
+        SetActiveTab(CharacterSummaryTab.Ai);
+        RefreshAiDetails();
+    }
+
+    public void ShowCombatTab()
+    {
+        SetActiveTab(CharacterSummaryTab.Combat);
+        RefreshCombatDetails();
+    }
+
+    public void ToggleCombatLoadout()
+    {
+        if (!TryGetCombatRuntime(out ICombatEquipmentRuntime equipment, out string characterId))
         {
             return;
         }
 
-        if (index < 7 || index >= 10)
+        CharacterCombatLoadoutProfile current = equipment.GetActiveProfileSnapshot(characterId);
+        string target = string.Equals(
+            current?.profileId,
+            CombatLoadoutPresetIds.Peace,
+            StringComparison.Ordinal)
+            ? CombatLoadoutPresetIds.Combat
+            : CombatLoadoutPresetIds.Peace;
+        bool success = equipment.TrySetActiveProfile(characterId, target);
+        NoticeFeedEvent.Trigger(
+            success
+                ? target == CombatLoadoutPresetIds.Combat
+                    ? $"{actor.name}: 전투 로드아웃으로 전환"
+                    : $"{actor.name}: 평시 로드아웃으로 전환"
+                : "현재 장비 조합으로는 해당 로드아웃을 사용할 수 없습니다.",
+            success ? NoticeFeedEvent.Grade.NONE : NoticeFeedEvent.Grade.WARNING);
+        RefreshCombatDetails();
+    }
+
+    public void CycleCombatWeapon()
+    {
+        if (!TryGetCombatRuntime(out ICombatEquipmentRuntime equipment, out string characterId))
+        {
+            return;
+        }
+
+        CharacterCombatLoadoutProfile profile = equipment.GetActiveProfileSnapshot(characterId);
+        string[] weaponIds = profile?.weaponInstanceIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray()
+            ?? Array.Empty<string>();
+        if (weaponIds.Length == 0)
+        {
+            NoticeFeedEvent.Trigger("교체할 소지 무기가 없습니다.", NoticeFeedEvent.Grade.WARNING);
+            return;
+        }
+
+        int currentIndex = Array.FindIndex(
+            weaponIds,
+            id => string.Equals(id, profile.activeWeaponInstanceId, StringComparison.Ordinal));
+        for (int offset = 1; offset <= weaponIds.Length; offset++)
+        {
+            string candidate = weaponIds[(Mathf.Max(-1, currentIndex) + offset) % weaponIds.Length];
+            if (equipment.TrySetActiveWeapon(characterId, candidate, out string failureReason))
+            {
+                NoticeFeedEvent.Trigger(
+                    $"{actor.name}: 무기 교체",
+                    NoticeFeedEvent.Grade.NONE);
+                RefreshCombatDetails();
+                return;
+            }
+
+            if (offset == weaponIds.Length)
+            {
+                NoticeFeedEvent.Trigger(failureReason, NoticeFeedEvent.Grade.WARNING);
+            }
+        }
+    }
+
+    public void ReloadCombatWeapon()
+    {
+        if (!TryGetCombatRuntime(out ICombatEquipmentRuntime equipment, out string characterId)
+            || !equipment.TryGetActiveWeapon(characterId, out CombatWeaponSnapshot weapon)
+            || weapon == null
+            || string.IsNullOrWhiteSpace(weapon.InstanceId))
+        {
+            NoticeFeedEvent.Trigger("재장전할 활성 무기가 없습니다.", NoticeFeedEvent.Grade.WARNING);
+            return;
+        }
+
+        bool success = equipment.TryReloadFromCharacterInventory(
+            characterId,
+            weapon.InstanceId,
+            out int consumed);
+        NoticeFeedEvent.Trigger(
+            success
+                ? $"{actor.name}: 탄약 {consumed}발 재장전"
+                : "맞는 탄약이 없거나 이미 장전되어 있습니다.",
+            success ? NoticeFeedEvent.Grade.NONE : NoticeFeedEvent.Grade.WARNING);
+        RefreshCombatDetails();
+    }
+
+    public void CycleCombatFireMode()
+    {
+        if (!TryGetCombatRuntime(out ICombatEquipmentRuntime equipment, out string characterId))
+        {
+            return;
+        }
+
+        CharacterCombatLoadoutProfile profile = equipment.GetActiveProfileSnapshot(characterId);
+        CombatFireMode[] modes =
+        {
+            CombatFireMode.Aimed,
+            CombatFireMode.Rapid,
+            CombatFireMode.Suppressive
+        };
+        int currentIndex = Array.IndexOf(modes, profile?.fireMode ?? CombatFireMode.Aimed);
+        string lastFailure = "사용 가능한 사격 모드가 없습니다.";
+        for (int offset = 1; offset <= modes.Length; offset++)
+        {
+            CombatFireMode candidate = modes[(Mathf.Max(0, currentIndex) + offset) % modes.Length];
+            if (equipment.TrySetFireMode(characterId, candidate, out lastFailure))
+            {
+                NoticeFeedEvent.Trigger(
+                    $"{actor.name}: {FormatCombatFireMode(candidate)} 사격",
+                    NoticeFeedEvent.Grade.NONE);
+                RefreshCombatDetails();
+                return;
+            }
+        }
+
+        NoticeFeedEvent.Trigger(lastFailure, NoticeFeedEvent.Grade.WARNING);
+    }
+
+    public void ToggleCombatHoldFire()
+    {
+        if (!TryGetCombatRuntime(out ICombatEquipmentRuntime equipment, out string characterId))
+        {
+            return;
+        }
+
+        CharacterCombatLoadoutProfile profile = equipment.GetActiveProfileSnapshot(characterId);
+        bool holdFire = !(profile?.holdFire ?? false);
+        if (equipment.TrySetHoldFire(characterId, holdFire))
+        {
+            NoticeFeedEvent.Trigger(
+                holdFire ? $"{actor.name}: 사격 중지" : $"{actor.name}: 사격 허용",
+                NoticeFeedEvent.Grade.NONE);
+        }
+
+        RefreshCombatDetails();
+    }
+
+    public void RequestCombatEquipmentRepair()
+    {
+        if (!TryGetCombatRuntime(out ICombatEquipmentRuntime equipment, out string characterId)
+            || EquipmentMaintenancePolicyRuntime.Active == null)
+        {
+            NoticeFeedEvent.Trigger(
+                "장비 수리 정보를 불러올 수 없습니다.",
+                NoticeFeedEvent.Grade.WARNING);
+            return;
+        }
+
+        CharacterCombatLoadoutProfile profile = equipment.GetActiveProfileSnapshot(characterId);
+        IEnumerable<string> candidateIds = (profile?.armorInstanceIds ?? new List<string>())
+            .Concat(string.IsNullOrWhiteSpace(profile?.shieldInstanceId)
+                ? Array.Empty<string>()
+                : new[] { profile.shieldInstanceId });
+        CombatEquipmentInstance candidate = candidateIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .Select(id => equipment.TryGetInstance(id, out CombatEquipmentInstance instance)
+                ? instance
+                : null)
+            .Where(instance => instance != null && instance.durabilityRatio < 0.999f)
+            .OrderBy(instance => instance.durabilityRatio)
+            .FirstOrDefault();
+        if (candidate == null)
+        {
+            NoticeFeedEvent.Trigger(
+                "수리가 필요한 방어구나 방패가 없습니다.",
+                NoticeFeedEvent.Grade.WARNING);
+            return;
+        }
+
+        bool requested = EquipmentMaintenancePolicyRuntime.Active.TryRequestManualRepair(
+            candidate.instanceId,
+            out string message);
+        NoticeFeedEvent.Trigger(
+            message,
+            requested ? NoticeFeedEvent.Grade.NONE : NoticeFeedEvent.Grade.WARNING);
+        RefreshCombatDetails();
+    }
+
+    private void SetActiveTab(CharacterSummaryTab tab)
+    {
+        if (statusTabContent != null)
+        {
+            statusTabContent.SetActive(tab == CharacterSummaryTab.Status);
+        }
+
+        if (growthTabContent != null)
+        {
+            growthTabContent.SetActive(tab == CharacterSummaryTab.Growth);
+        }
+
+        if (healthTabContent != null)
+        {
+            healthTabContent.SetActive(tab == CharacterSummaryTab.Health);
+        }
+
+        if (moodTabContent != null)
+        {
+            moodTabContent.SetActive(tab == CharacterSummaryTab.Mood);
+        }
+
+        if (recordsTabContent != null)
+        {
+            recordsTabContent.SetActive(tab == CharacterSummaryTab.Records);
+        }
+
+        if (aiTabContent != null)
+        {
+            aiTabContent.SetActive(tab == CharacterSummaryTab.Ai);
+        }
+
+        if (combatTabContent != null)
+        {
+            combatTabContent.SetActive(tab == CharacterSummaryTab.Combat);
+        }
+
+        DungeonUiTheme.StyleButton(statusTabButton, selected: tab == CharacterSummaryTab.Status);
+        DungeonUiTheme.StyleButton(healthTabButton, selected: tab == CharacterSummaryTab.Health);
+        DungeonUiTheme.StyleButton(growthTabButton, selected: tab == CharacterSummaryTab.Growth);
+        DungeonUiTheme.StyleButton(moodTabButton, selected: tab == CharacterSummaryTab.Mood);
+        DungeonUiTheme.StyleButton(recordsTabButton, selected: tab == CharacterSummaryTab.Records);
+        DungeonUiTheme.StyleButton(aiTabButton, selected: tab == CharacterSummaryTab.Ai);
+        DungeonUiTheme.StyleButton(combatTabButton, selected: tab == CharacterSummaryTab.Combat);
+    }
+
+    public void ToggleSkillAt(int index)
+    {
+        if (actor == null || progression == null || index < 7 || index >= 10)
         {
             return;
         }
@@ -282,38 +582,34 @@ public class CharacterSummeryInfo : UIPopUp,
         RefreshProgression();
     }
 
-    public void ShowRecordsTab()
+    public void OnTriggerEvent(CharacterGrowthTabRequestedEvent eventType)
     {
-        SetActiveTab(CharacterSummaryTab.Records);
+        if (eventType.Actor == null)
+        {
+            return;
+        }
+
+        if (actor != eventType.Actor)
+        {
+            OnTriggerEvent(new InfoFeedEvent(eventType.Actor));
+        }
+
+        ShowGrowthTab();
+    }
+
+    public void OnLogAdded(CharacterLogEntry entry)
+    {
         RefreshLogText();
     }
 
-    private void SetActiveTab(CharacterSummaryTab tab)
+    public void RefreshLogText()
     {
-        if (statusTabContent != null)
+        if (logText == null)
         {
-            statusTabContent.SetActive(tab == CharacterSummaryTab.Status);
+            return;
         }
 
-        if (growthTabContent != null)
-        {
-            growthTabContent.SetActive(tab == CharacterSummaryTab.Growth);
-        }
-
-        if (moodTabContent != null)
-        {
-            moodTabContent.SetActive(tab == CharacterSummaryTab.Mood);
-        }
-
-        if (recordsTabContent != null)
-        {
-            recordsTabContent.SetActive(tab == CharacterSummaryTab.Records);
-        }
-
-        DungeonUiTheme.StyleButton(statusTabButton, selected: tab == CharacterSummaryTab.Status);
-        DungeonUiTheme.StyleButton(growthTabButton, selected: tab == CharacterSummaryTab.Growth);
-        DungeonUiTheme.StyleButton(moodTabButton, selected: tab == CharacterSummaryTab.Mood);
-        DungeonUiTheme.StyleButton(recordsTabButton, selected: tab == CharacterSummaryTab.Records);
+        logText.text = FormatLogText(characterLog, 40);
     }
 
     public void RefreshProgression()
@@ -325,6 +621,7 @@ public class CharacterSummeryInfo : UIPopUp,
             {
                 progressionSummaryText.text = "성장 정보가 없습니다.";
             }
+
             return;
         }
 
@@ -387,7 +684,7 @@ public class CharacterSummeryInfo : UIPopUp,
                 CharacterSkillInstance skill = progression.Ultimate;
                 text = skill != null
                     ? $"궁극기  [{skill.ultimateDomain}] {skill.displayName}  ·  {skill.description}"
-                    : "궁극기  Lv.50 서사 완성 시 획득";
+                    : "궁극기  Lv.50 서사 완성 후 획득";
             }
             else
             {
@@ -413,8 +710,535 @@ public class CharacterSummeryInfo : UIPopUp,
             {
                 label.text = text;
             }
+
             DungeonUiTheme.StyleButton(button, selected);
         }
+    }
+
+    public void RefreshMoodDetails()
+    {
+        if (characterStats == null)
+        {
+            SetMeter(mood, 0f, "--");
+            if (moodSummaryText != null)
+            {
+                moodSummaryText.text = "기분 정보가 없습니다.";
+            }
+
+            if (moodFactorsText != null)
+            {
+                moodFactorsText.text = "적용 중인 요인이 없습니다.";
+            }
+
+            return;
+        }
+
+        CharacterMoodSnapshot snapshot = characterStats.GetMoodSnapshot();
+        SetMeter(mood, snapshot.Value / 100f, $"{Mathf.RoundToInt(snapshot.Value)}");
+        if (moodSummaryText != null)
+        {
+            string offset = snapshot.TotalOffset >= 0f
+                ? $"+{Mathf.RoundToInt(snapshot.TotalOffset)}"
+                : $"{Mathf.RoundToInt(snapshot.TotalOffset)}";
+            moodSummaryText.text =
+                $"{CharacterMoodRules.GetMoodLabel(snapshot.Value)} · 기준 {Mathf.RoundToInt(snapshot.BaseValue)} · 보정 {offset}";
+        }
+
+        if (moodFactorsText != null)
+        {
+            moodFactorsText.text = FormatMoodFactors(snapshot);
+        }
+    }
+
+    public void RefreshAiDetails()
+    {
+        if (aiSummaryText == null)
+        {
+            return;
+        }
+
+        if (actor == null)
+        {
+            aiSummaryText.text = "AI 정보가 없습니다.";
+            return;
+        }
+
+        StringBuilder builder = new StringBuilder(1024);
+        if (DefenseEngagementRuntime.Active != null
+            && DefenseEngagementRuntime.Active.TryGetActorDefenseStatus(
+                actor,
+                out DefenseEngagement defenseEngagement,
+                out string defenseRole,
+                out string defenseStatus))
+        {
+            builder.AppendLine($"방어 임무  {defenseRole} · {Fallback(defenseStatus, "대기")}");
+            builder.AppendLine($"교전 위치  침입자 {defenseEngagement.IntruderStopCell} / 경비 {defenseEngagement.GuardCell}");
+            builder.AppendLine($"공방 횟수  {defenseEngagement.ExchangeCount}");
+            builder.AppendLine();
+        }
+
+        CharacterBlackboard blackboard = actor.Blackboard;
+        if (blackboard != null)
+        {
+            builder.AppendLine($"현재 BT 분기  {CharacterAiUtilityText.GetBranchLabel(blackboard.CurrentBranch)}");
+            builder.AppendLine($"현재 의도  {Fallback(blackboard.CurrentIntent, "없음")}");
+            builder.AppendLine($"행동 단계  {Fallback(blackboard.CurrentTask, "대기")} · {Fallback(blackboard.CurrentStatus, "판단 대기")}");
+            builder.AppendLine($"의도 유지  {blackboard.GetSoftLockDebugSummary()}");
+
+            CharacterAiWorldSignalSnapshot signals = CharacterAiWorldSignalUtility.Capture(actor, blackboard.CurrentBranch);
+            builder.AppendLine($"주변 신호  {signals.ToCompactString()}");
+
+            if (!string.IsNullOrWhiteSpace(blackboard.LastDecisionContextSummary))
+            {
+                builder.AppendLine();
+                builder.AppendLine(blackboard.LastDecisionContextSummary);
+            }
+
+            IReadOnlyList<string> breakdowns = blackboard.TopUtilityBreakdowns;
+            if (breakdowns != null && breakdowns.Count > 0)
+            {
+                builder.AppendLine();
+                builder.AppendLine("상위 후보 5개");
+                foreach (string row in breakdowns.Take(5))
+                {
+                    builder.AppendLine($"- {row}");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(blackboard.LastCommitBreakReason))
+            {
+                builder.AppendLine();
+                builder.AppendLine($"최근 중단 사유  {blackboard.LastCommitBreakReason}");
+            }
+        }
+
+        if (actor.Brain != null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("현재 행동");
+            builder.AppendLine(actor.Brain.GetDebugSummary(5));
+        }
+
+        CharacterAiScheduler scheduler = FindFirstObjectByType<CharacterAiScheduler>(FindObjectsInactive.Include);
+        if (scheduler != null)
+        {
+            builder.AppendLine();
+            builder.AppendLine($"다음 판단  {scheduler.GetNextDecisionDelayForDebug(actor):0.0}s 후");
+            builder.AppendLine($"AI 처리  {scheduler.LastProcessingMilliseconds:0.00}ms · 경로 {scheduler.LastPathSearchCount}/{scheduler.CurrentPathSearchBudget}");
+        }
+
+        if (actor.AiMemory != null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("최근 기억");
+            builder.AppendLine(actor.AiMemory.GetRecentMemorySummary());
+        }
+
+        string text = builder.ToString().TrimEnd();
+        aiSummaryText.text = string.IsNullOrWhiteSpace(text)
+            ? "아직 AI 판단 기록이 없습니다."
+            : text;
+    }
+
+    public void RefreshCombatDetails()
+    {
+        if (combatSummaryText == null)
+        {
+            return;
+        }
+
+        if (actor == null)
+        {
+            combatSummaryText.text = "전투 정보가 없습니다.";
+            return;
+        }
+
+        string characterId = actor.Identity?.PersistentId ?? string.Empty;
+        int melee = actor.GetCharacterStat(CharacterStatType.Attack);
+        int shooting = actor.GetCharacterStat(CharacterStatType.Shooting);
+        int evasion = actor.GetCharacterStat(CharacterStatType.Evasion);
+        int move = actor.GetCharacterStat(CharacterStatType.MoveSpeed);
+        int strength = actor.GetCharacterStat(CharacterStatType.Strength);
+        int dexterity = actor.GetCharacterStat(CharacterStatType.Dexterity);
+
+        float baseRangedHit = Mathf.Clamp(
+            0.45f + shooting * 0.025f + dexterity * 0.01f,
+            0.05f,
+            0.95f);
+        float baseMeleeHit = Mathf.Clamp(0.72f + (melee + dexterity) * 0.018f, 0.1f, 0.95f);
+        float baseEvasion = Mathf.Clamp(0.02f + evasion * 0.01f + move * 0.003f, 0f, 0.35f);
+
+        StringBuilder builder = new StringBuilder(1536);
+        builder.AppendLine("전투 능력");
+        builder.AppendLine($"근접 {melee} · 사격 {shooting} · 회피 {evasion} · 민첩 {dexterity} · 힘 {strength}");
+        builder.AppendLine($"기본 사격 명중 {baseRangedHit * 100f:0.#}%  (45 + 사격×2.5 + 민첩×1)");
+        builder.AppendLine($"기본 근접 명중 {baseMeleeHit * 100f:0.#}%  (대상 회피 전)");
+        builder.AppendLine($"기본 회피 {baseEvasion * 100f:0.#}%  (2 + 회피×1 + 이동×0.3)");
+
+        CharacterBodyHealthSnapshot body = CharacterBodyHealthRuntime.Active != null
+            ? CharacterBodyHealthRuntime.Active.GetSnapshot(actor)
+            : default;
+        builder.AppendLine();
+        builder.AppendLine("신체 상태");
+        builder.AppendLine(
+            $"의식 {body.Consciousness * 100f:0}% · 조작 {body.Manipulation * 100f:0}% · 이동 {body.Mobility * 100f:0}%");
+        builder.AppendLine(
+            $"혈액 손실 {body.BloodLoss:0.#}% · 제압 {body.Suppression:0.#}%"
+            + (body.Downed ? " · 쓰러짐" : string.Empty));
+        foreach (CharacterBodyPartHealthState part in body.Parts ?? Array.Empty<CharacterBodyPartHealthState>())
+        {
+            string bleeding = part.bleedingPerSecond > 0f
+                ? $" · 출혈 {part.bleedingPerSecond:0.##}/s"
+                : string.Empty;
+            builder.AppendLine(
+                $"- {CombatBodyPartRules.GetDisplayName(part.bodyPart)} "
+                + $"{part.currentHealth:0.#}/{part.maxHealth:0.#}{bleeding}");
+        }
+
+        ICombatEquipmentRuntime equipment = CombatEquipmentRuntime.Active;
+        CharacterCombatLoadoutProfile profile = equipment?.GetActiveProfileSnapshot(characterId);
+        ResourceCombatEquipmentCatalog catalog = new ResourceCombatEquipmentCatalog();
+        builder.AppendLine();
+        builder.AppendLine("장비와 탄약");
+        builder.AppendLine($"로드아웃  {profile?.displayName ?? "평시"}");
+
+        if (equipment != null
+            && equipment.TryGetActiveWeapon(characterId, out CombatWeaponSnapshot weapon)
+            && weapon != null
+            && !string.IsNullOrWhiteSpace(weapon.InstanceId)
+            && catalog.TryGet(weapon.DefinitionId, out CombatEquipmentDefinitionSO weaponDefinition))
+        {
+            string ammo = weapon.RequiresAmmo
+                ? $" · 장전 {weapon.LoadedAmmo}/{weapon.MagazineCapacity}"
+                : string.Empty;
+            builder.AppendLine(
+                $"활성 무기  {weaponDefinition.DisplayName} [{CombatQualityRules.GetDisplayName(weapon.Quality)}]"
+                + $" · 최대 {weapon.MaximumRange}칸{ammo}");
+            builder.AppendLine(
+                $"사격 모드  {FormatCombatFireMode(profile?.fireMode ?? CombatFireMode.Aimed)}"
+                + ((profile?.holdFire ?? false) ? " · 사격 중지" : string.Empty));
+        }
+        else
+        {
+            builder.AppendLine("활성 무기  맨손");
+        }
+
+        AppendCombatEquipmentList(
+            builder,
+            "방어구",
+            profile?.armorInstanceIds,
+            equipment,
+            catalog);
+        AppendCombatEquipmentList(
+            builder,
+            "방패",
+            string.IsNullOrWhiteSpace(profile?.shieldInstanceId)
+                ? Array.Empty<string>()
+                : new[] { profile.shieldInstanceId },
+            equipment,
+            catalog);
+
+        ICombatEquipmentMaintenanceRuntime maintenance =
+            EquipmentMaintenancePolicyRuntime.Active;
+        EquipmentMaintenancePolicyData maintenancePolicy =
+            maintenance?.GetPolicy(actor);
+        builder.AppendLine();
+        builder.AppendLine("장비 정비");
+        builder.AppendLine(
+            $"정책  {maintenancePolicy?.displayName ?? "표준"}"
+            + (maintenancePolicy?.automaticRepair == true
+                ? $" · {maintenancePolicy.sendAtDurability:P0}에 보내고 {maintenancePolicy.returnAtDurability:P0}에 복귀"
+                : " · 자동 수리 꺼짐"));
+        CombatEquipmentRepairOrder repairOrder = maintenance?.Orders
+            .FirstOrDefault(order =>
+                order != null
+                && (string.Equals(
+                        order.originalOwnerCharacterId,
+                        characterId,
+                        StringComparison.Ordinal)
+                    || profile?.armorInstanceIds?.Contains(
+                        order.equipmentInstanceId,
+                        StringComparer.Ordinal) == true
+                    || string.Equals(
+                        profile?.shieldInstanceId,
+                        order.equipmentInstanceId,
+                        StringComparison.Ordinal)));
+        builder.AppendLine(repairOrder != null
+            ? $"수리 상태  {FormatRepairState(repairOrder.state)} · {repairOrder.ProgressRatio:P0}"
+                + $" · 재료 {repairOrder.requiredGeneralMaterials} · 작업량 {repairOrder.completedWork:0.#}/{repairOrder.requiredWork:0.#}"
+            : "수리 상태  대기 없음");
+
+        CharacterCarryInventory carry = CharacterCarryInventory.Ensure(actor);
+        int arrows = carry?.CountItem(CombatItemDefinitions.ArrowItemId) ?? 0;
+        int bolts = carry?.CountItem(CombatItemDefinitions.BoltItemId) ?? 0;
+        float carriedWeight = carry?.GetCurrentWeight() ?? 0f;
+        float equippedWeight = equipment?.GetCarriedWeight(characterId) ?? 0f;
+        builder.AppendLine($"탄약  화살 {arrows} · 볼트 {bolts}");
+        builder.AppendLine(
+            $"무게  {carriedWeight + equippedWeight:0.#}kg"
+            + $" / 허용 {carry?.GetMaxAllowedWeight():0.#}kg");
+
+        combatSummaryText.text = builder.ToString().TrimEnd();
+        RefreshCombatCommandLabels(profile, weapon: equipment != null
+            && equipment.TryGetActiveWeapon(characterId, out CombatWeaponSnapshot activeWeapon)
+                ? activeWeapon
+                : null);
+    }
+
+    private void RefreshCombatCommandLabels(
+        CharacterCombatLoadoutProfile profile,
+        CombatWeaponSnapshot weapon)
+    {
+        SetButtonLabel(
+            combatLoadoutButton,
+            string.Equals(profile?.profileId, CombatLoadoutPresetIds.Peace, StringComparison.Ordinal)
+                ? "전투 장비"
+                : "평시 장비");
+        SetButtonLabel(combatWeaponButton, "무기 교체");
+        SetButtonLabel(combatReloadButton, weapon?.RequiresAmmo == true
+            ? $"재장전 {weapon.LoadedAmmo}/{weapon.MagazineCapacity}"
+            : "재장전");
+        SetButtonLabel(combatFireModeButton, FormatCombatFireMode(profile?.fireMode ?? CombatFireMode.Aimed));
+        SetButtonLabel(combatHoldFireButton, profile?.holdFire == true ? "사격 중지" : "사격 허용");
+        SetButtonLabel(combatRepairButton, "수리 요청");
+        if (combatHoldFireButton != null)
+        {
+            DungeonUiTheme.StyleButton(combatHoldFireButton, selected: profile?.holdFire == true);
+        }
+    }
+
+    private bool TryGetCombatRuntime(
+        out ICombatEquipmentRuntime equipment,
+        out string characterId)
+    {
+        equipment = CombatEquipmentRuntime.Active;
+        characterId = actor?.Identity?.PersistentId ?? string.Empty;
+        if (actor != null && equipment != null && !string.IsNullOrWhiteSpace(characterId))
+        {
+            return true;
+        }
+
+        NoticeFeedEvent.Trigger("전투 장비 정보를 불러올 수 없습니다.", NoticeFeedEvent.Grade.WARNING);
+        return false;
+    }
+
+    private static void SetButtonLabel(Button button, string text)
+    {
+        TMP_Text label = button != null
+            ? button.transform.Find("Label")?.GetComponent<TMP_Text>()
+            : null;
+        if (label != null)
+        {
+            label.text = text ?? string.Empty;
+        }
+    }
+
+    private static void AppendCombatEquipmentList(
+        StringBuilder builder,
+        string label,
+        IEnumerable<string> instanceIds,
+        ICombatEquipmentRuntime equipment,
+        ICombatEquipmentCatalog catalog)
+    {
+        string[] ids = instanceIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray()
+            ?? Array.Empty<string>();
+        if (ids.Length == 0 || equipment == null)
+        {
+            builder.AppendLine($"{label}  없음");
+            return;
+        }
+
+        List<string> rows = new List<string>();
+        foreach (string id in ids)
+        {
+            if (!equipment.TryGetInstance(id, out CombatEquipmentInstance instance)
+                || !catalog.TryGet(instance.definitionId, out CombatEquipmentDefinitionSO definition))
+            {
+                continue;
+            }
+
+            rows.Add(
+                $"{definition.DisplayName} [{CombatQualityRules.GetDisplayName(instance.quality)}]"
+                + $" {instance.durabilityRatio * 100f:0}%");
+        }
+
+        builder.AppendLine(rows.Count > 0
+            ? $"{label}  {string.Join(" · ", rows)}"
+            : $"{label}  없음");
+    }
+
+    private static string FormatCombatFireMode(CombatFireMode mode)
+    {
+        return mode switch
+        {
+            CombatFireMode.Rapid => "속사",
+            CombatFireMode.Suppressive => "제압",
+            _ => "조준"
+        };
+    }
+
+    private static string FormatRepairState(CombatEquipmentRepairOrderState state)
+    {
+        return state switch
+        {
+            CombatEquipmentRepairOrderState.PendingCombatEnd => "교전 종료 대기",
+            CombatEquipmentRepairOrderState.WaitingForDelivery => "운반 대기",
+            CombatEquipmentRepairOrderState.Ready => "수리 준비",
+            CombatEquipmentRepairOrderState.InProgress => "수리 중",
+            CombatEquipmentRepairOrderState.Completed => "완료",
+            _ => "취소"
+        };
+    }
+
+    public void RefreshHealthDetails()
+    {
+        if (healthSummaryText == null)
+        {
+            return;
+        }
+
+        if (actor == null
+            || CharacterDeprivationRuntime.Active == null
+            || !CharacterDeprivationRuntime.Active.TryGetSnapshot(actor, out CharacterDeprivationSnapshot snapshot))
+        {
+            healthSummaryText.text = "결핍 건강 정보가 없습니다.";
+            return;
+        }
+
+        StringBuilder builder = new StringBuilder(512);
+        builder.AppendLine("결핍 부담");
+        foreach (DeprivationKind kind in Enum.GetValues(typeof(DeprivationKind)))
+        {
+            float burden = snapshot.Burdens != null && snapshot.Burdens.TryGetValue(kind, out float value)
+                ? value
+                : 0f;
+            builder.AppendLine($"{FormatDeprivation(kind),-8} {burden,5:0.#}  {FormatBurdenState(burden)}");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine($"감염 부담  {snapshot.InfectionBurden:0.#} / 100");
+        float highest = snapshot.HighestBurden;
+        float mood01 = characterStats != null ? Mathf.Clamp01(characterStats.Mood / 100f) : 0.5f;
+        float chance = highest >= 70f
+            ? CharacterDeprivationRuntime.GetBreakdownChance(actor, highest, mood01) * 100f
+            : 0f;
+        builder.AppendLine($"붕괴 확률  {chance:0.#}% / 5초");
+
+        if (snapshot.Breakdown != null && snapshot.Breakdown.active)
+        {
+            builder.AppendLine($"현재 붕괴  {FormatBreakdown(snapshot.Breakdown.kind)}");
+            builder.AppendLine($"원인  {FormatDeprivation(snapshot.Breakdown.cause)}");
+            if (!string.IsNullOrWhiteSpace(snapshot.Breakdown.targetId))
+            {
+                builder.AppendLine($"목표  {snapshot.Breakdown.targetId}");
+            }
+
+            builder.AppendLine($"제압 저항  {snapshot.Breakdown.suppressionResistance:0.#}");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("최근 금기 행동");
+        if (snapshot.TabooMemories == null || snapshot.TabooMemories.Count == 0)
+        {
+            builder.AppendLine("기록 없음");
+        }
+        else
+        {
+            foreach (string memory in snapshot.TabooMemories.TakeLast(5))
+            {
+                builder.AppendLine($"- {memory}");
+            }
+        }
+
+        healthSummaryText.text = builder.ToString().TrimEnd();
+    }
+
+    private static string FormatDeprivation(DeprivationKind kind)
+    {
+        return kind switch
+        {
+            DeprivationKind.Hunger => "굶주림",
+            DeprivationKind.Thirst => "탈수",
+            DeprivationKind.Bladder => "방광 손상",
+            DeprivationKind.Contamination => "오염",
+            DeprivationKind.Exhaustion => "탈진",
+            DeprivationKind.MentalInstability => "정신 불안",
+            _ => kind.ToString()
+        };
+    }
+
+    private static string FormatBurdenState(float burden)
+    {
+        if (burden >= 100f) return "붕괴 임박";
+        if (burden >= 70f) return "위험";
+        if (burden >= 40f) return "건강 이상";
+        if (burden > 0.1f) return "누적 중";
+        return "안정";
+    }
+
+    private static string FormatBreakdown(CharacterBreakdownKind kind)
+    {
+        return kind switch
+        {
+            CharacterBreakdownKind.DesperateRelief => "배변 통제 상실",
+            CharacterBreakdownKind.DesperateDrink => "절박한 갈증",
+            CharacterBreakdownKind.DesperateEat => "금기 포식",
+            CharacterBreakdownKind.Collapse => "실신",
+            CharacterBreakdownKind.ViolentImpulse => "폭력 충동",
+            _ => "없음"
+        };
+    }
+
+    public static string FormatMoodFactors(CharacterMoodSnapshot snapshot)
+    {
+        if (snapshot == null || snapshot.Factors == null || snapshot.Factors.Count == 0)
+        {
+            return "현재 기분을 바꾸는 요인이 없습니다.";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        AppendMoodFactorGroup(builder, snapshot.Factors, CharacterMoodFactorKind.Need, "욕구 영향");
+        AppendMoodFactorGroup(builder, snapshot.Factors, CharacterMoodFactorKind.Interaction, "최근 경험");
+        return builder.ToString().TrimEnd();
+    }
+
+    public static string FormatLogText(CharacterActor character, int maxLines = 8)
+    {
+        return FormatLogText(character != null ? character.LogComponent : null, maxLines);
+    }
+
+    public static string FormatLogText(CharacterLog characterLog, int maxLines = 8)
+    {
+        IReadOnlyList<string> entries = characterLog != null ? characterLog.Entries : null;
+        if (entries == null || entries.Count == 0)
+        {
+            return "아직 기록이 없습니다.";
+        }
+
+        int start = Mathf.Max(0, entries.Count - Mathf.Max(1, maxLines));
+        List<string> rows = new List<string>();
+        for (int i = entries.Count - 1; i >= start; i--)
+        {
+            rows.Add($"- {entries[i]}");
+        }
+
+        return string.Join("\n\n", rows);
+    }
+
+    public void OnEnable()
+    {
+        this.EventStartListening<InfoFeedEvent>();
+        this.EventStartListening<CharacterGrowthTabRequestedEvent>();
+    }
+
+    private void OnDisable()
+    {
+        UnbindCharacter();
+        this.EventStopListening<InfoFeedEvent>();
+        this.EventStopListening<CharacterGrowthTabRequestedEvent>();
     }
 
     private CharacterSkillDraft GetCurrentActiveDraft()
@@ -448,14 +1272,9 @@ public class CharacterSummeryInfo : UIPopUp,
                 $"{definition.DisplayName}  {breakdown.BaseValue} | {FormatSigned(breakdown.SpeciesTraitValue)} | {FormatSigned(breakdown.LevelGrowthValue)} | {FormatSigned(equipmentBonus)} | {FormatSigned(breakdown.ConditionalPassiveValue)} | {finalValue}");
         }
 
-        if (equipment != null && equipment.maxHealth != 0)
-        {
-            builder.AppendLine($"장비 체력 {FormatSigned(equipment.maxHealth)} · 장비 보정은 출정 전투에만 적용");
-        }
-        else
-        {
-            builder.AppendLine("장비 보정은 출정 전투에만 적용");
-        }
+        builder.AppendLine(equipment != null && equipment.maxHealth != 0
+            ? $"장비 체력 {FormatSigned(equipment.maxHealth)} · 장비 보정은 출정 전투에만 적용"
+            : "장비 보정은 출정 전투에만 적용");
 
         IReadOnlyList<CharacterGrowthAllocationRecord> records =
             progression.GrowthState.allocationRecords;
@@ -487,209 +1306,19 @@ public class CharacterSummeryInfo : UIPopUp,
         return $"Lv.{record.level} {statName}+1({reason})";
     }
 
-    private ExpeditionEquipmentStatBlock GetCurrentEquipmentBonuses()
-    {
-        string characterId = actor?.Identity?.PersistentId;
-        if (string.IsNullOrWhiteSpace(characterId))
-        {
-            return ExpeditionEquipmentStatBlock.Empty;
-        }
-
-        IExpeditionEquipmentRuntime runtime = ResolveEquipmentRuntime();
-        return runtime?.GetCombatBonuses(characterId) ?? ExpeditionEquipmentStatBlock.Empty;
-    }
-
-    private IExpeditionEquipmentRuntime ResolveEquipmentRuntime()
-    {
-        if (equipmentRuntime != null)
-        {
-            return equipmentRuntime;
-        }
-
-        DungeonRuntimeLifetimeScope scope =
-            FindFirstObjectByType<DungeonRuntimeLifetimeScope>(FindObjectsInactive.Include);
-        if (scope == null || scope.Container == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            equipmentRuntime = scope.Container.Resolve<IExpeditionEquipmentRuntime>();
-        }
-        catch
-        {
-            equipmentRuntime = null;
-        }
-
-        return equipmentRuntime;
-    }
-
-    private static int GetEquipmentBonus(
-        ExpeditionEquipmentStatBlock equipment,
-        CharacterStatType statType)
-    {
-        if (equipment == null)
-        {
-            return 0;
-        }
-
-        return statType switch
-        {
-            CharacterStatType.Attack => equipment.attack,
-            CharacterStatType.Strength => equipment.strength,
-            CharacterStatType.Toughness => equipment.toughness,
-            CharacterStatType.Dexterity => equipment.dexterity,
-            CharacterStatType.MoveSpeed => equipment.moveSpeed,
-            _ => 0
-        };
-    }
-
-    private static string FormatSigned(int value)
-    {
-        return value > 0 ? "+" + value : value.ToString();
-    }
-
-    public void OnTriggerEvent(CharacterGrowthTabRequestedEvent eventType)
-    {
-        if (eventType.Actor == null)
-        {
-            return;
-        }
-
-        if (actor != eventType.Actor)
-        {
-            OnTriggerEvent(new InfoFeedEvent(eventType.Actor));
-        }
-
-        ShowGrowthTab();
-    }
-
-    public void OnLogAdded(CharacterLogEntry entry)
-    {
-        RefreshLogText();
-    }
-
-    public void RefreshLogText()
-    {
-        if (logText == null)
-        {
-            return;
-        }
-
-        logText.text = FormatLogText(characterLog, 40);
-    }
-
-    public void RefreshMoodDetails()
-    {
-        if (characterStats == null)
-        {
-            SetMeter(mood, 0f, "--");
-            if (moodSummaryText != null) moodSummaryText.text = "기분 정보가 없습니다.";
-            if (moodFactorsText != null) moodFactorsText.text = "적용 중인 요인이 없습니다.";
-            return;
-        }
-
-        CharacterMoodSnapshot snapshot = characterStats.GetMoodSnapshot();
-        SetMeter(mood, snapshot.Value / 100f, $"{Mathf.RoundToInt(snapshot.Value)}");
-        if (moodSummaryText != null)
-        {
-            string offset = snapshot.TotalOffset >= 0f
-                ? $"+{Mathf.RoundToInt(snapshot.TotalOffset)}"
-                : $"{Mathf.RoundToInt(snapshot.TotalOffset)}";
-            moodSummaryText.text = $"{CharacterMoodRules.GetMoodLabel(snapshot.Value)} · 기준 {Mathf.RoundToInt(snapshot.BaseValue)} · 보정 {offset}";
-        }
-
-        if (moodFactorsText != null)
-        {
-            moodFactorsText.text = FormatMoodFactors(snapshot);
-        }
-    }
-
-    public static string FormatMoodFactors(CharacterMoodSnapshot snapshot)
-    {
-        if (snapshot == null || snapshot.Factors == null || snapshot.Factors.Count == 0)
-        {
-            return "현재 기분을 바꾸는 요인이 없습니다.";
-        }
-
-        StringBuilder builder = new StringBuilder();
-        AppendMoodFactorGroup(builder, snapshot.Factors, CharacterMoodFactorKind.Need, "욕구 영향");
-        AppendMoodFactorGroup(builder, snapshot.Factors, CharacterMoodFactorKind.Interaction, "최근 경험");
-        return builder.ToString().TrimEnd();
-    }
-
-    private static void AppendMoodFactorGroup(
-        StringBuilder builder,
-        IReadOnlyList<CharacterMoodFactorSnapshot> factors,
-        CharacterMoodFactorKind kind,
-        string heading)
-    {
-        bool hasGroup = false;
-        for (int i = 0; i < factors.Count; i++)
-        {
-            if (factors[i] != null && factors[i].Kind == kind)
-            {
-                hasGroup = true;
-                break;
-            }
-        }
-
-        if (!hasGroup)
-        {
-            return;
-        }
-
-        if (builder.Length > 0)
-        {
-            builder.AppendLine();
-        }
-
-        builder.AppendLine(heading);
-        for (int i = 0; i < factors.Count; i++)
-        {
-            CharacterMoodFactorSnapshot factor = factors[i];
-            if (factor == null || factor.Kind != kind)
-            {
-                continue;
-            }
-
-            string signedValue = factor.Value >= 0f
-                ? $"+{Mathf.RoundToInt(factor.Value)}"
-                : $"{Mathf.RoundToInt(factor.Value)}";
-            if (kind == CharacterMoodFactorKind.Interaction)
-            {
-                builder.AppendLine($"• {factor.Label}  {signedValue}  · {FormatRemainingTime(factor.RemainingSeconds)}");
-            }
-            else
-            {
-                builder.AppendLine($"• {factor.Label}  {signedValue}");
-            }
-        }
-    }
-
-    private static string FormatRemainingTime(float remainingSeconds)
-    {
-        int seconds = Mathf.Max(1, Mathf.CeilToInt(remainingSeconds));
-        if (seconds < 60)
-        {
-            return $"{seconds}초";
-        }
-
-        int minutes = seconds / 60;
-        int remainder = seconds % 60;
-        return remainder > 0 ? $"{minutes}분 {remainder}초" : $"{minutes}분";
-    }
-
     private void RefreshProfileAndVitals()
     {
-        if (actor == null) return;
+        if (actor == null)
+        {
+            return;
+        }
 
         if (profileText != null)
         {
             string species = !string.IsNullOrWhiteSpace(actor.SpeciesTag) ? actor.SpeciesTag : "종족 미상";
             int actorLevel = actor.Progression != null ? actor.Progression.Level : 1;
-            profileText.text = $"Lv.{actorLevel} · {species} · {FormatRole(actor.Role)} · {FormatLifecycle(actor.CurrentLifecycleState)}";
+            profileText.text =
+                $"Lv.{actorLevel} · {species} · {FormatRole(actor.Role)} · {FormatLifecycle(actor.CurrentLifecycleState)}";
         }
 
         if (characterStats == null)
@@ -735,6 +1364,7 @@ public class CharacterSummeryInfo : UIPopUp,
         bool overloaded = currentWeight > baseLimit + 0.01f;
 
         StringBuilder builder = new StringBuilder();
+        AppendSurvivalStatus(builder);
         builder.AppendLine($"소지 무게 {FormatWeight(currentWeight)} / 기본 {FormatWeight(baseLimit)} / 최대 {FormatWeight(maxAllowed)}");
         builder.AppendLine(overloaded
             ? $"과적 중 · 이동 속도 {Mathf.RoundToInt(speedMultiplier * 100f)}%"
@@ -761,89 +1391,27 @@ public class CharacterSummeryInfo : UIPopUp,
         carrySummaryText.color = overloaded ? DungeonUiTheme.Warning : DungeonUiTheme.TextSecondary;
     }
 
-    private static string FormatWeight(float weight)
+    private void AppendSurvivalStatus(StringBuilder builder)
     {
-        return $"{Mathf.Max(0f, weight):0.#}kg";
-    }
-
-    private static void SetMeter(Slider slider, float normalizedValue, string valueText)
-    {
-        if (slider == null) return;
-
-        float clamped = Mathf.Clamp01(normalizedValue);
-        slider.value = clamped;
-        Image fill = slider.fillRect != null ? slider.fillRect.GetComponent<Image>() : null;
-        if (fill != null)
+        if (builder == null
+            || actor == null
+            || SurvivalFoodRuntime.Active == null
+            || !SurvivalFoodRuntime.Active.TryGetCharacterStatus(actor, out SurvivalCharacterStatus status))
         {
-            fill.color = DungeonUiTheme.GetMeterColor(clamped);
+            return;
         }
 
-        Transform row = slider.transform.parent;
-        TMP_Text value = row != null ? row.Find("Value")?.GetComponent<TMP_Text>() : null;
-        if (value != null)
-        {
-            value.text = valueText;
-            value.color = clamped < 0.25f
-                ? DungeonUiTheme.Danger
-                : clamped < 0.5f
-                    ? DungeonUiTheme.Warning
-                    : DungeonUiTheme.TextSecondary;
-        }
-    }
-
-    private static string FormatRole(CharacterRole role)
-    {
-        return role == CharacterRole.Owner ? "사장" : "일반";
-    }
-
-    private static string FormatLifecycle(CharacterLifecycleState state)
-    {
-        return state switch
-        {
-            CharacterLifecycleState.SpawningOutside => "입장 준비",
-            CharacterLifecycleState.EnteringDungeon => "입장 중",
-            CharacterLifecycleState.Active => "활동 중",
-            CharacterLifecycleState.ExitingDungeon => "퇴장 중",
-            CharacterLifecycleState.OnExpedition => "원정 중",
-            CharacterLifecycleState.Despawned => "이탈",
-            _ => "대기"
-        };
-    }
-
-    public static string FormatLogText(CharacterActor character, int maxLines = 8)
-    {
-        return FormatLogText(character != null ? character.LogComponent : null, maxLines);
-    }
-
-    public static string FormatLogText(CharacterLog characterLog, int maxLines = 8)
-    {
-        IReadOnlyList<string> entries = characterLog != null ? characterLog.Entries : null;
-        if (entries == null || entries.Count == 0)
-        {
-            return "아직 기록이 없습니다.";
-        }
-
-        int start = Mathf.Max(0, entries.Count - Mathf.Max(1, maxLines));
-        List<string> rows = new List<string>();
-        for (int i = entries.Count - 1; i >= start; i--)
-        {
-            rows.Add($"• {entries[i]}");
-        }
-
-        return string.Join("\n\n", rows);
-    }
-
-    public void OnEnable()
-    {
-        this.EventStartListening<InfoFeedEvent>();
-        this.EventStartListening<CharacterGrowthTabRequestedEvent>();
-    }
-
-    private void OnDisable()
-    {
-        UnbindCharacter();
-        this.EventStopListening<InfoFeedEvent>();
-        this.EventStopListening<CharacterGrowthTabRequestedEvent>();
+        string healthLabel = FormatSurvivalHealthState(status.PrimaryState);
+        string temperature = status.TemperatureComfort01 >= 0.75f
+            ? "체온 안정"
+            : status.TemperatureComfort01 >= 0.45f
+                ? "체온 주의"
+                : "체온 위험";
+        string issueSuffix = status.ActiveIssueCount > 1
+            ? $" 외 {status.ActiveIssueCount - 1}건"
+            : string.Empty;
+        builder.AppendLine(
+            $"생존 상태 {healthLabel}{issueSuffix} · {status.FoodSummary} · {status.WaterSummary} · {temperature}");
     }
 
     private void UnbindCharacter()
@@ -878,15 +1446,42 @@ public class CharacterSummeryInfo : UIPopUp,
         nextVitalsRefreshAt = 0f;
     }
 
-    private static string GetDisplayName(GameObject targetObject)
+    private ExpeditionEquipmentStatBlock GetCurrentEquipmentBonuses()
     {
-        CharacterIdentity identity = targetObject != null ? targetObject.GetComponent<CharacterIdentity>() : null;
-        if (!string.IsNullOrWhiteSpace(identity != null ? identity.DisplayName : null))
+        string characterId = actor?.Identity?.PersistentId;
+        if (string.IsNullOrWhiteSpace(characterId))
         {
-            return identity.DisplayName;
+            return ExpeditionEquipmentStatBlock.Empty;
         }
 
-        return targetObject != null ? targetObject.name : string.Empty;
+        IExpeditionEquipmentRuntime runtime = ResolveEquipmentRuntime();
+        return runtime?.GetCombatBonuses(characterId) ?? ExpeditionEquipmentStatBlock.Empty;
+    }
+
+    private IExpeditionEquipmentRuntime ResolveEquipmentRuntime()
+    {
+        if (equipmentRuntime != null)
+        {
+            return equipmentRuntime;
+        }
+
+        DungeonRuntimeLifetimeScope scope =
+            FindFirstObjectByType<DungeonRuntimeLifetimeScope>(FindObjectsInactive.Include);
+        if (scope == null || scope.Container == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            equipmentRuntime = scope.Container.Resolve<IExpeditionEquipmentRuntime>();
+        }
+        catch
+        {
+            equipmentRuntime = null;
+        }
+
+        return equipmentRuntime;
     }
 
     private IUiPopupService ResolvePopupService()
@@ -921,11 +1516,185 @@ public class CharacterSummeryInfo : UIPopUp,
         return UI;
     }
 
+    private static void SetSlider(
+        Slider slider,
+        IReadOnlyDictionary<CharacterCondition, float> stats,
+        CharacterCondition condition)
+    {
+        if (slider == null || stats == null)
+        {
+            return;
+        }
+
+        float rawValue = stats.TryGetValue(condition, out float value) ? value : 0f;
+        SetMeter(slider, rawValue / 100f, $"{Mathf.RoundToInt(rawValue)}");
+    }
+
+    private static void AppendMoodFactorGroup(
+        StringBuilder builder,
+        IReadOnlyList<CharacterMoodFactorSnapshot> factors,
+        CharacterMoodFactorKind kind,
+        string heading)
+    {
+        bool hasGroup = factors.Any(factor => factor != null && factor.Kind == kind);
+        if (!hasGroup)
+        {
+            return;
+        }
+
+        if (builder.Length > 0)
+        {
+            builder.AppendLine();
+        }
+
+        builder.AppendLine(heading);
+        foreach (CharacterMoodFactorSnapshot factor in factors)
+        {
+            if (factor == null || factor.Kind != kind)
+            {
+                continue;
+            }
+
+            string signedValue = factor.Value >= 0f
+                ? $"+{Mathf.RoundToInt(factor.Value)}"
+                : $"{Mathf.RoundToInt(factor.Value)}";
+            builder.AppendLine(kind == CharacterMoodFactorKind.Interaction
+                ? $"- {factor.Label}  {signedValue}  · {FormatRemainingTime(factor.RemainingSeconds)}"
+                : $"- {factor.Label}  {signedValue}");
+        }
+    }
+
+    private static void SetMeter(Slider slider, float normalizedValue, string valueText)
+    {
+        if (slider == null)
+        {
+            return;
+        }
+
+        float clamped = Mathf.Clamp01(normalizedValue);
+        slider.value = clamped;
+        Image fill = slider.fillRect != null ? slider.fillRect.GetComponent<Image>() : null;
+        if (fill != null)
+        {
+            fill.color = DungeonUiTheme.GetMeterColor(clamped);
+        }
+
+        Transform row = slider.transform.parent;
+        TMP_Text value = row != null ? row.Find("Value")?.GetComponent<TMP_Text>() : null;
+        if (value != null)
+        {
+            value.text = valueText;
+            value.color = clamped < 0.25f
+                ? DungeonUiTheme.Danger
+                : clamped < 0.5f
+                    ? DungeonUiTheme.Warning
+                    : DungeonUiTheme.TextSecondary;
+        }
+    }
+
+    private static int GetEquipmentBonus(
+        ExpeditionEquipmentStatBlock equipment,
+        CharacterStatType statType)
+    {
+        if (equipment == null)
+        {
+            return 0;
+        }
+
+        return statType switch
+        {
+            CharacterStatType.Attack => equipment.attack,
+            CharacterStatType.Strength => equipment.strength,
+            CharacterStatType.Toughness => equipment.toughness,
+            CharacterStatType.Dexterity => equipment.dexterity,
+            CharacterStatType.MoveSpeed => equipment.moveSpeed,
+            _ => 0
+        };
+    }
+
+    private static string FormatSurvivalHealthState(SurvivalHealthState state)
+    {
+        return state switch
+        {
+            SurvivalHealthState.Thirsty => "갈증",
+            SurvivalHealthState.Hungry => "배고픔",
+            SurvivalHealthState.Exposed => "노출",
+            SurvivalHealthState.Sick => "질병",
+            SurvivalHealthState.Infected => "감염",
+            SurvivalHealthState.Recovering => "회복 중",
+            _ => "건강"
+        };
+    }
+
+    private static string FormatRemainingTime(float remainingSeconds)
+    {
+        int seconds = Mathf.Max(1, Mathf.CeilToInt(remainingSeconds));
+        if (seconds < 60)
+        {
+            return $"{seconds}초";
+        }
+
+        int minutes = seconds / 60;
+        int remainder = seconds % 60;
+        return remainder > 0 ? $"{minutes}분 {remainder}초" : $"{minutes}분";
+    }
+
+    private static string FormatRole(CharacterRole role)
+    {
+        return role == CharacterRole.Owner ? "사장" : "일반";
+    }
+
+    private static string FormatLifecycle(CharacterLifecycleState state)
+    {
+        return state switch
+        {
+            CharacterLifecycleState.SpawningOutside => "입장 준비",
+            CharacterLifecycleState.EnteringDungeon => "입장 중",
+            CharacterLifecycleState.Active => "활동 중",
+            CharacterLifecycleState.ExitingDungeon => "퇴장 중",
+            CharacterLifecycleState.OnExpedition => "원정 중",
+            CharacterLifecycleState.PreparingExpedition => "출정 준비",
+            CharacterLifecycleState.DepartingExpedition => "출정 중",
+            CharacterLifecycleState.ReturningExpedition => "귀환 중",
+            CharacterLifecycleState.Despawned => "퇴장",
+            _ => "대기"
+        };
+    }
+
+    private static string FormatWeight(float weight)
+    {
+        return $"{Mathf.Max(0f, weight):0.#}kg";
+    }
+
+    private static string FormatSigned(int value)
+    {
+        return value > 0 ? "+" + value : value.ToString();
+    }
+
+    private static string Fallback(string text, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(text) ? fallback : text;
+    }
+
+    private static string GetDisplayName(GameObject targetObject)
+    {
+        CharacterIdentity identity = targetObject != null ? targetObject.GetComponent<CharacterIdentity>() : null;
+        if (!string.IsNullOrWhiteSpace(identity != null ? identity.DisplayName : null))
+        {
+            return identity.DisplayName;
+        }
+
+        return targetObject != null ? targetObject.name : string.Empty;
+    }
+
     private enum CharacterSummaryTab
     {
         Status,
+        Health,
+        Combat,
         Growth,
         Mood,
-        Records
+        Records,
+        Ai
     }
 }

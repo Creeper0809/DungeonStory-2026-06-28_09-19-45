@@ -24,6 +24,7 @@ public static class PhysicalItemPilePlayModeVerifier
     public const string DetailCapturePath = "Artifacts/QA/physical-item-pile-detail.png";
     public const string PriorityCapturePath = "Artifacts/QA/physical-item-character-priority.png";
     public const string AltCapturePath = "Artifacts/QA/physical-item-alt-select.png";
+    private const string GameplayScenePath = "Assets/Scenes/GameplayScene.unity";
 
     private static bool runnerCreated;
 
@@ -76,10 +77,10 @@ public static class PhysicalItemPilePlayModeVerifier
 
         if (!string.Equals(
                 SceneManager.GetActiveScene().path,
-                "Assets/Scenes/SampleScene.unity",
+                GameplayScenePath,
                 StringComparison.OrdinalIgnoreCase))
         {
-            EditorSceneManager.OpenScene("Assets/Scenes/SampleScene.unity", OpenSceneMode.Single);
+            EditorSceneManager.OpenScene(GameplayScenePath, OpenSceneMode.Single);
         }
 
         EditorApplication.EnterPlaymode();

@@ -6,6 +6,7 @@ using UnityEngine;
 
 public interface ICharacterLogNarrativeService
 {
+    bool TryBuildImmediateLine(CharacterLog characterLog, CharacterLogEntry entry, out string line);
     bool ShouldDeferDisplay(CharacterLogEntry entry);
     bool RequestNarrative(CharacterLog characterLog, CharacterLogEntry entry);
     bool TryApplyFallback(CharacterLog characterLog, CharacterLogEntry entry);
@@ -72,9 +73,27 @@ public sealed class CharacterLogNarrativeService : ICharacterLogNarrativeService
     public int RequestedCount { get; private set; }
     public int AppliedCount { get; private set; }
     public int ControlledFallbackCount { get; private set; }
+    public int TemplateLineCount { get; private set; }
     public string LastPrompt { get; private set; } = string.Empty;
     public string LastResponse { get; private set; } = string.Empty;
     public string LastError { get; private set; } = string.Empty;
+
+    public bool TryBuildImmediateLine(CharacterLog characterLog, CharacterLogEntry entry, out string line)
+    {
+        if (!Application.isPlaying)
+        {
+            line = string.Empty;
+            return false;
+        }
+
+        if (!CharacterRecordTemplateBank.TryBuildLine(characterLog, entry, out line))
+        {
+            return false;
+        }
+
+        TemplateLineCount++;
+        return true;
+    }
 
     public bool ShouldDeferDisplay(CharacterLogEntry entry)
     {
@@ -404,8 +423,13 @@ public sealed class CharacterLogNarrativeService : ICharacterLogNarrativeService
             return;
         }
 
+        string fallbackLine = BuildControlledFallbackLine(entry, requiredSubject);
         if (characterLog == null
-            || !characterLog.TryUpdateDisplayLine(entry.EntryId, entry.DisplayLine, line))
+            || !characterLog.TryUpdateDisplayLine(
+                entry.EntryId,
+                entry.DisplayLine,
+                fallbackLine,
+                line))
         {
             LastError = "Character record response became stale before it could be applied.";
             return;

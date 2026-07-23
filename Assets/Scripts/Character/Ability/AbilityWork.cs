@@ -24,6 +24,7 @@ public class AbilityWork : CharacterAbility
     [SerializeField] private float restRecoveryOnWait = 15f;
     [SerializeField] private float offDutySleepThreshold = 25f;
     [SerializeField] private float returnToWorkSleepThreshold = 55f;
+    [SerializeField] private float hungerWorkInterruptThreshold = 35f;
     [SerializeField] private float offDutyMoodThreshold = 25f;
     [SerializeField] private float returnToWorkMoodThreshold = 45f;
     [SerializeField] private float minimumOffDutySeconds = 8f;
@@ -46,6 +47,7 @@ public class AbilityWork : CharacterAbility
     private IWorkGridResolver workGridResolver;
     private IFacilityCandidateCache facilityCandidateCache;
     private IRoomEnvironmentQuery roomEnvironmentQuery;
+    private IExteriorZoneQuery exteriorZoneQuery;
     private bool isScheduleBound;
     private float routineOperateCooldownUntil;
     private Coroutine activeWorkRoutine;
@@ -62,6 +64,7 @@ public class AbilityWork : CharacterAbility
     public DutyState CurrentDutyState => DutyController.CurrentState;
     public bool IsOffDuty => DutyController.IsOffDuty;
     public WorkTargetCandidate LastRejectedWorkCandidate => TargetSelector.LastRejectedCandidate;
+    public bool HasExteriorZoneQuery => exteriorZoneQuery != null;
 
     public CharacterActor WorkerActor => actor;
     public AbilityMove WorkerMove => move;
@@ -76,6 +79,7 @@ public class AbilityWork : CharacterAbility
     internal IFacilityCandidateCache FacilityCandidateCacheService =>
         RuntimeDependency.Require(facilityCandidateCache, this);
     internal IRoomEnvironmentQuery RoomEnvironmentQuery => roomEnvironmentQuery;
+    internal IExteriorZoneQuery ExteriorZoneQuery => exteriorZoneQuery;
 
     internal float GetWorkEnvironmentDurationMultiplier(FacilityWorkType workType)
     {
@@ -89,6 +93,7 @@ public class AbilityWork : CharacterAbility
     internal float MinimumRestProtectionSeconds => minimumRestProtectionSeconds;
     internal float OffDutySleepThreshold => offDutySleepThreshold;
     internal float ReturnToWorkSleepThreshold => returnToWorkSleepThreshold;
+    internal float HungerWorkInterruptThreshold => hungerWorkInterruptThreshold;
     internal float OffDutyMoodThreshold => offDutyMoodThreshold;
     internal float ReturnToWorkMoodThreshold => returnToWorkMoodThreshold;
     internal float MinimumOffDutySeconds => minimumOffDutySeconds;
@@ -149,7 +154,8 @@ public class AbilityWork : CharacterAbility
         IFloatingIconFeedbackService floatingIconFeedbackService,
         IWorkGridResolver workGridResolver,
         IFacilityCandidateCache facilityCandidateCache,
-        IRoomEnvironmentQuery roomEnvironmentQuery)
+        IRoomEnvironmentQuery roomEnvironmentQuery,
+        IExteriorZoneQuery exteriorZoneQuery = null)
     {
         this.blueprintResearchWorkService = blueprintResearchWorkService
             ?? throw new ArgumentNullException(nameof(blueprintResearchWorkService));
@@ -162,6 +168,7 @@ public class AbilityWork : CharacterAbility
         this.facilityCandidateCache = facilityCandidateCache
             ?? throw new ArgumentNullException(nameof(facilityCandidateCache));
         this.roomEnvironmentQuery = roomEnvironmentQuery;
+        this.exteriorZoneQuery = exteriorZoneQuery;
     }
 
     public override void Initializtion(CharacterSO data)

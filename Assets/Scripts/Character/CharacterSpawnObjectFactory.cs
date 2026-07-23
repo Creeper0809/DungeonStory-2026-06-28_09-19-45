@@ -27,7 +27,9 @@ public sealed class CharacterSpawnObjectFactory : ICharacterSpawnObjectFactory
             throw new ArgumentNullException(nameof(characterPrefab));
         }
 
-        return Object.Instantiate(characterPrefab);
+        GameObject characterObject = Object.Instantiate(characterPrefab);
+        DungeonRuntimeHierarchy.Parent(characterObject, DungeonRuntimeHierarchy.Characters);
+        return characterObject;
     }
 
     public void Inject(GameObject characterObject)

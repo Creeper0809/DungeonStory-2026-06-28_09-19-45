@@ -4,6 +4,8 @@ using UnityEngine;
 public static class CharacterMoodImpulseUtility
 {
     private const float GoodMoodRoutineStart = 0.72f;
+    private const float LowMoodAutonomyStart = 0.38f;
+    private const float CriticalMoodAutonomyStart = 0.20f;
     private const float StrongImpulseInterruptThreshold = 0.65f;
 
     public static float GetMood01(CharacterActor actor)
@@ -59,6 +61,26 @@ public static class CharacterMoodImpulseUtility
             {
                 adjusted += Mathf.Lerp(1f, 6f, moodWeight);
                 reasonSuffix = AppendReason(reasonSuffix, $"goodMoodLeisure={moodWeight:0.###}");
+            }
+        }
+
+        if (priority > 0f && mood01 < LowMoodAutonomyStart)
+        {
+            float lowMoodWeight = Mathf.InverseLerp(LowMoodAutonomyStart, 0f, mood01);
+            if (routineBranch == CharacterAiBranch.DutyWork)
+            {
+                adjusted *= Mathf.Lerp(1f, 0.55f, lowMoodWeight);
+                reasonSuffix = AppendReason(reasonSuffix, $"lowMoodDutyDrop={lowMoodWeight:0.###}");
+            }
+            else if (routineBranch == CharacterAiBranch.LeisureVisit)
+            {
+                adjusted = Mathf.Max(adjusted, Mathf.Lerp(18f, 44f, lowMoodWeight));
+                reasonSuffix = AppendReason(reasonSuffix, $"lowMoodLeisure={lowMoodWeight:0.###}");
+            }
+            else if (routineBranch == CharacterAiBranch.Idle)
+            {
+                adjusted = Mathf.Max(adjusted, Mathf.Lerp(22f, 52f, lowMoodWeight));
+                reasonSuffix = AppendReason(reasonSuffix, $"lowMoodAutonomy={lowMoodWeight:0.###}");
             }
         }
 
@@ -127,6 +149,22 @@ public static class CharacterMoodImpulseUtility
     {
         reasonSuffix = string.Empty;
         float adjusted = Mathf.Clamp01(domainScore);
+        float mood01 = GetMood01(actor);
+        if (mood01 < LowMoodAutonomyStart)
+        {
+            float lowMoodWeight = Mathf.InverseLerp(LowMoodAutonomyStart, 0f, mood01);
+            if (branch == CharacterAiBranch.Work)
+            {
+                adjusted *= Mathf.Lerp(1f, 0.2f, lowMoodWeight);
+                reasonSuffix = AppendReason(reasonSuffix, $"lowMoodDutyDrop={lowMoodWeight:0.###}");
+            }
+            else if (branch == CharacterAiBranch.Wait || branch == CharacterAiBranch.LookAround)
+            {
+                adjusted = Mathf.Max(adjusted, Mathf.Lerp(0.48f, 0.9f, lowMoodWeight));
+                reasonSuffix = AppendReason(reasonSuffix, $"lowMoodAutonomy={lowMoodWeight:0.###}");
+            }
+        }
+
         if (!TryGetActiveImpulse(actor, out CharacterMoodImpulse impulse))
         {
             return adjusted;
@@ -162,9 +200,20 @@ public static class CharacterMoodImpulseUtility
         out string reason)
     {
         reason = string.Empty;
-        if (runningAction == null
-            || runningAction.actionset == null
-            || !TryGetActiveImpulse(actor, out CharacterMoodImpulse impulse)
+        if (runningAction == null || runningAction.actionset == null)
+        {
+            return false;
+        }
+
+        CharacterAiBranch runningBranch = GetBranchForActionSet(runningAction.actionset);
+        if (runningBranch == CharacterAiBranch.Work
+            && GetMood01(actor) <= CriticalMoodAutonomyStart)
+        {
+            reason = "기분이 바닥나 일을 멈추고 제멋대로 행동";
+            return true;
+        }
+
+        if (!TryGetActiveImpulse(actor, out CharacterMoodImpulse impulse)
             || impulse.strength < StrongImpulseInterruptThreshold
             || impulse.type == CharacterMoodImpulseType.FollowRoutine)
         {
@@ -178,7 +227,6 @@ public static class CharacterMoodImpulseUtility
             return true;
         }
 
-        CharacterAiBranch runningBranch = GetBranchForActionSet(runningAction.actionset);
         if (runningBranch == CharacterAiBranch.None)
         {
             return false;
@@ -202,6 +250,60 @@ public static class CharacterMoodImpulseUtility
 
         reason = $"Mood impulse {impulse.type} interrupts {runningBranch}: {impulse.reason}";
         return true;
+    }
+
+    public static bool ShouldPreferAutonomousIdle(CharacterActor actor, out string reason)
+    {
+        reason = string.Empty;
+        if (actor == null)
+        {
+            return false;
+        }
+
+        float mood01 = GetMood01(actor);
+        if (mood01 < LowMoodAutonomyStart)
+        {
+            reason = mood01 <= CriticalMoodAutonomyStart
+                ? "기분이 바닥나 제멋대로 서성이는 중"
+                : "기분을 풀려고 잠시 서성이는 중";
+            return true;
+        }
+
+        if (!TryGetActiveImpulse(actor, out CharacterMoodImpulse impulse)
+            || !IsTemperamentalImpulse(impulse.type))
+        {
+            return false;
+        }
+
+        reason = impulse.type switch
+        {
+            CharacterMoodImpulseType.IgnoreDuty => "일을 제쳐두고 제멋대로 돌아다니는 중",
+            CharacterMoodImpulseType.Complain => "투덜거리며 주변을 서성이는 중",
+            CharacterMoodImpulseType.Vandalize => "화를 삭이지 못하고 거칠게 돌아다니는 중",
+            CharacterMoodImpulseType.Wait => "마음을 식히며 서성이는 중",
+            _ => "기분 내키는 대로 돌아다니는 중"
+        };
+        return true;
+    }
+
+    public static float ApplyFinalAutonomyBias(
+        CharacterActor actor,
+        CharacterAiBranch branch,
+        float utility)
+    {
+        float adjusted = Mathf.Clamp01(utility);
+        if (!ShouldPreferAutonomousIdle(actor, out _))
+        {
+            return adjusted;
+        }
+
+        return branch switch
+        {
+            CharacterAiBranch.Work => adjusted * 0.15f,
+            CharacterAiBranch.Wait => Mathf.Max(adjusted, 0.88f),
+            CharacterAiBranch.LookAround => Mathf.Max(adjusted, 0.82f),
+            _ => adjusted
+        };
     }
 
     public static CharacterAiBranch GetBranchForActionSet(AIActionSet actionSet)

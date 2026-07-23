@@ -51,6 +51,7 @@ public sealed class OwnerCharacterFactory : IOwnerCharacterFactory
 
         ownerObject.name = ownerData.characterName;
         ownerObject.transform.position = ResolveOwnerSpawnPosition(ownerSpawnPoint, ownerSpawnGridPosition);
+        DungeonRuntimeHierarchy.Parent(ownerObject, DungeonRuntimeHierarchy.Characters);
 
         CharacterActor owner = EnsureOwnerComponents(ownerObject);
         InjectOwnerRuntime(ownerObject);

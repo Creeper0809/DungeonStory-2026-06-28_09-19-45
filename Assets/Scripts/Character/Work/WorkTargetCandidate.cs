@@ -7,7 +7,8 @@ public readonly struct WorkTargetCandidate
         float score,
         float urgencyScore,
         string failureReason,
-        AIActionFailureKind failureKind = AIActionFailureKind.None)
+        AIActionFailureKind failureKind = AIActionFailureKind.None,
+        string breakdownSummary = "")
     {
         Building = building;
         WorkType = workType;
@@ -16,6 +17,7 @@ public readonly struct WorkTargetCandidate
         UrgencyScore = urgencyScore;
         FailureReason = failureReason;
         FailureKind = failureKind;
+        BreakdownSummary = breakdownSummary ?? string.Empty;
         IsValid = building != null && workType != FacilityWorkType.None && priority != WorkPriorityLevel.Off;
     }
 
@@ -26,6 +28,7 @@ public readonly struct WorkTargetCandidate
     public float UrgencyScore { get; }
     public string FailureReason { get; }
     public AIActionFailureKind FailureKind { get; }
+    public string BreakdownSummary { get; }
     public bool IsValid { get; }
 
     public static WorkTargetCandidate Invalid(

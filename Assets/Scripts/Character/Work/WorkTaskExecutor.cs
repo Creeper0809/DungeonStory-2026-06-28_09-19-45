@@ -7,6 +7,7 @@ using UnityEngine;
 public sealed class WorkTaskExecutor
 {
     private const float RestockPickupWaitSeconds = 0.35f;
+    private const float MinimumNaturalExteriorWorkSeconds = 3.2f;
 
     private readonly AbilityWork work;
     private readonly WorkTargetSelector targetSelector;
@@ -83,9 +84,50 @@ public sealed class WorkTaskExecutor
             WorkDebugLog.LogStarted(actor);
             bool completedImmediately = false;
             bool completedSuccessfully = true;
-            if (workType == FacilityWorkType.Repair)
+            bool completionEffectsAlreadyApplied = false;
+            if (WorkOrderRuntime.Active != null
+                && WorkOrderRuntime.Active.TryGetOrderFor(assignedTarget, workType, out _))
             {
-                yield return ExecuteRepairWork();
+                yield return ExecuteWorkOrderRoutine(
+                    runId,
+                    actor,
+                    assignedTarget,
+                    workType,
+                    (success, appliedEffects) =>
+                    {
+                        completedSuccessfully = success;
+                        completionEffectsAlreadyApplied = appliedEffects;
+                    });
+                if (ShouldAbortWorkRun(runId, actor))
+                {
+                    facility.DeallocateWorker(actor);
+                    AbortWorkRun(runId, actor, currentAction);
+                    yield break;
+                }
+
+                completedImmediately = true;
+            }
+            else if (TryGetExteriorWorkSeconds(assignedTarget, actor, workType, out float exteriorWorkSeconds))
+            {
+                yield return ExecuteWorkAmountLoop(
+                    runId,
+                    actor,
+                    assignedTarget,
+                    workType,
+                    exteriorWorkSeconds,
+                    WorkTaskCatalog.GetDisplayName(workType));
+                if (ShouldAbortWorkRun(runId, actor))
+                {
+                    facility.DeallocateWorker(actor);
+                    AbortWorkRun(runId, actor, currentAction);
+                    yield break;
+                }
+
+                completedImmediately = true;
+            }
+            else if (workType == FacilityWorkType.Repair)
+            {
+                yield return ExecuteRepairWork(runId);
                 if (ShouldAbortWorkRun(runId, actor))
                 {
                     facility.DeallocateWorker(actor);
@@ -97,7 +139,7 @@ public sealed class WorkTaskExecutor
             }
             else if (workType == FacilityWorkType.Research)
             {
-                yield return ExecuteResearchWork((success) => completedSuccessfully = success);
+                yield return ExecuteResearchWork(runId, (success) => completedSuccessfully = success);
                 if (ShouldAbortWorkRun(runId, actor))
                 {
                     facility.DeallocateWorker(actor);
@@ -112,15 +154,40 @@ public sealed class WorkTaskExecutor
                 completedSuccessfully = assignedTarget.HasPendingEquipmentCraftWork();
                 if (completedSuccessfully)
                 {
-                    yield return ExecuteCraftWork();
+                    yield return ExecuteCraftWork(runId, (success, appliedEffects) =>
+                    {
+                        completedSuccessfully = success;
+                        completionEffectsAlreadyApplied = appliedEffects;
+                    });
+                }
+
+                completedImmediately = true;
+            }
+            else if (workType == FacilityWorkType.Butcher)
+            {
+                completedSuccessfully = WildlifeRuntime.Active != null
+                    && WildlifeRuntime.Active.HasButcherWorkAvailable(assignedTarget);
+                if (completedSuccessfully)
+                {
+                    yield return ExecuteButcherWork(runId);
+                }
+
+                completedImmediately = true;
+            }
+            else if (SurvivalFacilityUtility.IsSurvivalWork(workType))
+            {
+                completedSuccessfully = SurvivalFoodRuntime.Active != null
+                    && SurvivalFoodRuntime.Active.HasSurvivalWorkAvailable(assignedTarget, workType);
+                if (completedSuccessfully)
+                {
+                    yield return ExecuteSurvivalWork(runId, workType);
                 }
 
                 completedImmediately = true;
             }
             else if (workType == FacilityWorkType.Clean)
             {
-                float cleaningSpeed = CharacterSkillRuntimeEffects.GetCleaningSpeedMultiplier(actor);
-                yield return new WaitForSeconds(1f / Mathf.Max(0.1f, cleaningSpeed));
+                yield return ExecuteCleanWork(runId);
                 completedImmediately = true;
             }
 
@@ -140,7 +207,7 @@ public sealed class WorkTaskExecutor
             else
             {
                 work.isWorking = false;
-                WorkDebugLog.LogEnd(actor, "즉시 작업 완료");
+                WorkDebugLog.LogEnd(actor, "작업량 완료");
             }
 
             if (completedSuccessfully)
@@ -151,17 +218,25 @@ public sealed class WorkTaskExecutor
                     assignedTarget,
                     workType,
                     $"work:{runId}:{assignedTarget.GetInstanceID()}:completed");
-                ModularFacilityRuntimeEffects.ApplyWorkCompleted(
-                    actor,
-                    assignedTarget,
-                    workType);
-                RoomEnvironmentExperienceEvent.Trigger(
-                    actor,
-                    assignedTarget,
-                    RoomExperienceActivity.Work,
-                    workType);
+                if (!completionEffectsAlreadyApplied)
+                {
+                    ModularFacilityRuntimeEffects.ApplyWorkCompleted(
+                        actor,
+                        assignedTarget,
+                        workType);
+                    RoomEnvironmentExperienceEvent.Trigger(
+                        actor,
+                        assignedTarget,
+                        RoomExperienceActivity.Work,
+                        workType);
+                }
             }
 
+            actor?.AiMemory?.RecordWork(
+                workType,
+                assignedTarget,
+                completedSuccessfully,
+                $"{WorkTaskCatalog.GetDisplayName(workType)} {(completedSuccessfully ? "완료" : "실패")}: {assignedTarget.name}");
             CharacterSkillRuntimeEffects.EndWork(actor);
             bool wasPriorityTarget = work.assignedShop == work.PriorityWorkTarget;
             facility.DeallocateWorker(actor);
@@ -183,6 +258,11 @@ public sealed class WorkTaskExecutor
                 assignedTarget,
                 reasonCode: "target-unreachable",
                 bubbleEligible: true));
+            actor?.AiMemory?.RecordWork(
+                work.AssignedWorkType,
+                assignedTarget,
+                false,
+                $"작업 도달 실패: {(assignedTarget != null ? assignedTarget.name : "대상 없음")}");
             currentAction?.ReleaseReservation(actor);
         }
 
@@ -366,6 +446,14 @@ public sealed class WorkTaskExecutor
                 $"work:{runId}:{restockTarget.GetInstanceID()}:restock-completed");
         }
 
+        actor?.AiMemory?.RecordWork(
+            FacilityWorkType.Restock,
+            restockTarget,
+            restocked > 0,
+            restocked > 0
+                ? $"보충 완료: {restockTarget.name}"
+                : $"보충 실패: {restockTarget.name}");
+
         yield return new WaitForSeconds(0.5f * durationMultiplier);
         work.isWorking = false;
         WorkDebugLog.LogEnd(actor, "보충 완료");
@@ -397,7 +485,12 @@ public sealed class WorkTaskExecutor
         }
 
         Vector2Int startPos = work.WorkGridResolver.GetGridPosition(grid, actor);
-        GridPathSearchResult searchResult = grid.SearchPath(startPos);
+        if (!GridPathSearchBroker.TryGetSearch(grid, startPos, () => true, out GridPathSearchResult searchResult))
+        {
+            failureReason = "창고 경로 계산 대기";
+            return false;
+        }
+
         List<IWarehouseFacility> reachableWarehouses = searchResult
             .GetAllReachableBuilding()
             .OfType<IWarehouseFacility>()
@@ -480,7 +573,12 @@ public sealed class WorkTaskExecutor
         }
 
         Vector2Int startPos = work.WorkGridResolver.GetGridPosition(grid, actor);
-        path = grid.SearchPath(startPos).GetMovePathTo(target);
+        if (!GridPathSearchBroker.TryGetSearch(grid, startPos, () => true, out GridPathSearchResult searchResult))
+        {
+            return false;
+        }
+
+        path = searchResult.GetMovePathTo(target);
         return path != null;
     }
 
@@ -534,11 +632,23 @@ public sealed class WorkTaskExecutor
             reasonCode: resultMessage,
             quantity: amount,
             bubbleEligible: amount <= 0));
+        actor?.AiMemory?.RecordWork(
+            FacilityWorkType.Restock,
+            restockTarget,
+            amount > 0,
+            amount > 0
+                ? $"보충 완료: {restockTarget.name}"
+                : $"보충 실패: {restockTarget.name}");
 
         yield return new WaitForSeconds(0.5f * durationMultiplier);
     }
 
     public IEnumerator ExecuteRepairWork()
+    {
+        yield return ExecuteRepairWork(0);
+    }
+
+    private IEnumerator ExecuteRepairWork(int runId)
     {
         CharacterActor actor = work.WorkerActor;
         if (work.assignedShop == null)
@@ -552,11 +662,27 @@ public sealed class WorkTaskExecutor
             yield break;
         }
 
-        float workSpeed = actor != null
-            ? Mathf.Max(0.1f, actor.GetWorkSpeedMultiplier(FacilityWorkType.Repair))
-            : 1f;
-        workSpeed *= CharacterSkillRuntimeEffects.GetRepairSpeedMultiplier(actor);
-        yield return new WaitForSeconds(0.8f / workSpeed);
+        if (EquipmentMaintenancePolicyRuntime.Active?.HasRepairWorkFor(work.assignedShop) == true)
+        {
+            yield return ExecuteEquipmentRepairWork(runId, actor, work.assignedShop);
+            yield break;
+        }
+
+        float requiredWork = Mathf.Max(0.1f, work.assignedShop.BuildingData.GetRequiredWork(FacilityWorkType.Repair));
+        float repairMultiplier = CharacterSkillRuntimeEffects.GetRepairSpeedMultiplier(actor);
+        yield return ExecuteWorkAmountLoop(
+            runId,
+            actor,
+            work.assignedShop,
+            FacilityWorkType.Repair,
+            requiredWork,
+            "수리",
+            repairMultiplier);
+        if (!CanContinueTimedWork(runId, actor) || !work.isWorking)
+        {
+            yield break;
+        }
+
         work.assignedShop.SetDamaged(false);
         actor?.AddActivity(CharacterActivityEvent.Work(
             FacilityWorkType.Repair,
@@ -565,28 +691,330 @@ public sealed class WorkTaskExecutor
             work.assignedShop));
     }
 
+    private IEnumerator ExecuteEquipmentRepairWork(
+        int runId,
+        CharacterActor actor,
+        BuildableObject building)
+    {
+        EquipmentMaintenancePolicyRuntime maintenance =
+            EquipmentMaintenancePolicyRuntime.Active;
+        if (maintenance == null)
+        {
+            yield break;
+        }
+
+        float durationMultiplier =
+            work.GetWorkEnvironmentDurationMultiplier(FacilityWorkType.Repair);
+        float lastReportAt = -10f;
+        while (CanContinueTimedWork(runId, actor)
+            && work.isWorking
+            && maintenance.HasRepairWorkFor(building))
+        {
+            float deltaWork = WorkAmountUtility.CalculateWorkPerSecond(
+                    actor,
+                    building,
+                    FacilityWorkType.Repair,
+                    durationMultiplier)
+                * Time.deltaTime;
+            if (!maintenance.TryApplyRepairWork(
+                    actor,
+                    building,
+                    deltaWork,
+                    out bool completed,
+                    out string message))
+            {
+                actor?.AddActivity(CharacterActivityEvent.Work(
+                    FacilityWorkType.Repair,
+                    CharacterActivityOutcomes.Blocked,
+                    $"장비 수리 중단: {message}",
+                    building,
+                    reasonCode: "equipment-repair-blocked",
+                    bubbleEligible: true));
+                yield break;
+            }
+
+            if (Time.time - lastReportAt >= 0.75f)
+            {
+                lastReportAt = Time.time;
+                actor?.Brain?.SetActionPhase(message, building);
+            }
+
+            if (completed)
+            {
+                actor?.AddActivity(CharacterActivityEvent.Work(
+                    FacilityWorkType.Repair,
+                    CharacterActivityOutcomes.Completed,
+                    message,
+                    building,
+                    reasonCode: "equipment-repair-completed",
+                    bubbleEligible: true));
+                yield break;
+            }
+
+            yield return null;
+        }
+    }
+
     public IEnumerator ExecuteResearchWork()
     {
-        yield return ExecuteResearchWork(null);
+        yield return ExecuteResearchWork(0, null);
     }
 
     private IEnumerator ExecuteCraftWork()
     {
-        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(FacilityWorkType.Craft);
-        yield return new WaitForSeconds(1f * durationMultiplier);
+        yield return ExecuteCraftWork(0, null);
     }
 
-    private IEnumerator ExecuteResearchWork(Action<bool> onCompleted)
+    private IEnumerator ExecuteCraftWork(int runId, Action<bool, bool> onCompleted)
+    {
+        float requiredWork = GetEquipmentCraftWorkRequired(work.assignedShop);
+        yield return ExecuteWorkAmountLoop(
+            runId,
+            work.WorkerActor,
+            work.assignedShop,
+            FacilityWorkType.Craft,
+            requiredWork,
+            "제작");
+        if (!CanContinueTimedWork(runId, work.WorkerActor) || !work.isWorking)
+        {
+            onCompleted?.Invoke(false, false);
+            yield break;
+        }
+
+        int applied = ModularFacilityRuntimeEffects.ApplyWorkCompleted(
+            work.WorkerActor,
+            work.assignedShop,
+            FacilityWorkType.Craft);
+        onCompleted?.Invoke(applied > 0, true);
+    }
+
+    private IEnumerator ExecuteButcherWork()
+    {
+        yield return ExecuteButcherWork(0);
+    }
+
+    private IEnumerator ExecuteButcherWork(int runId)
+    {
+        float requiredWork = GetButcherWorkRequired(work.assignedShop);
+        yield return ExecuteWorkAmountLoop(
+            runId,
+            work.WorkerActor,
+            work.assignedShop,
+            FacilityWorkType.Butcher,
+            requiredWork,
+            "도축");
+    }
+
+    private IEnumerator ExecuteSurvivalWork(FacilityWorkType workType)
+    {
+        yield return ExecuteSurvivalWork(0, workType);
+    }
+
+    private IEnumerator ExecuteSurvivalWork(int runId, FacilityWorkType workType)
+    {
+        float requiredWork = GetSurvivalWorkRequired(work.assignedShop, workType);
+        yield return ExecuteWorkAmountLoop(
+            runId,
+            work.WorkerActor,
+            work.assignedShop,
+            workType,
+            requiredWork,
+            WorkTaskCatalog.GetDisplayName(workType));
+    }
+
+    private IEnumerator ExecuteCleanWork(int runId)
+    {
+        WorldFilthWorkTarget filthTarget = work.assignedShop as WorldFilthWorkTarget;
+        float requiredWork = filthTarget != null
+            ? Mathf.Max(0.1f, filthTarget.RequiredCleaningWork)
+            : Mathf.Max(0.1f, work.assignedShop.BuildingData.GetRequiredWork(FacilityWorkType.Clean));
+        float cleaningMultiplier = CharacterSkillRuntimeEffects.GetCleaningSpeedMultiplier(work.WorkerActor);
+        yield return ExecuteWorkAmountLoop(
+            runId,
+            work.WorkerActor,
+            work.assignedShop,
+            FacilityWorkType.Clean,
+            requiredWork,
+            "청소",
+            cleaningMultiplier);
+        filthTarget?.CompleteCleaning(requiredWork);
+    }
+
+    private IEnumerator ExecuteWorkOrderRoutine(
+        int runId,
+        CharacterActor actor,
+        BuildableObject target,
+        FacilityWorkType workType,
+        Action<bool, bool> onCompleted)
+    {
+        bool completed = false;
+        bool appliedCompletionEffects = false;
+        if (target == null || WorkOrderRuntime.Active == null)
+        {
+            onCompleted?.Invoke(false, false);
+            yield break;
+        }
+
+        string label = WorkTaskCatalog.GetDisplayName(workType);
+        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(workType);
+        float lastReportTime = -10f;
+        while (CanContinueTimedWork(runId, actor)
+            && work.isWorking
+            && WorkOrderRuntime.Active.TryGetOrderFor(target, workType, out WorkOrderProgressState order)
+            && order.Status != WorkOrderStatus.Completed
+            && order.Status != WorkOrderStatus.Cancelled)
+        {
+            if (order.Status == WorkOrderStatus.WaitingForMaterials)
+            {
+                actor?.AddActivity(CharacterActivityEvent.Work(
+                    workType,
+                    CharacterActivityOutcomes.Blocked,
+                    $"{label} 대기: 재료가 아직 도착하지 않음",
+                    target,
+                    reasonCode: "waiting-for-materials",
+                    value: order.ProgressRatio));
+                yield return new WaitForSeconds(0.35f);
+                if (!WorkOrderRuntime.Active.RefreshMaterialsReady(target as ConstructionSite))
+                {
+                    continue;
+                }
+            }
+
+            float deltaWork = WorkAmountUtility.CalculateWorkPerSecond(
+                    actor,
+                    target,
+                    workType,
+                    durationMultiplier)
+                * Time.deltaTime;
+            if (!WorkOrderRuntime.Active.ApplyWork(
+                    actor,
+                    target,
+                    workType,
+                    deltaWork,
+                    out completed,
+                    out appliedCompletionEffects,
+                    out string message))
+            {
+                actor?.AddActivity(CharacterActivityEvent.Work(
+                    workType,
+                    CharacterActivityOutcomes.Blocked,
+                    $"{label} 중단: {message}",
+                    target,
+                    reasonCode: "work-order-blocked",
+                    bubbleEligible: true));
+                onCompleted?.Invoke(false, false);
+                yield break;
+            }
+
+            if (Time.time - lastReportTime >= 0.75f
+                && WorkOrderRuntime.Active.TryGetOrderFor(target, workType, out order))
+            {
+                lastReportTime = Time.time;
+                actor?.Brain?.SetActionPhase($"{label} {Mathf.RoundToInt(order.ProgressRatio * 100f)}%", target);
+                actor?.AddActivity(CharacterActivityEvent.Work(
+                    workType,
+                    CharacterActivityOutcomes.Progress,
+                    $"{label} 진행 {Mathf.RoundToInt(order.ProgressRatio * 100f)}%",
+                    target,
+                    reasonCode: "work-progress",
+                    value: order.ProgressRatio));
+            }
+
+            if (completed)
+            {
+                actor?.AddActivity(CharacterActivityEvent.Work(
+                    workType,
+                    CharacterActivityOutcomes.Completed,
+                    $"{label} 완료",
+                    target,
+                    reasonCode: "work-order-completed",
+                    value: 1f));
+                onCompleted?.Invoke(true, appliedCompletionEffects);
+                yield break;
+            }
+
+            yield return null;
+        }
+
+        onCompleted?.Invoke(false, appliedCompletionEffects);
+    }
+
+    private IEnumerator ExecuteWorkAmountLoop(
+        int runId,
+        CharacterActor actor,
+        BuildableObject target,
+        FacilityWorkType workType,
+        float requiredWork,
+        string label,
+        float extraMultiplier = 1f)
+    {
+        requiredWork = Mathf.Max(0.1f, requiredWork);
+        label = string.IsNullOrWhiteSpace(label) ? WorkTaskCatalog.GetDisplayName(workType) : label;
+        if (DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.InstantWork))
+        {
+            actor?.Brain?.SetActionPhase($"{label} 100%", target);
+            yield return null;
+            yield break;
+        }
+
+        float completedWork = 0f;
+        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(workType);
+        float lastReportTime = -10f;
+        while (completedWork + 0.001f < requiredWork
+            && CanContinueTimedWork(runId, actor)
+            && work.isWorking)
+        {
+            float tickDeltaTime = Time.deltaTime > 0f ? Time.deltaTime : 1f / 60f;
+            float deltaWork = WorkAmountUtility.CalculateWorkPerSecond(
+                    actor,
+                    target,
+                    workType,
+                    durationMultiplier)
+                * Mathf.Max(0.05f, extraMultiplier)
+                * tickDeltaTime;
+            completedWork = Mathf.Min(requiredWork, completedWork + deltaWork);
+            if (Time.time - lastReportTime >= 0.75f)
+            {
+                lastReportTime = Time.time;
+                float ratio = Mathf.Clamp01(completedWork / requiredWork);
+                actor?.Brain?.SetActionPhase($"{label} {Mathf.RoundToInt(ratio * 100f)}%", target);
+                actor?.AddActivity(CharacterActivityEvent.Work(
+                    workType,
+                    CharacterActivityOutcomes.Progress,
+                    $"{label} 진행 {Mathf.RoundToInt(ratio * 100f)}%",
+                    target,
+                    reasonCode: "work-progress",
+                    value: ratio));
+            }
+
+            yield return null;
+        }
+    }
+
+    private IEnumerator ExecuteResearchWork(int runId, Action<bool> onCompleted)
     {
         CharacterActor actor = work.WorkerActor;
         IBlueprintResearchWorkService researchWorkService = work.BlueprintResearchWorkService;
 
-        const float workSeconds = 1f;
-        float durationMultiplier = work.GetWorkEnvironmentDurationMultiplier(FacilityWorkType.Research);
-        BlueprintResearchWorkResult result = researchWorkService.ApplyResearchWork(
+        const float researchSeconds = 1f;
+        float requiredWork = GetResearchWorkRequired(work.assignedShop);
+        yield return ExecuteWorkAmountLoop(
+            runId,
             actor,
             work.assignedShop,
-            workSeconds);
+            FacilityWorkType.Research,
+            requiredWork,
+            "연구");
+        if (!CanContinueTimedWork(runId, actor) || !work.isWorking)
+        {
+            onCompleted?.Invoke(false);
+            yield break;
+        }
+
+        BlueprintResearchWorkResult result = researchWorkService.ApplyResearchWork(
+            null,
+            work.assignedShop,
+            researchSeconds);
         if (!result.Success)
         {
             onCompleted?.Invoke(false);
@@ -613,7 +1041,6 @@ public sealed class WorkTaskExecutor
             value: result.ProgressRatio));
 
         onCompleted?.Invoke(true);
-        yield return new WaitForSeconds(workSeconds * durationMultiplier);
     }
 
     private static void EndAiAction(CharacterActor actor, AIAction currentAction)
@@ -650,6 +1077,28 @@ public sealed class WorkTaskExecutor
             || actor.Brain.isBestActionEnd;
     }
 
+    private bool CanContinueTimedWork(int runId)
+    {
+        return runId <= 0 || work.IsActiveWorkRun(runId);
+    }
+
+    private bool CanContinueTimedWork(int runId, CharacterActor actor)
+    {
+        if (!CanContinueTimedWork(runId))
+        {
+            return false;
+        }
+
+        if (runId <= 0)
+        {
+            return true;
+        }
+
+        return actor != null
+            && actor.Brain != null
+            && !actor.Brain.isBestActionEnd;
+    }
+
     private void AbortWorkRun(int runId, CharacterActor actor, AIAction currentAction)
     {
         CharacterSkillRuntimeEffects.EndWork(actor);
@@ -661,5 +1110,99 @@ public sealed class WorkTaskExecutor
         }
 
         work.ClearActiveWorkRoutine(runId);
+    }
+
+    private static bool TryGetExteriorWorkSeconds(
+        BuildableObject target,
+        CharacterActor actor,
+        FacilityWorkType workType,
+        out float seconds)
+    {
+        seconds = 0f;
+        if (target?.BuildingData == null)
+        {
+            return false;
+        }
+
+        foreach (IBuildingExteriorWorkRuntimeAbility ability in target.BuildingData.Abilities
+                     .OfType<IBuildingExteriorWorkRuntimeAbility>())
+        {
+            if (!ability.SupportsExteriorWork(workType)
+                || !ability.IsExteriorWorkAvailable(actor, target, workType))
+            {
+                continue;
+            }
+
+            seconds = Mathf.Max(
+                MinimumNaturalExteriorWorkSeconds,
+                ability.GetExteriorWorkSeconds(actor, target, workType));
+            return true;
+        }
+
+        return false;
+    }
+
+    private static float GetSurvivalWorkSeconds(BuildableObject target, FacilityWorkType workType)
+    {
+        if (target?.BuildingData == null)
+        {
+            return 1f;
+        }
+
+        return workType switch
+        {
+            FacilityWorkType.DrawWater => Mathf.Max(
+                0.1f,
+                target.BuildingData.GetAbility<BuildingWaterSourceAbility>()?.workSeconds ?? 1f),
+            FacilityWorkType.Cook => Mathf.Max(
+                0.1f,
+                target.BuildingData.GetAbility<BuildingCookingAbility>()?.workSeconds ?? 1f),
+            FacilityWorkType.Treat => Mathf.Max(
+                0.1f,
+                target.BuildingData.GetAbility<BuildingMedicalAbility>()?.workSeconds ?? 1f),
+            FacilityWorkType.Refuel => Mathf.Max(
+                0.1f,
+                target.BuildingData.GetAbility<BuildingFuelConsumerAbility>()?.workSeconds ?? 1f),
+            _ => 1f
+        };
+    }
+
+    private static float GetSurvivalWorkRequired(BuildableObject target, FacilityWorkType workType)
+    {
+        return Mathf.Max(0.1f, GetSurvivalWorkSeconds(target, workType));
+    }
+
+    private static float GetEquipmentCraftWorkRequired(BuildableObject target)
+    {
+        if (target?.BuildingData == null)
+        {
+            return 1f;
+        }
+
+        return Mathf.Max(
+            0.1f,
+            target.BuildingData.GetAbility<BuildingEquipmentCraftingAbility>()?.workSecondsPerCycle ?? 1f);
+    }
+
+    private static float GetButcherWorkRequired(BuildableObject target)
+    {
+        if (target?.BuildingData == null)
+        {
+            return 1f;
+        }
+
+        return Mathf.Max(
+            0.1f,
+            target.BuildingData.GetAbility<BuildingButcherAbility>()?.workSeconds ?? 1f);
+    }
+
+    private static float GetResearchWorkRequired(BuildableObject target)
+    {
+        if (target?.BuildingData == null)
+        {
+            return 1f;
+        }
+
+        return Mathf.Max(0.1f, target.BuildingData.GetRequiredWork(FacilityWorkType.Research));
     }
 }

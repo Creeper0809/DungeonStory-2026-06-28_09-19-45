@@ -42,11 +42,11 @@ public static class StaffDutyDebugScenarios
         RunScenario("鍮꾨쾲 諛⑸Ц ?ъ씠???쒖옉", VerifyOffDutyVisitCycle, errors);
         RunScenario("吏곸썝 AI 鍮꾨쾲 ?됰룞 蹂닿컯", VerifyStaffBrainAddsOffDutyActions, errors);
         RunScenario("?⑤???吏곸썝 援ш꼍 ?쒖쇅", VerifyOnDutyStaffDoesNotUseLookAround, errors);
-        RunScenario("?ъ옣 AI 諛⑸Ц ?됰룞 ?쒖쇅", VerifyOwnerBrainDoesNotAddVisitorActions, errors);
+        RunScenario("Owner keeps self-care but excludes discretionary visitor actions", VerifyOwnerSelfCareActionPolicy, errors);
         RunScenario("鍮꾨쾲 吏곸썝 留ㅼ텧 ?쒖쇅", VerifyOffDutyStaffDoesNotCreateRevenue, errors);
         RunScenario("湲닿툒 ?묒뾽 鍮꾨쾲 以묐떒", VerifyEmergencyCanInterruptOffDuty, errors);
 
-        RunScenario("?덇린留뚯쑝濡쒕뒗 吏곸썝??鍮꾨쾲 ?꾪솚?섏? ?딆쓬", VerifyHungerDoesNotForceOffDuty, errors);
+        RunScenario("Hunger interrupts work without forcing off-duty", VerifyHungerInterruptsWithoutForcingOffDuty, errors);
         RunScenario("鍮꾨쾲 ?湲곕뒗 ?덇린瑜??뚮났?섏? ?딆쓬", VerifyWaitDoesNotRecoverHunger, errors);
         RunScenario("?⑤????湲?吏곸썝 ?섏쟾 諛고쉶 寃쎈줈", VerifyOnDutyWaitCanWander, errors);
         RunScenario("On-duty wait selects dungeon wander", VerifyOnDutyWaitSelectsDungeonWander, errors);
@@ -398,7 +398,7 @@ public static class StaffDutyDebugScenarios
         return valid;
     }
 
-    private static bool VerifyOwnerBrainDoesNotAddVisitorActions()
+    private static bool VerifyOwnerSelfCareActionPolicy()
     {
         CharacterActor owner = CreateOwner("Owner_Orc");
         Type[] actionTypes = owner.ai.availableActions
@@ -408,8 +408,8 @@ public static class StaffDutyDebugScenarios
 
         bool valid = actionTypes.Contains(typeof(AIWork))
             && actionTypes.Contains(typeof(AIWait))
-            && !actionTypes.Contains(typeof(AIEat))
-            && !actionTypes.Contains(typeof(AIRest))
+            && actionTypes.Contains(typeof(AIEat))
+            && actionTypes.Contains(typeof(AIRest))
             && !actionTypes.Contains(typeof(AIShopping))
             && !actionTypes.Contains(typeof(AIExitDungeon));
 
@@ -455,12 +455,22 @@ public static class StaffDutyDebugScenarios
             && !work.IsOffDuty
             && work.assignedShop == damaged
             && work.AssignedWorkType == FacilityWorkType.Repair;
+        if (!valid)
+        {
+            Debug.LogError(
+                $"Emergency priority detail: prioritySet={prioritySet}, assigned={assigned}, "
+                + $"offDuty={work.IsOffDuty}, canStart={work.CanStartWorkAction()}, "
+                + $"assignedShop={work.assignedShop?.name ?? "null"}, assignedType={work.AssignedWorkType}, "
+                + $"sleep={staff.stats[CharacterCondition.SLEEP]:0.##}, hunger={staff.stats[CharacterCondition.HUNGER]:0.##}, "
+                + $"mood={staff.stats[CharacterCondition.MOOD]:0.##}, "
+                + $"priorityTarget={work.PriorityWorkTarget?.name ?? "null"}");
+        }
 
         Object.DestroyImmediate(staff.gameObject);
         return valid;
     }
 
-    private static bool VerifyHungerDoesNotForceOffDuty()
+    private static bool VerifyHungerInterruptsWithoutForcingOffDuty()
     {
         CharacterActor staff = CreateStaff("Staff Hungry Still Works", withShopping: true, withWorkAction: true);
         AbilityWork work = staff.GetAbility<AbilityWork>();
@@ -469,9 +479,12 @@ public static class StaffDutyDebugScenarios
         staff.stats[CharacterCondition.MOOD] = 100f;
         staff.stats[CharacterCondition.HUNGER] = 5f;
 
+        bool interruptsForFood = work.ShouldInterruptCurrentWork(out string interruptReason)
+            && interruptReason == "식사 필요";
         bool valid = work.CanStartWorkAction()
             && !work.IsOffDuty
-            && !work.ShouldTakeOffDuty();
+            && !work.ShouldTakeOffDuty()
+            && interruptsForFood;
 
         Object.DestroyImmediate(staff.gameObject);
         return valid;
@@ -983,6 +996,8 @@ public static class StaffDutyDebugScenarios
                 && staff.CanRunAi
                 && staff.ai.isBestActionEnd;
             schedulerInstanceField?.SetValue(null, null);
+            AbilityWork work = staff.GetAbility<AbilityWork>();
+            bool canStartWork = work != null && work.CanStartWorkAction();
             bool decided = staff.ai.DecideAction();
             bool selectedWork = decided
                 && staff.ai.bestAction != null
@@ -996,7 +1011,11 @@ public static class StaffDutyDebugScenarios
                     $"Expedition return detail: left={leftDungeon}, returned={returnedReady}, decided={decided}, " +
                     $"best={staff.ai.bestAction?.actionset?.GetType().Name ?? "null"}, " +
                     $"dest={(staff.ai.bestAction?.destination != null ? staff.ai.bestAction.destination.name : "null")}, " +
-                    $"target={damaged.name}, failure={staff.ai.LastActionFailure}");
+                    $"target={damaged.name}, failure={staff.ai.LastActionFailure}, "
+                    + $"canStartWork={canStartWork}, offDuty={work?.IsOffDuty}, "
+                    + $"sleep={staff.stats[CharacterCondition.SLEEP]:0.##}, hunger={staff.stats[CharacterCondition.HUNGER]:0.##}, "
+                    + $"mood={staff.stats[CharacterCondition.MOOD]:0.##}, excretion={staff.stats[CharacterCondition.EXCRETION]:0.##}, "
+                    + $"hygiene={staff.stats[CharacterCondition.HYGIENE]:0.##}");
             }
 
             return valid;

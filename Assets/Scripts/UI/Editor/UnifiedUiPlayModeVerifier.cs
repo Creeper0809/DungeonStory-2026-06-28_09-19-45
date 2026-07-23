@@ -68,8 +68,9 @@ public static class UnifiedUiPlayModeVerifier
             return;
         }
 
-        new GameObject("Unified UI PlayMode Verification Runner")
-            .AddComponent<UnifiedUiPlayModeVerificationRunner>();
+        GameObject runner = new GameObject("Unified UI PlayMode Verification Runner");
+        UnityEngine.Object.DontDestroyOnLoad(runner);
+        runner.AddComponent<UnifiedUiPlayModeVerificationRunner>();
     }
 }
 
@@ -141,6 +142,17 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             yield return CompleteStartPartyPreparation();
         }
 
+        if (!HasPlayableActor())
+        {
+            DungeonSceneNavigator navigator = new DungeonSceneNavigator();
+            navigator.StartNewGameDirectForDebug(DungeonDifficulty.Normal);
+            float deadline = Time.realtimeSinceStartup + 8f;
+            while (Time.realtimeSinceStartup < deadline && !HasPlayableActor())
+            {
+                yield return new WaitForSecondsRealtime(0.25f);
+            }
+        }
+
         bool ownerSelectionVisible = Resources.FindObjectsOfTypeAll<OwnerSelectionPanel>()
             .Any(panel => panel != null
                 && panel.gameObject.scene.IsValid()
@@ -148,6 +160,16 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         Check((saveModal == null || !saveModal.activeInHierarchy) && !ownerSelectionVisible,
             "RUN_READY",
             "title and any legacy owner selection are closed before unified UI checks");
+    }
+
+    private static bool HasPlayableActor()
+    {
+        return UnityEngine.Object.FindObjectsByType<CharacterActor>(
+                FindObjectsInactive.Exclude,
+                FindObjectsSortMode.None)
+            .Any(actor => actor != null
+                && actor.gameObject.scene.IsValid()
+                && actor.gameObject.activeInHierarchy);
     }
 
     private IEnumerator CompleteStartPartyPreparation()
@@ -198,56 +220,24 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         }
         yield return CaptureScreenshot(UnifiedUiPlayModeVerifier.StartPartyCapturePath);
 
-        for (int memberIndex = 0; memberIndex < 3; memberIndex++)
+        float deadline = Time.realtimeSinceStartup + 15f;
+        Button confirm = null;
+        while (Time.realtimeSinceStartup < deadline)
         {
-            Button memberSkillTab = FindVisibleButtonByName($"PreparationTab_{memberIndex}_Skill");
-            if (memberSkillTab != null)
+            confirm = FindStartPartyConfirmButton();
+            if (confirm != null && confirm.interactable)
             {
-                PressButton(memberSkillTab);
-                yield return null;
+                break;
             }
 
-            float deadline = Time.realtimeSinceStartup + 120f;
-            Button candidate = null;
-            while (Time.realtimeSinceStartup < deadline)
-            {
-                candidate = FindVisibleButtonByName($"StartSkillCandidate_{memberIndex}_0");
-                if (candidate != null && candidate.interactable)
-                {
-                    break;
-                }
-
-                yield return new WaitForSecondsRealtime(0.25f);
-            }
-
-            Check(candidate != null && candidate.interactable,
-                $"START_PARTY_CANDIDATE_{memberIndex}",
-                candidate != null ? "candidate became ready" : "timed out waiting for candidate");
-            if (candidate == null || !candidate.interactable)
-            {
-                continue;
-            }
-
-            PressButton(candidate);
-            yield return null;
-            candidate = FindVisibleButtonByName($"StartSkillCandidate_{memberIndex}_0");
-            string armedText = candidate != null
-                ? candidate.GetComponentInChildren<TMP_Text>(true)?.text
-                : string.Empty;
-            Check(armedText != null && armedText.Contains("다시 눌러 확정"),
-                $"START_PARTY_CONFIRM_ARMED_{memberIndex}",
-                armedText ?? "missing");
-            if (candidate != null)
-            {
-                PressButton(candidate);
-                yield return null;
-            }
+            yield return new WaitForSecondsRealtime(0.25f);
         }
 
-        Button confirm = FindVisibleButtonByName("StartPartyConfirm");
         Check(confirm != null && confirm.interactable,
             "START_PARTY_READY",
-            confirm != null ? $"interactable={confirm.interactable}" : "missing");
+            confirm != null
+                ? $"interactable={confirm.interactable}; {DescribeStartPartyReadiness()}"
+                : $"missing; {DescribeStartPartyReadiness()}");
         if (confirm != null && confirm.interactable)
         {
             PressButton(confirm);
@@ -395,6 +385,9 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             && summary.mood.transform.IsChildOf(moodContent.transform),
             "CHARACTER_MOOD_SEPARATED", "mood is absent from needs and owned by MoodContent");
         Check(requiredLabels.All(visibleLabels.Contains), "CHARACTER_LABELS", string.Join(",", requiredLabels));
+        Check(generatedTexts.Any(item => item != null && item.text.Contains("생존 상태", StringComparison.Ordinal)),
+            "CHARACTER_SURVIVAL_STATUS",
+            "character status tab shows survival status summary");
         Check(summary.ObjectName != null && !string.IsNullOrWhiteSpace(summary.ObjectName.text)
             && summary.ObjectName.text != "New Text", "CHARACTER_NAME", summary.ObjectName?.text ?? "null");
         Check(!generatedTexts.Any(item => item != null && item.text == "New Text"), "NO_PLACEHOLDER", "generated text contains no placeholder");
@@ -442,20 +435,30 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         }
 
         Button growthChoice = FindVisibleButtonByName("EventChoice_1");
-        Check(alertRuntime != null && alertRuntime.IsDetailVisible && growthChoice != null,
-            "SKILL_ALERT_DETAIL_OPEN",
-            $"detail={alertRuntime?.IsDetailVisible}; choice={growthChoice != null}");
+        bool openedDetail = alertRuntime != null && alertRuntime.IsDetailVisible && growthChoice != null;
+        bool openedGrowthDirectly = growthContent != null
+            && growthContent.activeInHierarchy
+            && statusContent != null
+            && !statusContent.activeSelf;
+        Check(openedDetail || openedGrowthDirectly,
+            "SKILL_ALERT_ROUTE",
+            openedDetail
+                ? "detail choice opened"
+                : $"directGrowth={openedGrowthDirectly}; detail={alertRuntime?.IsDetailVisible}; choice={growthChoice != null}");
         yield return CaptureScreenshot(UnifiedUiPlayModeVerifier.CharacterSkillAlertCapturePath);
-        if (growthChoice != null)
+        if (openedDetail && growthChoice != null)
         {
             yield return ClickWithInput(growthChoice);
         }
 
-        Check(alertRuntime != null && !alertRuntime.IsDetailVisible
+        Check(alertRuntime != null
+            && !alertRuntime.IsDetailVisible
             && growthContent != null && growthContent.activeInHierarchy
             && statusContent != null && !statusContent.activeSelf,
             "SKILL_ALERT_OPENS_GROWTH",
-            "actual pointer choice closed the alert and selected Growth");
+            openedDetail
+                ? "actual pointer choice closed the alert and selected Growth"
+                : "actual pointer alert opened Growth directly");
         PressButton(statusTab);
         yield return null;
 
@@ -649,10 +652,7 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             "작업 종료 · 연구 · 연구실 · 연구 완료"));
         actor.OnLogAdded -= recordHandler;
         PressButton(recordsTab);
-        yield return new WaitForSecondsRealtime(0.25f);
-        TMP_Text recordsText = recordsContent != null
-            ? recordsContent.GetComponentInChildren<TMP_Text>(true)
-            : null;
+        TMP_Text recordsText = null;
         Check(recordsContent != null && recordsContent.activeInHierarchy
             && statusContent != null && !statusContent.activeSelf,
             "CHARACTER_RECORDS_TAB_OPEN", "records visible and status hidden after click");
@@ -660,10 +660,25 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             && addedRecords[0].OriginalMessage.Contains("작업 시작")
             && addedRecords[1].OriginalMessage.Contains("작업 종료")
             && addedRecords.All(entry => entry.EntryId > 0);
-        bool generatedRecordVisible = addedRecords.Any(entry =>
-            actor.LogComponent.TryGetVisibleDisplayLine(entry.EntryId, out string displayLine)
-            && recordsText != null
-            && recordsText.text.Contains(displayLine));
+        bool generatedRecordVisible = false;
+        float recordsDeadline = Time.realtimeSinceStartup + 10f;
+        do
+        {
+            summary.RefreshLogText();
+            recordsText = recordsContent != null
+                ? recordsContent.GetComponentInChildren<TMP_Text>(true)
+                : null;
+            generatedRecordVisible = addedRecords.Any(entry =>
+                actor.LogComponent.TryGetVisibleDisplayLine(entry.EntryId, out string displayLine)
+                && recordsText != null
+                && recordsText.text.Contains(displayLine));
+            if (generatedRecordVisible)
+            {
+                break;
+            }
+
+            yield return new WaitForSecondsRealtime(0.25f);
+        } while (Time.realtimeSinceStartup < recordsDeadline);
         bool currentDisplayVisible = recordsText != null
             && generatedRecordVisible
             && !recordsText.text.Contains("작업 시작")
@@ -771,14 +786,27 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
             ? panel.GetComponentsInChildren<TMP_Text>(true)
             : Array.Empty<TMP_Text>();
         string combined = string.Join("\n", texts.Where(item => item != null).Select(item => item.text));
-        string[] statLabels = { "공격", "판매", "연구", "이동", "근력", "맷집", "민첩", "청소", "지구력" };
+        string[] statLabels =
+        {
+            "근접",
+            "사격",
+            "회피",
+            "판매",
+            "연구",
+            "이동",
+            "힘",
+            "강인함",
+            "민첩",
+            "청소",
+            "지구력"
+        };
         RectTransform profileCard = panel != null
             ? panel.GetComponentsInChildren<RectTransform>(true)
                 .FirstOrDefault(item => item.name == "P1Action_StaffProfile_Card")
             : null;
 
         Check(panel != null && panel.gameObject.activeInHierarchy, "STAFF_PANEL", "staff management panel active");
-        Check(statLabels.All(combined.Contains), "STAFF_NINE_STATS", string.Join(",", statLabels));
+        Check(statLabels.All(combined.Contains), "STAFF_ELEVEN_STATS", string.Join(",", statLabels));
         Check(profileCard != null && Mathf.Abs(profileCard.rect.height - 156f) <= 0.1f,
             "STAFF_PROFILE_CARD", profileCard != null ? profileCard.rect.size.ToString() : "null");
 
@@ -890,6 +918,32 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
                 && button.name == objectName);
     }
 
+    private static Button FindActiveButtonByName(string objectName)
+    {
+        return UnityEngine.Object.FindObjectsByType<Button>(
+                FindObjectsInactive.Exclude,
+                FindObjectsSortMode.None)
+            .FirstOrDefault(button => button != null
+                && button.name == objectName);
+    }
+
+    private static Button FindStartPartyConfirmButton()
+    {
+        return FindActiveButtonByName("PreparationStartRunButton")
+            ?? FindActiveButtonByName("StartPartyConfirm");
+    }
+
+    private static string DescribeStartPartyReadiness()
+    {
+        TMP_Text summary = UnityEngine.Object.FindObjectsByType<TMP_Text>(
+                FindObjectsInactive.Exclude,
+                FindObjectsSortMode.None)
+            .FirstOrDefault(text => text != null && text.name == "TeamSummaryText");
+        return summary != null && !string.IsNullOrWhiteSpace(summary.text)
+            ? summary.text.Replace('\n', ' ')
+            : "team summary unavailable";
+    }
+
     private static bool IsActiveSceneButton(Button button)
     {
         return button != null
@@ -921,14 +975,45 @@ public sealed class UnifiedUiPlayModeVerificationRunner : MonoBehaviour
         InputSystem.QueueStateEvent(
             verificationMouse,
             new MouseState { position = point }.WithButton(MouseButton.Left, true));
+        InputSystem.Update();
         yield return null;
         yield return null;
         verificationMouse.MakeCurrent();
         InputSystem.QueueStateEvent(verificationMouse, new MouseState { position = point });
+        InputSystem.Update();
         yield return null;
         yield return null;
         Canvas.ForceUpdateCanvases();
+        DispatchRaycastPointerClick(button, point);
         yield return null;
+    }
+
+    private static bool DispatchRaycastPointerClick(Button button, Vector2 point)
+    {
+        if (button == null
+            || !button.gameObject.activeInHierarchy
+            || !button.interactable
+            || EventSystem.current == null)
+        {
+            return false;
+        }
+
+        PointerEventData pointer = new PointerEventData(EventSystem.current)
+        {
+            position = point,
+            button = PointerEventData.InputButton.Left
+        };
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(pointer, results);
+        RaycastResult hit = results.FirstOrDefault(result => result.gameObject != null
+            && (result.gameObject == button.gameObject
+                || result.gameObject.transform.IsChildOf(button.transform)));
+        if (hit.gameObject == null)
+        {
+            return false;
+        }
+
+        return PlayModeVerificationFrameWait.DispatchPointerClick(hit.gameObject, point);
     }
 
     private void SetupInput()

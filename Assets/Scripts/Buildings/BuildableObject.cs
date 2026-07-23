@@ -71,6 +71,12 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     {
     }
 
+    protected virtual void OnDestroy()
+    {
+        CharacterAiWorldRegistry.UnregisterBuilding(this);
+        DetachFromGridIfStillRegistered();
+    }
+
     [Inject]
     public void ConstructBuildableObject(
         IBlueprintResearchWorkService blueprintResearchWorkService,
@@ -129,6 +135,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         mutableBuildPoses.Clear();
         mutableBuildPoses.AddRange(placement.GetGridPosList(buildPos));
         ModularFacilityRuntimeEffects.ConfigureVisual(this);
+        CharacterAiWorldRegistry.RegisterBuilding(this);
     }
 
     public virtual Vector3 GetMovementWorldPosition(Vector2Int gridPosition)
@@ -206,6 +213,7 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
     {
         OnBuildingDestroyed?.Invoke();
         isDestroy = true;
+        CharacterAiWorldRegistry.UnregisterBuilding(this);
         DetachFromGridIfStillRegistered();
         MarkFacilityDynamicStateDirty();
         if (Application.isPlaying)
@@ -231,6 +239,11 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
     public void SetDamaged(bool value)
     {
+        if (DungeonDebugRuntimeRules.ShouldBlockFacilityDamage(value))
+        {
+            return;
+        }
+
         if (isDamaged == value)
         {
             return;
@@ -452,14 +465,26 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
         }
 
         FacilityData facilityData = Facility;
-        if (facilityData == null || !facilityData.SupportsWork(workType))
+        bool supportsButcherFallback = workType == FacilityWorkType.Butcher
+            && WildlifeButcherFacilityUtility.IsButcherFacility(this);
+        bool supportsSurvivalFallback = SurvivalFacilityUtility.IsSurvivalWork(workType)
+            && (SurvivalFacilityUtility.AddFallbackWorkTypes(this, FacilityWorkType.None) & workType) != 0;
+        bool supportsEquipmentMaintenance = workType == FacilityWorkType.Repair
+            && CombatEquipmentMaintenanceFacilityUtility.IsMaintenanceFacility(this);
+        if (facilityData == null
+            || (!facilityData.SupportsWork(workType)
+                && !supportsButcherFallback
+                && !supportsSurvivalFallback
+                && !supportsEquipmentMaintenance))
         {
             return FacilityAssignmentStatus.Rejected(
                 FacilityAssignmentFailureKind.UnsupportedWork,
                 "지원하지 않는 작업");
         }
 
-        if (workType == FacilityWorkType.Repair && !isDamaged)
+        if (workType == FacilityWorkType.Repair
+            && !isDamaged
+            && !(EquipmentMaintenancePolicyRuntime.Active?.HasRepairWorkFor(this) ?? false))
         {
             return FacilityAssignmentStatus.Rejected(
                 FacilityAssignmentFailureKind.WorkNotNeeded,
@@ -701,6 +726,16 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
             urgency += 55f;
         }
 
+        if (workType == FacilityWorkType.Butcher && WildlifeRuntime.Active != null)
+        {
+            urgency += WildlifeRuntime.Active.GetButcherWorkUrgency();
+        }
+
+        if (SurvivalFoodRuntime.Active != null && SurvivalFacilityUtility.IsSurvivalWork(workType))
+        {
+            urgency += SurvivalFoodRuntime.Active.GetSurvivalWorkUrgency(this, workType);
+        }
+
         if (workType == FacilityWorkType.Clean && FacilityState.cleanliness < CleaningWorkThreshold)
         {
             urgency += Mathf.Lerp(15f, 70f, 1f - (FacilityState.cleanliness / CleaningWorkThreshold));
@@ -716,7 +751,13 @@ public class BuildableObject : MonoBehaviour, IGridOccupant, IGridMovementOccupa
 
     public void TriggerWorldInfoClick()
     {
-        OnBuildingClicked?.Invoke(this);
+        if (OnBuildingClicked != null)
+        {
+            OnBuildingClicked.Invoke(this);
+            return;
+        }
+
+        InfoFeedEvent.Trigger(new BuildingInfoTarget(this));
     }
 
     protected void MarkFacilityDynamicStateDirty()

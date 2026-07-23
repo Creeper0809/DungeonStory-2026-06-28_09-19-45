@@ -5,6 +5,11 @@ using UnityEngine;
 
 public static class BuildingAbilityAccessors
 {
+    public static BuildingCoverAbility GetCoverAbility(this BuildingSO building)
+    {
+        return building?.GetAbility<BuildingCoverAbility>();
+    }
+
     public static int GetConstructionCost(this BuildingSO building)
     {
         BuildingEconomyAbility ability = building != null
@@ -214,6 +219,54 @@ public static class BuildingAbilityAccessors
     {
         return building.GetAbilityCapabilities<IBuildingStockCategorySignal>()
             .SelectMany(capability => capability.GetStockCategorySignals() ?? Enumerable.Empty<StockCategory>());
+    }
+
+    public static float GetRequiredWork(this BuildingSO building, FacilityWorkType workType)
+    {
+        BuildingWorkAmountAbility ability = building?.GetAbility<BuildingWorkAmountAbility>();
+        if (ability != null)
+        {
+            float configuredWork = ability.GetRequiredWork(null, workType);
+            if (configuredWork > 0f)
+            {
+                return configuredWork;
+            }
+        }
+
+        GridBuildingPlacement placement = building != null
+            ? building.Placement
+            : new GridBuildingPlacement(1, 1, GridLayer.Building, BuildingCategory.None, false, false);
+        int width = Mathf.Max(1, placement.Width);
+        int height = Mathf.Max(1, placement.Height);
+        int cells = Mathf.Max(1, width * height);
+        int cost = building.GetConstructionCost();
+        return workType switch
+        {
+            FacilityWorkType.Construct => Mathf.Clamp(12f + cells * 6f + cost * 0.02f, 12f, 120f),
+            FacilityWorkType.Repair => Mathf.Clamp(8f + cells * 2f, 6f, 35f),
+            FacilityWorkType.Clean => Mathf.Clamp(5f + cells * 1.25f, 4f, 24f),
+            FacilityWorkType.Research => 6f,
+            FacilityWorkType.Operate => 10f,
+            _ => 0f
+        };
+    }
+
+    public static Dictionary<StockCategory, int> GetConstructionMaterials(this BuildingSO building)
+    {
+        BuildingWorkAmountAbility ability = building?.GetAbility<BuildingWorkAmountAbility>();
+        if (ability != null)
+        {
+            return ability.GetConstructionMaterials(building);
+        }
+
+        Dictionary<StockCategory, int> result = new Dictionary<StockCategory, int>();
+        int amount = Mathf.CeilToInt(building.GetConstructionCost() * 0.05f);
+        if (amount > 0)
+        {
+            result[StockCategory.General] = amount;
+        }
+
+        return result;
     }
 
     public static IEnumerable<string> GetSemanticTags(this BuildingSO building)

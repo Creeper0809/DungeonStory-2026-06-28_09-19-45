@@ -196,6 +196,49 @@ public sealed class WorkCommandHandler
             yield break;
         }
 
+        if (target.TryGetComponent(out InvasionIntruderRuntime invasionIntruder))
+        {
+            DefenseEngagementRuntime defenseRuntime = DefenseEngagementRuntime.Active;
+            string failureReason = "방어 지휘 체계 없음";
+            if (defenseRuntime == null
+                || !defenseRuntime.TryAssignManual(actor, invasionIntruder, out failureReason))
+            {
+                actor.AddActivity(CharacterActivityEvent.Create(
+                    CharacterActivityKinds.Combat,
+                    CharacterActivityOutcomes.Failed,
+                    $"저지 실패: {failureReason ?? "방어 지휘 체계 없음"}",
+                    actionId: "combat:suppress",
+                    targetId: target.Identity?.PersistentId ?? string.Empty,
+                    targetName: target.Identity?.DisplayName ?? target.name,
+                    reasonCode: failureReason,
+                    sentiment: -0.7f,
+                    bubbleEligible: true));
+                ClearPriorityWorkTarget();
+                actor.Brain.isBestActionEnd = true;
+                yield break;
+            }
+
+            actor.AddActivity(CharacterActivityEvent.Create(
+                CharacterActivityKinds.Combat,
+                CharacterActivityOutcomes.Started,
+                $"{target.Identity?.DisplayName ?? target.name} 저지하러 이동",
+                actionId: "defense:manual-intercept",
+                targetId: target.Identity?.PersistentId ?? string.Empty,
+                targetName: target.Identity?.DisplayName ?? target.name));
+            while (target != null
+                && !target.IsDead
+                && actor != null
+                && !actor.IsDead
+                && defenseRuntime.TryGetEngagement(invasionIntruder, out _))
+            {
+                yield return null;
+            }
+
+            ClearPriorityWorkTarget();
+            actor.Brain.isBestActionEnd = true;
+            yield break;
+        }
+
         actor.AddActivity(CharacterActivityEvent.Create(
             CharacterActivityKinds.Combat,
             CharacterActivityOutcomes.Started,
@@ -230,18 +273,32 @@ public sealed class WorkCommandHandler
             }
 
             float damage = Mathf.Max(1f, work.SuppressBaseDamage * actor.GetCombatPowerMultiplier());
-            target.ApplyDamage(damage, $"제압: {actor.name}");
+            bool breakdownTarget = CharacterDeprivationRuntime.Active?.IsSuppressible(target) ?? false;
+            bool suppressionEnded = false;
+            if (breakdownTarget)
+            {
+                CharacterDeprivationRuntime.Active.ApplySuppression(target, damage, out suppressionEnded);
+            }
+            else
+            {
+                target.ApplyDamage(damage, $"제압: {actor.name}");
+            }
             actor.AddActivity(CharacterActivityEvent.Create(
                 CharacterActivityKinds.Combat,
-                target.IsDead ? CharacterActivityOutcomes.Completed : CharacterActivityOutcomes.Progress,
-                target.IsDead
+                target.IsDead || suppressionEnded ? CharacterActivityOutcomes.Completed : CharacterActivityOutcomes.Progress,
+                target.IsDead || suppressionEnded
                     ? $"제압 완료: {target.name}"
-                    : $"제압 공격: {target.name}",
+                    : $"저항을 누르는 중: {target.name}",
                 actionId: "combat:suppress",
                 targetId: $"character:{target.GetInstanceID()}",
                 targetName: target.name,
                 value: damage,
-                sentiment: target.IsDead ? 0.2f : -0.3f));
+                sentiment: target.IsDead || suppressionEnded ? 0.2f : -0.3f));
+
+            if (suppressionEnded)
+            {
+                break;
+            }
 
             if (target.IsDead)
             {

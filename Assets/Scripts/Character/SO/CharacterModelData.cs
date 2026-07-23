@@ -5,15 +5,17 @@ using UnityEngine;
 
 public enum CharacterStatType
 {
-    Attack,
-    Sales,
-    Research,
-    MoveSpeed,
-    Strength,
-    Toughness,
-    Dexterity,
-    Cleaning,
-    Endurance
+    Attack = 0,
+    Sales = 1,
+    Research = 2,
+    MoveSpeed = 3,
+    Strength = 4,
+    Toughness = 5,
+    Dexterity = 6,
+    Cleaning = 7,
+    Endurance = 8,
+    Shooting = 9,
+    Evasion = 10
 }
 
 [Serializable]
@@ -264,6 +266,11 @@ public sealed class CharacterRuntimeProfile
         return Mathf.Max(0f, finalModifiers.crowdSensitivityMultiplier);
     }
 
+    public float GetWaitPatienceMultiplier()
+    {
+        return Mathf.Max(0f, finalModifiers.waitPatienceMultiplier);
+    }
+
     public float GetAccidentChanceMultiplier()
     {
         float enduranceMultiplier = Mathf.Clamp(1f - ((GetStat(CharacterStatType.Endurance) - DefaultStatValue) * 0.03f), 0.5f, 1.5f);
@@ -407,9 +414,14 @@ public sealed class CharacterRuntimeProfile
 
     private static CharacterStatType GetBestWorkStat(FacilityWorkType workTypes)
     {
+        if ((workTypes & FacilityWorkType.Construct) != 0) return CharacterStatType.Dexterity;
         if ((workTypes & FacilityWorkType.Research) != 0) return CharacterStatType.Research;
         if ((workTypes & FacilityWorkType.Guard) != 0) return CharacterStatType.Attack;
         if ((workTypes & FacilityWorkType.Clean) != 0) return CharacterStatType.Cleaning;
+        if ((workTypes & FacilityWorkType.DrawWater) != 0) return CharacterStatType.Endurance;
+        if ((workTypes & FacilityWorkType.Cook) != 0) return CharacterStatType.Dexterity;
+        if ((workTypes & FacilityWorkType.Treat) != 0) return CharacterStatType.Research;
+        if ((workTypes & FacilityWorkType.Refuel) != 0) return CharacterStatType.Strength;
         if ((workTypes & FacilityWorkType.Restock) != 0) return CharacterStatType.Strength;
         if ((workTypes & FacilityWorkType.Repair) != 0) return CharacterStatType.Dexterity;
         if ((workTypes & FacilityWorkType.Operate) != 0) return CharacterStatType.Sales;

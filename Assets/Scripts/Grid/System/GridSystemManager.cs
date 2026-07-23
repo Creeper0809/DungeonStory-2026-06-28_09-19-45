@@ -25,7 +25,9 @@ public class GridSystemManager : MonoBehaviour
     public Vector3 gridOriginPos;
     [Header("Physical World Areas")]
     [SerializeField] private bool configureDefaultPhysicalWorldAreas = true;
-    [SerializeField, Min(0)] private int exteriorColumnCount = 4;
+    [SerializeField] private bool centerDungeonInteriorHorizontally = true;
+    [SerializeField, Min(0)] private int dungeonInteriorStartX = 4;
+    [SerializeField, Min(1)] private int dungeonInteriorColumnCount = 27;
     [SerializeField, Min(0)] private int dropZoneWidth = 3;
     [SerializeField] private Vector2Int entranceGridPosition = new Vector2Int(4, 0);
 
@@ -41,6 +43,24 @@ public class GridSystemManager : MonoBehaviour
     public event Action OnGridObjectChanged;
     public event Action<GridMode> OnGridModeChanged;
     public event Action<Vector2Int> OnLastSelectedPosChanged;
+
+    public bool CenterDungeonInteriorHorizontally => centerDungeonInteriorHorizontally;
+    public int ResolvedDungeonInteriorStartX => ResolveDungeonInteriorStartX(
+        grid != null ? grid.width : defaultGridWidth);
+    public int AuthoredLayoutHorizontalShift => ResolvedDungeonInteriorStartX
+        - Mathf.Max(0, dungeonInteriorStartX);
+    public Vector2Int ResolvedEntranceGridPosition
+    {
+        get
+        {
+            int width = grid != null ? grid.width : Mathf.Max(1, defaultGridWidth);
+            int resolvedX = Mathf.Clamp(
+                entranceGridPosition.x + AuthoredLayoutHorizontalShift,
+                0,
+                Mathf.Max(0, width - 1));
+            return new Vector2Int(resolvedX, entranceGridPosition.y);
+        }
+    }
 
     protected virtual void Awake()
     {
@@ -58,6 +78,7 @@ public class GridSystemManager : MonoBehaviour
 
         grid = new Grid(defaultGridWidth, defaultGridHeight, gridOriginPos);
         ApplyDefaultPhysicalWorldAreas();
+        CharacterAiWorldRegistry.SetGrid(grid);
     }
 
     protected virtual void Start()
@@ -73,6 +94,7 @@ public class GridSystemManager : MonoBehaviour
 
         grid = newGrid;
         ApplyDefaultPhysicalWorldAreas();
+        CharacterAiWorldRegistry.SetGrid(grid);
         OnGridExpand?.Invoke();
     }
 
@@ -157,7 +179,7 @@ public class GridSystemManager : MonoBehaviour
     public bool TryGetEntranceGridPosition(out Vector2Int position)
     {
         EnsureGridInitialized();
-        position = entranceGridPosition;
+        position = ResolvedEntranceGridPosition;
         if (grid == null)
         {
             return false;
@@ -191,11 +213,50 @@ public class GridSystemManager : MonoBehaviour
             return;
         }
 
+        ApplyPhysicalWorldAreas(
+            grid,
+            ResolvedDungeonInteriorStartX,
+            dungeonInteriorColumnCount,
+            dropZoneWidth,
+            ResolvedEntranceGridPosition);
+    }
+
+    public static int CalculateCenteredDungeonInteriorStartX(int gridWidth, int interiorColumnCount)
+    {
+        int width = Mathf.Max(1, gridWidth);
+        int columns = Mathf.Clamp(interiorColumnCount, 1, width);
+        return Mathf.CeilToInt((width - columns) * 0.5f);
+    }
+
+    private int ResolveDungeonInteriorStartX(int gridWidth)
+    {
+        int width = Mathf.Max(1, gridWidth);
+        if (centerDungeonInteriorHorizontally)
+        {
+            return CalculateCenteredDungeonInteriorStartX(width, dungeonInteriorColumnCount);
+        }
+
+        return Mathf.Clamp(dungeonInteriorStartX, 0, Mathf.Max(0, width - 1));
+    }
+
+    public static void ApplyPhysicalWorldAreas(
+        Grid grid,
+        int dungeonInteriorStartX,
+        int dungeonInteriorColumnCount,
+        int dropZoneWidth,
+        Vector2Int entranceGridPosition)
+    {
+        if (grid == null)
+        {
+            return;
+        }
+
         int entranceX = Mathf.Clamp(entranceGridPosition.x, 0, grid.width - 1);
         int entranceY = Mathf.Clamp(entranceGridPosition.y, 0, grid.height - 1);
-        int exteriorLimitExclusive = Mathf.Clamp(
-            exteriorColumnCount > 0 ? exteriorColumnCount : entranceX,
-            0,
+        int interiorStartX = Mathf.Clamp(dungeonInteriorStartX, 0, grid.width);
+        int interiorEndX = Mathf.Clamp(
+            interiorStartX + Mathf.Max(1, dungeonInteriorColumnCount),
+            interiorStartX,
             grid.width);
         int dropStartX = Mathf.Max(0, entranceX - Mathf.Max(0, dropZoneWidth));
 
@@ -207,13 +268,13 @@ public class GridSystemManager : MonoBehaviour
             }
 
             Vector2Int pos = cell.Position;
-            GridCellAreaType areaType = GridCellAreaType.DungeonInterior;
-            if (pos.x < exteriorLimitExclusive)
-            {
-                areaType = pos.y == entranceY
+            bool isInteriorColumn = pos.x >= interiorStartX && pos.x < interiorEndX;
+            bool isExteriorGroundRow = pos.y == entranceY;
+            GridCellAreaType areaType = isInteriorColumn
+                ? GridCellAreaType.DungeonInterior
+                : isExteriorGroundRow
                     ? GridCellAreaType.ExteriorPath
                     : GridCellAreaType.BlockedExterior;
-            }
 
             if (pos.y == entranceY && pos.x >= dropStartX && pos.x < entranceX)
             {

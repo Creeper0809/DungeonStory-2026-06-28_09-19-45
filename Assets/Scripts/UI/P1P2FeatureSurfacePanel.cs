@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 public sealed partial class P0FeatureSurfacePanel
 {
@@ -28,6 +30,11 @@ public sealed partial class P0FeatureSurfacePanel
     private int selectedShopId;
     private int selectedDefenseReportIndex;
     private int selectedExpeditionResultIndex;
+    private string selectedDefensePolicyId = DefenseResponsePolicyRuntime.StandardPolicyId;
+    private string pendingDefensePolicyDeleteId = string.Empty;
+    private string selectedMaintenancePolicyId =
+        EquipmentMaintenancePolicyRuntime.StandardPolicyId;
+    private string pendingMaintenancePolicyDeleteId = string.Empty;
 
     private sealed class RoomUiEntry
     {
@@ -41,6 +48,327 @@ public sealed partial class P0FeatureSurfacePanel
         BuildRoomIdentitySection();
         BuildSynthesisSection();
         BuildEvolutionSection();
+    }
+
+    internal void BuildEquipmentMaintenanceSection()
+    {
+        IReadOnlyList<EquipmentMaintenancePolicyData> policies =
+            equipmentMaintenanceRuntime.Policies;
+        EquipmentMaintenancePolicyData selected = policies.FirstOrDefault(policy =>
+                policy != null
+                && string.Equals(
+                    policy.id,
+                    selectedMaintenancePolicyId,
+                    StringComparison.Ordinal))
+            ?? policies.FirstOrDefault();
+        if (selected == null)
+        {
+            AddSection("장비 정비 정책", "사용 가능한 정책이 없습니다.");
+            return;
+        }
+
+        selectedMaintenancePolicyId = selected.id;
+        AddSection(
+            "장비 정비 정책",
+            $"정책 {policies.Count}개 / 선택 {selected.displayName} / "
+            + $"수리 대기 {equipmentMaintenanceRuntime.Orders.Count}건");
+        for (int i = 0; i < policies.Count; i++)
+        {
+            EquipmentMaintenancePolicyData policy = policies[i];
+            bool isSelected = string.Equals(
+                policy.id,
+                selectedMaintenancePolicyId,
+                StringComparison.Ordinal);
+            CreateDataCard(
+                $"V14Action_MaintenancePolicySelect_{i}",
+                policy.displayName,
+                policy.automaticRepair
+                    ? $"자동 수리 / {policy.sendAtDurability:P0}에 보내고 {policy.returnAtDurability:P0}에 복귀"
+                        + $" / 침공 중 탈착 {(policy.allowUnequipDuringInvasion ? "허용" : "금지")}"
+                    : "수동 수리만",
+                isSelected ? "선택됨" : "선택",
+                () =>
+                {
+                    selectedMaintenancePolicyId = policy.id;
+                    pendingMaintenancePolicyDeleteId = string.Empty;
+                    SetFeedback($"장비 정비 정책 선택: {policy.displayName}");
+                },
+                CompactCardHeight);
+        }
+
+        CreateMaintenancePolicyNameEditor(selected);
+        CreateButtonRow(
+            "V14Action_MaintenanceAuto",
+            selected.automaticRepair ? "자동 수리 끄기" : "자동 수리 켜기",
+            "자동 수리를 꺼도 캐릭터 전투 탭의 수동 수리 요청은 사용할 수 있습니다.",
+            () => UpdateSelectedMaintenancePolicy(
+                policy => policy.automaticRepair = !policy.automaticRepair));
+        CreateButtonRow(
+            "V14Action_MaintenanceSendAt",
+            $"수리 보낼 내구도 {selected.sendAtDurability:P0}",
+            "누르면 5%씩 조정합니다.",
+            () => UpdateSelectedMaintenancePolicy(policy =>
+                policy.sendAtDurability = StepRatio(policy.sendAtDurability)));
+        CreateButtonRow(
+            "V14Action_MaintenanceReturnAt",
+            $"복귀 내구도 {selected.returnAtDurability:P0}",
+            "누르면 5%씩 조정하며 보내는 내구도보다 낮아지지 않습니다.",
+            () => UpdateSelectedMaintenancePolicy(policy =>
+                policy.returnAtDurability = StepRatio(policy.returnAtDurability)));
+        CreateButtonRow(
+            "V14Action_MaintenanceInvasionUnequip",
+            selected.allowUnequipDuringInvasion
+                ? "침공 중 탈착 허용"
+                : "침공 중 탈착 금지",
+            "금지 상태에서는 주문만 만들고 교전 종료 뒤 실제 운반을 시작합니다.",
+            () => UpdateSelectedMaintenancePolicy(policy =>
+                policy.allowUnequipDuringInvasion =
+                    !policy.allowUnequipDuringInvasion));
+        CreateButtonRow(
+            "V14Action_MaintenanceReplacement",
+            selected.preferReplacement
+                ? "대체 장비 우선"
+                : "대체 장비 사용 안 함",
+            "수리 장비를 벗을 때 사용할 수 있는 같은 종류의 저장 장비를 우선합니다.",
+            () => UpdateSelectedMaintenancePolicy(policy =>
+                policy.preferReplacement = !policy.preferReplacement));
+        CreateButtonRow(
+            "V14Action_MaintenanceCreate",
+            "새 정책",
+            "표준 수치로 사용자 정책을 만듭니다.",
+            () =>
+            {
+                if (equipmentMaintenanceRuntime.TryCreatePolicy(
+                    $"새 장비 정책 {policies.Count + 1}",
+                    out EquipmentMaintenancePolicyData created))
+                {
+                    selectedMaintenancePolicyId = created.id;
+                    SetFeedback($"장비 정비 정책 생성: {created.displayName}");
+                }
+            });
+        CreateButtonRow(
+            "V14Action_MaintenanceDuplicate",
+            "정책 복제",
+            "현재 정책을 복제해 별도로 조정합니다.",
+            () =>
+            {
+                if (equipmentMaintenanceRuntime.TryDuplicatePolicy(
+                    selected.id,
+                    $"{selected.displayName} 사본",
+                    out EquipmentMaintenancePolicyData duplicate))
+                {
+                    selectedMaintenancePolicyId = duplicate.id;
+                    SetFeedback($"장비 정비 정책 복제: {duplicate.displayName}");
+                }
+            });
+
+        if (IsCustomMaintenancePolicy(selected.id))
+        {
+            bool confirming = string.Equals(
+                pendingMaintenancePolicyDeleteId,
+                selected.id,
+                StringComparison.Ordinal);
+            CreateButtonRow(
+                "V14Action_MaintenanceDelete",
+                confirming ? "삭제 확정" : "정책 삭제",
+                confirming
+                    ? "배정된 캐릭터는 표준 정책으로 재배정됩니다."
+                    : "한 번 더 눌러 삭제를 확정합니다.",
+                () =>
+                {
+                    if (!confirming)
+                    {
+                        pendingMaintenancePolicyDeleteId = selected.id;
+                        SetFeedback("장비 정책 삭제를 한 번 더 확인하세요.");
+                        return;
+                    }
+
+                    if (equipmentMaintenanceRuntime.TryDeletePolicy(
+                        selected.id,
+                        reassignToStandard: true))
+                    {
+                        selectedMaintenancePolicyId =
+                            EquipmentMaintenancePolicyRuntime.StandardPolicyId;
+                        pendingMaintenancePolicyDeleteId = string.Empty;
+                        SetFeedback("장비 정책을 삭제하고 표준 정책으로 재배정했습니다.");
+                    }
+                });
+        }
+
+        BuildMaintenanceAssignments(selected);
+        BuildMaintenanceOrders();
+    }
+
+    private void BuildMaintenanceAssignments(EquipmentMaintenancePolicyData selected)
+    {
+        IReadOnlyList<CharacterActor> workers = staffWorkforceQuery.FindActiveWorkers()
+            .Where(actor => actor != null && !actor.IsDead)
+            .ToList();
+        AddSection(
+            "캐릭터별 장비 정책",
+            $"대상 {workers.Count}명 / 배정할 정책 {selected.displayName}");
+        for (int i = 0; i < workers.Count; i++)
+        {
+            CharacterActor worker = workers[i];
+            EquipmentMaintenancePolicyData assigned =
+                equipmentMaintenanceRuntime.GetPolicy(worker);
+            CreateDataCard(
+                $"V14Action_MaintenanceAssign_{i}",
+                GetCharacterName(worker),
+                $"현재 {assigned?.displayName ?? "표준"}",
+                string.Equals(
+                    assigned?.id,
+                    selected.id,
+                    StringComparison.Ordinal)
+                    ? "배정됨"
+                    : "이 정책 배정",
+                () =>
+                {
+                    bool assignedNow = equipmentMaintenanceRuntime.AssignPolicy(
+                        worker,
+                        selected.id);
+                    SetFeedback(assignedNow
+                        ? $"{GetCharacterName(worker)}: {selected.displayName} 배정"
+                        : $"{GetCharacterName(worker)} 정책 배정 실패");
+                },
+                CompactCardHeight);
+        }
+    }
+
+    private void BuildMaintenanceOrders()
+    {
+        IReadOnlyList<CombatEquipmentRepairOrder> orders =
+            equipmentMaintenanceRuntime.Orders;
+        AddSection("대장작업대 수리 대기열", $"활성 주문 {orders.Count}건");
+        ResourceCombatEquipmentCatalog catalog = new ResourceCombatEquipmentCatalog();
+        ICombatEquipmentRuntime equipment = CombatEquipmentRuntime.Active;
+        for (int i = 0; i < Mathf.Min(orders.Count, MaxVisibleCardsPerSection); i++)
+        {
+            CombatEquipmentRepairOrder order = orders[i];
+            string equipmentName = order.equipmentInstanceId;
+            if (equipment != null
+                && equipment.TryGetInstance(
+                    order.equipmentInstanceId,
+                    out CombatEquipmentInstance instance)
+                && catalog.TryGet(
+                    instance.definitionId,
+                    out CombatEquipmentDefinitionSO definition))
+            {
+                equipmentName = definition.DisplayName;
+            }
+
+            CreateStatusCard(
+                $"V14State_MaintenanceOrder_{i}",
+                equipmentName,
+                $"{FormatMaintenanceState(order.state)} / 진행 {order.ProgressRatio:P0}"
+                + $" / 일반 재료 {order.requiredGeneralMaterials}"
+                + $" / 작업 {order.completedWork:0.#}/{order.requiredWork:0.#}",
+                CompactCardHeight);
+        }
+    }
+
+    private void CreateMaintenancePolicyNameEditor(
+        EquipmentMaintenancePolicyData selected)
+    {
+        GameObject row = CreateUiObject("V14MaintenancePolicyNameEditor", contentRoot);
+        spawnedObjects.Add(row);
+        Image background = row.AddComponent<Image>();
+        background.color = DungeonUiTheme.SurfaceRaised;
+        HorizontalLayoutGroup horizontal = row.AddComponent<HorizontalLayoutGroup>();
+        horizontal.padding = new RectOffset(10, 10, 8, 8);
+        horizontal.spacing = 8f;
+        horizontal.childControlHeight = true;
+        horizontal.childControlWidth = true;
+        horizontal.childForceExpandHeight = true;
+        horizontal.childForceExpandWidth = false;
+        LayoutElement rowLayout = row.AddComponent<LayoutElement>();
+        rowLayout.preferredHeight = 58f;
+        rowLayout.minHeight = 58f;
+
+        GameObject inputObject = CreateUiObject("PolicyNameInput", row.transform);
+        inputObject.AddComponent<Image>().color = DungeonUiTheme.Surface;
+        TMP_InputField input = inputObject.AddComponent<TMP_InputField>();
+        TMP_Text inputText = AddText(
+            inputObject.transform,
+            selected.displayName,
+            17f,
+            FontStyles.Normal);
+        inputText.alignment = TextAlignmentOptions.MidlineLeft;
+        inputText.color = DungeonUiTheme.TextPrimary;
+        RectTransform inputTextRect = inputText.GetComponent<RectTransform>();
+        inputTextRect.anchorMin = Vector2.zero;
+        inputTextRect.anchorMax = Vector2.one;
+        inputTextRect.offsetMin = new Vector2(10f, 4f);
+        inputTextRect.offsetMax = new Vector2(-10f, -4f);
+        input.textComponent = inputText;
+        input.text = selected.displayName;
+        input.characterLimit = 20;
+        LayoutElement inputLayout = inputObject.AddComponent<LayoutElement>();
+        inputLayout.preferredWidth = 360f;
+        inputLayout.flexibleWidth = 1f;
+
+        CreateActionButton(
+            row.transform,
+            "V14Action_MaintenanceRename",
+            "이름 저장",
+            () =>
+            {
+                string nextName = input.text?.Trim();
+                if (string.IsNullOrWhiteSpace(nextName))
+                {
+                    SetFeedback("정책 이름은 비워 둘 수 없습니다.");
+                    return;
+                }
+
+                UpdateSelectedMaintenancePolicy(
+                    policy => policy.displayName = nextName);
+            },
+            132f,
+            42f);
+    }
+
+    private void UpdateSelectedMaintenancePolicy(
+        Action<EquipmentMaintenancePolicyData> update)
+    {
+        EquipmentMaintenancePolicyData source =
+            equipmentMaintenanceRuntime.Policies.FirstOrDefault(policy =>
+                policy != null
+                && string.Equals(
+                    policy.id,
+                    selectedMaintenancePolicyId,
+                    StringComparison.Ordinal));
+        if (source == null)
+        {
+            return;
+        }
+
+        EquipmentMaintenancePolicyData edited = source.Clone();
+        update?.Invoke(edited);
+        if (equipmentMaintenanceRuntime.TryUpdatePolicy(edited))
+        {
+            SetFeedback($"장비 정비 정책 갱신: {edited.displayName}");
+        }
+    }
+
+    private static bool IsCustomMaintenancePolicy(string policyId)
+    {
+        return policyId is not EquipmentMaintenancePolicyRuntime.StandardPolicyId
+            and not EquipmentMaintenancePolicyRuntime.PreventivePolicyId
+            and not EquipmentMaintenancePolicyRuntime.ManualPolicyId;
+    }
+
+    private static string FormatMaintenanceState(
+        CombatEquipmentRepairOrderState state)
+    {
+        return state switch
+        {
+            CombatEquipmentRepairOrderState.PendingCombatEnd => "교전 종료 대기",
+            CombatEquipmentRepairOrderState.WaitingForDelivery => "운반 대기",
+            CombatEquipmentRepairOrderState.Ready => "수리 준비",
+            CombatEquipmentRepairOrderState.InProgress => "수리 중",
+            CombatEquipmentRepairOrderState.Completed => "완료",
+            _ => "취소"
+        };
     }
 
     private void BuildRoomIdentitySection()
@@ -323,17 +651,297 @@ public sealed partial class P0FeatureSurfacePanel
             string targetText = intruder.CurrentPriorityTarget != null
                 ? GetBuildingName(intruder.CurrentPriorityTarget)
                 : FormatPatternTarget(pattern.targetPreference);
+            bool hasEngagement = defenseEngagementRuntime.TryGetEngagement(
+                intruder,
+                out DefenseEngagement engagement);
+            string frontText = hasEngagement
+                ? $"전선 {FormatDefenseEngagementState(engagement.State)} / "
+                    + $"선두 {GetCharacterName(engagement.LeadGuard)} / "
+                    + $"예비 {GetCharacterName(engagement.ReserveGuard)} / "
+                    + $"공방 {engagement.ExchangeCount}회"
+                : intruder.State == InvasionIntruderState.Rallying
+                    ? $"경비 대기 / 외부 집결 {Mathf.CeilToInt(intruder.RallySecondsRemaining)}초"
+                    : !intruder.HasBreachedDungeonInterior
+                        ? "경비 대기 / 입구 접근 중"
+                        : "전선 미형성 / 내부 진격 중";
             CreateDataCard(
                 $"P1Action_IntruderTrack_{i}",
                 $"{pattern.title} · {(actor != null ? actor.name : "침입자")}",
-                $"상태 {FormatIntruderState(intruder.State)} / 집중 {intruder.Focus:0.#} / 목표 {targetText}\n{statusText}",
+                $"상태 {FormatIntruderState(intruder.State)} / 집중 {intruder.Focus:0.#} / 목표 {targetText}\n{frontText}\n{statusText}",
                 "추적",
                 () => SetFeedback($"{pattern.title}: {pattern.detail}"),
-                CardHeight);
+                116f);
         }
+
+        BuildOwnerEvacuationSection();
+        BuildDefenseResponsePolicySection();
 
         BuildDefenseFacilitySection(intruders);
         BuildInvasionReportSection(reports);
+    }
+
+    private void BuildOwnerEvacuationSection()
+    {
+        string status = ownerEvacuationService.IsEvacuating
+            ? ownerEvacuationService.StatusText
+            : "침공 대기";
+        AddSection(
+            "사장 대피",
+            ownerEvacuationService.IsEvacuating
+                ? $"{status} / 목표 {ownerEvacuationService.TargetCell}"
+                : "침공이 시작되면 사장실 또는 가장 먼 내부 안전 칸으로 대피합니다.");
+        CreateStatusCard(
+            "P1State_OwnerEvacuation",
+            ownerEvacuationService.HasReachedTarget ? "대피 완료" : status,
+            ownerEvacuationService.IsEvacuating
+                ? "경비 전선이 모두 무너질 때만 최종 방어에 참여합니다."
+                : "사장은 자동 경비 후보에서 제외됩니다.",
+            CompactCardHeight);
+    }
+
+    private void BuildDefenseResponsePolicySection()
+    {
+        IReadOnlyList<DefenseResponsePolicyData> policies = defenseResponsePolicyRuntime.Policies;
+        DefenseResponsePolicyData selected = policies.FirstOrDefault(policy => policy != null
+            && string.Equals(policy.id, selectedDefensePolicyId, StringComparison.Ordinal))
+            ?? policies.FirstOrDefault();
+        if (selected == null)
+        {
+            AddSection("경비 대응 정책", "사용 가능한 정책이 없습니다.");
+            return;
+        }
+
+        selectedDefensePolicyId = selected.id;
+        AddSection(
+            "경비 대응 정책",
+            $"정책 {policies.Count}개 / 선택 {selected.displayName} / 자동 출동 {(selected.autoRespond ? "켜짐" : "꺼짐")}");
+        for (int i = 0; i < policies.Count; i++)
+        {
+            DefenseResponsePolicyData policy = policies[i];
+            bool isSelected = string.Equals(policy.id, selectedDefensePolicyId, StringComparison.Ordinal);
+            CreateDataCard(
+                $"P1Action_DefensePolicySelect_{i}",
+                policy.displayName,
+                $"출동 체력 {policy.minimumDispatchHealthRatio:P0} / 후퇴 {FormatRetreat(policy)} / "
+                    + $"재참전 {policy.rejoinHealthRatio:P0} / 대체자 없음 {(policy.holdWithoutReplacement ? "사수" : "후퇴")}",
+                isSelected ? "선택됨" : "선택",
+                () =>
+                {
+                    selectedDefensePolicyId = policy.id;
+                    pendingDefensePolicyDeleteId = string.Empty;
+                    SetFeedback($"방어 정책 선택: {policy.displayName}");
+                },
+                CompactCardHeight);
+        }
+
+        CreateDefensePolicyNameEditor(selected);
+        CreateButtonRow(
+            "P1Action_DefensePolicyAuto",
+            selected.autoRespond ? "자동 출동 끄기" : "자동 출동 켜기",
+            "당직이며 경비 우선순위가 켜진 직원에게만 적용됩니다.",
+            () => UpdateSelectedDefensePolicy(policy => policy.autoRespond = !policy.autoRespond));
+        CreateButtonRow(
+            "P1Action_DefensePolicyDispatchHealth",
+            $"최소 출동 체력 {selected.minimumDispatchHealthRatio:P0}",
+            "누르면 5%씩 증가하며 100% 다음에는 0%로 돌아갑니다.",
+            () => UpdateSelectedDefensePolicy(policy =>
+                policy.minimumDispatchHealthRatio = StepRatio(policy.minimumDispatchHealthRatio)));
+        CreateButtonRow(
+            "P1Action_DefensePolicyRetreatHealth",
+            $"후퇴 체력 {FormatRetreat(selected)}",
+            "0%는 자동 후퇴 없음입니다. 누르면 5%씩 조정합니다.",
+            () => UpdateSelectedDefensePolicy(policy =>
+                policy.retreatHealthRatio = StepRatio(policy.retreatHealthRatio)));
+        CreateButtonRow(
+            "P1Action_DefensePolicyHold",
+            selected.holdWithoutReplacement ? "대체자 없으면 사수" : "대체자 없어도 후퇴",
+            "예비 경비가 없을 때 선두 경비의 후퇴 여부입니다.",
+            () => UpdateSelectedDefensePolicy(policy =>
+                policy.holdWithoutReplacement = !policy.holdWithoutReplacement));
+        CreateButtonRow(
+            "P1Action_DefensePolicyRejoinHealth",
+            $"치료 후 재참전 {selected.rejoinHealthRatio:P0}",
+            "후퇴한 경비가 다시 출동할 최소 체력입니다.",
+            () => UpdateSelectedDefensePolicy(policy =>
+                policy.rejoinHealthRatio = StepRatio(policy.rejoinHealthRatio)));
+        CreateButtonRow(
+            "P1Action_DefensePolicyCreate",
+            "새 정책",
+            "표준 수치로 새 사용자 정책을 만듭니다.",
+            () =>
+            {
+                if (defenseResponsePolicyRuntime.TryCreatePolicy(
+                    $"새 정책 {policies.Count + 1}",
+                    out DefenseResponsePolicyData created))
+                {
+                    selectedDefensePolicyId = created.id;
+                    SetFeedback($"방어 정책 생성: {created.displayName}");
+                }
+            });
+        CreateButtonRow(
+            "P1Action_DefensePolicyDuplicate",
+            "정책 복제",
+            "현재 수치를 새 사용자 정책으로 복제합니다.",
+            () =>
+            {
+                if (defenseResponsePolicyRuntime.TryDuplicatePolicy(
+                    selected.id,
+                    $"{selected.displayName} 사본",
+                    out DefenseResponsePolicyData duplicate))
+                {
+                    selectedDefensePolicyId = duplicate.id;
+                    SetFeedback($"방어 정책 복제: {duplicate.displayName}");
+                }
+            });
+
+        if (selected.kind == DefenseResponsePolicyKind.Custom)
+        {
+            bool confirming = string.Equals(
+                pendingDefensePolicyDeleteId,
+                selected.id,
+                StringComparison.Ordinal);
+            CreateButtonRow(
+                "P1Action_DefensePolicyDelete",
+                confirming ? "삭제 확정" : "정책 삭제",
+                confirming
+                    ? "배정된 경비는 표준 정책으로 재배정됩니다."
+                    : "한 번 더 눌러 삭제를 확정합니다.",
+                () =>
+                {
+                    if (!confirming)
+                    {
+                        pendingDefensePolicyDeleteId = selected.id;
+                        SetFeedback("정책 삭제를 한 번 더 확인하세요.");
+                        return;
+                    }
+
+                    if (defenseResponsePolicyRuntime.TryDeletePolicy(selected.id, reassignToStandard: true))
+                    {
+                        selectedDefensePolicyId = DefenseResponsePolicyRuntime.StandardPolicyId;
+                        pendingDefensePolicyDeleteId = string.Empty;
+                        SetFeedback("정책을 삭제하고 배정 경비를 표준 정책으로 옮겼습니다.");
+                    }
+                });
+        }
+
+        BuildDefenseGuardAssignments(selected);
+    }
+
+    private void BuildDefenseGuardAssignments(DefenseResponsePolicyData selected)
+    {
+        IReadOnlyList<CharacterActor> guards = staffWorkforceQuery.FindActiveWorkers()
+            .Where(actor => actor != null && !actor.IsOwner)
+            .ToList();
+        AddSection("경비별 정책 배정", $"직원 {guards.Count}명 / 배정할 정책 {selected.displayName}");
+        for (int i = 0; i < guards.Count; i++)
+        {
+            CharacterActor guard = guards[i];
+            DefenseResponsePolicyData assigned = defenseResponsePolicyRuntime.GetPolicy(guard);
+            CharacterWorkRoleUtility.TryGetWork(guard, out AbilityWork work);
+            string duty = work != null && work.IsOffDuty ? "비번" : "당직";
+            string priority = work != null
+                ? work.WorkPriorities.GetPriority(FacilityWorkType.Guard).ToString()
+                : "없음";
+            CreateDataCard(
+                $"P1Action_DefensePolicyAssign_{i}",
+                GetCharacterName(guard),
+                $"현재 {assigned?.displayName ?? "표준"} / {duty} / 경비 우선순위 {priority}",
+                string.Equals(assigned?.id, selected.id, StringComparison.Ordinal) ? "배정됨" : "이 정책 배정",
+                () =>
+                {
+                    if (defenseResponsePolicyRuntime.AssignPolicy(guard, selected.id))
+                    {
+                        SetFeedback($"{GetCharacterName(guard)}: {selected.displayName} 배정");
+                    }
+                },
+                CompactCardHeight);
+        }
+    }
+
+    private void CreateDefensePolicyNameEditor(DefenseResponsePolicyData selected)
+    {
+        GameObject row = CreateUiObject("P1DefensePolicyNameEditor", contentRoot);
+        spawnedObjects.Add(row);
+        Image background = row.AddComponent<Image>();
+        background.color = DungeonUiTheme.SurfaceRaised;
+        HorizontalLayoutGroup horizontal = row.AddComponent<HorizontalLayoutGroup>();
+        horizontal.padding = new RectOffset(10, 10, 8, 8);
+        horizontal.spacing = 8f;
+        horizontal.childControlHeight = true;
+        horizontal.childControlWidth = true;
+        horizontal.childForceExpandHeight = true;
+        horizontal.childForceExpandWidth = false;
+        LayoutElement rowLayout = row.AddComponent<LayoutElement>();
+        rowLayout.preferredHeight = 58f;
+        rowLayout.minHeight = 58f;
+
+        GameObject inputObject = CreateUiObject("PolicyNameInput", row.transform);
+        Image inputBackground = inputObject.AddComponent<Image>();
+        inputBackground.color = DungeonUiTheme.Surface;
+        TMP_InputField input = inputObject.AddComponent<TMP_InputField>();
+        TMP_Text inputText = AddText(inputObject.transform, selected.displayName, 17f, FontStyles.Normal);
+        inputText.alignment = TextAlignmentOptions.MidlineLeft;
+        inputText.color = DungeonUiTheme.TextPrimary;
+        RectTransform inputTextRect = inputText.GetComponent<RectTransform>();
+        inputTextRect.anchorMin = Vector2.zero;
+        inputTextRect.anchorMax = Vector2.one;
+        inputTextRect.offsetMin = new Vector2(10f, 4f);
+        inputTextRect.offsetMax = new Vector2(-10f, -4f);
+        input.textComponent = inputText;
+        input.text = selected.displayName;
+        input.characterLimit = 20;
+        LayoutElement inputLayout = inputObject.AddComponent<LayoutElement>();
+        inputLayout.preferredWidth = 360f;
+        inputLayout.flexibleWidth = 1f;
+
+        CreateActionButton(
+            row.transform,
+            "P1Action_DefensePolicyRename",
+            "이름 저장",
+            () =>
+            {
+                string nextName = input.text?.Trim();
+                if (string.IsNullOrWhiteSpace(nextName))
+                {
+                    SetFeedback("정책 이름은 비워 둘 수 없습니다.");
+                    return;
+                }
+
+                UpdateSelectedDefensePolicy(policy => policy.displayName = nextName);
+            },
+            132f,
+            42f);
+    }
+
+    private void UpdateSelectedDefensePolicy(Action<DefenseResponsePolicyData> update)
+    {
+        DefenseResponsePolicyData source = defenseResponsePolicyRuntime.Policies
+            .FirstOrDefault(policy => policy != null
+                && string.Equals(policy.id, selectedDefensePolicyId, StringComparison.Ordinal));
+        if (source == null)
+        {
+            return;
+        }
+
+        DefenseResponsePolicyData edited = source.Clone();
+        update?.Invoke(edited);
+        if (defenseResponsePolicyRuntime.TryUpdatePolicy(edited))
+        {
+            SetFeedback($"방어 정책 갱신: {edited.displayName}");
+        }
+    }
+
+    private static float StepRatio(float current)
+    {
+        float next = Mathf.Round((Mathf.Clamp01(current) + 0.05f) * 20f) / 20f;
+        return next > 1f ? 0f : next;
+    }
+
+    private static string FormatRetreat(DefenseResponsePolicyData policy)
+    {
+        return policy != null && policy.retreatHealthRatio > 0f
+            ? policy.retreatHealthRatio.ToString("P0")
+            : "없음";
     }
 
     private void BuildDefenseFacilitySection(IReadOnlyList<InvasionIntruderRuntime> intruders)
@@ -882,15 +1490,41 @@ public sealed partial class P0FeatureSurfacePanel
     {
         return state switch
         {
+            InvasionIntruderState.Rallying => "외부 집결 중",
             InvasionIntruderState.Entering => "진입 중",
             InvasionIntruderState.Searching => "탐색 중",
             InvasionIntruderState.MovingToOwner => "사장 추적",
             InvasionIntruderState.MovingToFacility => "시설 추적",
             InvasionIntruderState.DamagingFacility => "시설 파괴",
+            InvasionIntruderState.InterceptPlanned => "저지 예정",
+            InvasionIntruderState.Engaged => "교전 중",
+            InvasionIntruderState.FrontBroken => "전선 돌파",
             InvasionIntruderState.FinalCombat => "최종 교전",
             InvasionIntruderState.Finished => "종료",
             _ => "대기"
         };
+    }
+
+    private static string FormatDefenseEngagementState(DefenseEngagementState state)
+    {
+        return state switch
+        {
+            DefenseEngagementState.Dispatching => "출동 중",
+            DefenseEngagementState.InterceptPlanned => "저지 예정",
+            DefenseEngagementState.Engaged => "교전 중",
+            DefenseEngagementState.ReserveWaiting => "교대 대기",
+            DefenseEngagementState.Switching => "교대 중",
+            DefenseEngagementState.Retreating => "후퇴 중",
+            DefenseEngagementState.FrontCollapsed => "전선 돌파",
+            _ => "종료"
+        };
+    }
+
+    private static string GetCharacterName(CharacterActor actor)
+    {
+        return actor != null
+            ? actor.Identity?.DisplayName ?? actor.name
+            : "없음";
     }
 
     private static string FormatRoomIdentity(RoomInstance room, RoomProfile profile)

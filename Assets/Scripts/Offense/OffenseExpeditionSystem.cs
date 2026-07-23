@@ -21,6 +21,8 @@ public class OffenseExpeditionRuntime : MonoBehaviour
     private IOffenseBattleRuntime battleRuntime;
     private IOffensePreparationService preparationService;
     private IExpeditionEquipmentRuntime equipmentRuntime;
+    private IExpeditionDepartureService departureService;
+    private IExpeditionReturnService returnService;
 
     public IReadOnlyList<OffenseExpeditionRun> ActiveExpeditions =>
         activeExpeditionsView ??= activeExpeditions.AsReadOnly();
@@ -75,7 +77,9 @@ public class OffenseExpeditionRuntime : MonoBehaviour
         IOffensePanelService panelService,
         IOffenseBattleRuntime battleRuntime,
         IOffensePreparationService preparationService,
-        IExpeditionEquipmentRuntime equipmentRuntime)
+        IExpeditionEquipmentRuntime equipmentRuntime,
+        IExpeditionDepartureService departureService = null,
+        IExpeditionReturnService returnService = null)
     {
         Construct(
             memberQuery,
@@ -88,6 +92,8 @@ public class OffenseExpeditionRuntime : MonoBehaviour
             ?? throw new ArgumentNullException(nameof(preparationService));
         this.equipmentRuntime = equipmentRuntime
             ?? throw new ArgumentNullException(nameof(equipmentRuntime));
+        this.departureService = departureService;
+        this.returnService = returnService;
     }
 
     private void OnDestroy()
@@ -321,6 +327,29 @@ public class OffenseExpeditionRuntime : MonoBehaviour
             OffenseRouteGenerator.Create(target),
             supplies,
             preparation);
+        if (departureService != null)
+        {
+            if (!departureService.TryBeginDeparture(
+                    expedition,
+                    party,
+                    () => StateChanged?.Invoke(),
+                    out string departureMessage))
+            {
+                preparationService?.ReturnSupplies(supplies, expeditionId);
+                message = departureMessage;
+                expedition = null;
+                return false;
+            }
+
+            preparationService?.ConsumePackedSupplies(expeditionId);
+            activeExpeditions.Add(expedition);
+            message = $"{target.title} 출정 집결 중";
+            OffenseExpeditionStartedEvent.Trigger(expedition);
+            EventAlertService.Raise("출정 집결", message, EventAlertImportance.Medium, "expedition");
+            StateChanged?.Invoke();
+            return true;
+        }
+
         List<CharacterActor> departedMembers = new List<CharacterActor>();
         foreach (CharacterActor member in party)
         {
@@ -669,7 +698,18 @@ public class OffenseExpeditionRuntime : MonoBehaviour
             if (actor == null) continue;
             bool survived = !actor.IsDead;
             actor.Lifecycle?.RecordExpeditionReturn(member.Stress, survived);
-            actor.EndExpedition(survived);
+            bool returnAnimated = survived
+                && returnService != null
+                && returnService.TryBeginReturn(
+                    actor,
+                    true,
+                    () => StateChanged?.Invoke(),
+                    out _);
+            if (!returnAnimated)
+            {
+                actor.EndExpedition(survived);
+            }
+
             if (success && survived)
             {
                 actor.Progression?.AddExperience(CalculateSuccessfulReturnExperience(expedition));
@@ -718,7 +758,9 @@ public class OffenseExpeditionRuntime : MonoBehaviour
     private static string GetActorName(CharacterActor actor)
     {
         actor?.EnsureRuntimeState();
-        return actor?.Identity != null ? actor.Identity.DisplayName : actor?.name ?? "대원";
+        return actor != null && actor.Identity != null
+            ? actor.Identity.DisplayName
+            : actor != null ? actor.name : "대원";
     }
 
     private OffenseExpeditionResult FinalizeBattleExpedition(
@@ -1435,7 +1477,9 @@ public class OffenseExpeditionPanel : MonoBehaviour
     private static string GetActorName(CharacterActor actor)
     {
         actor?.EnsureRuntimeState();
-        return actor?.Identity != null ? actor.Identity.DisplayName : actor?.name ?? "대원";
+        return actor != null && actor.Identity != null
+            ? actor.Identity.DisplayName
+            : actor != null ? actor.name : "대원";
     }
 
     private void EnsureView()

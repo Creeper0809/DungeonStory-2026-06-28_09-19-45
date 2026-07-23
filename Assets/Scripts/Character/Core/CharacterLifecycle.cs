@@ -290,6 +290,9 @@ public class CharacterLifecycle : SerializedMonoBehaviour
             if (lifecycleState == CharacterLifecycleState.SpawningOutside
                 || lifecycleState == CharacterLifecycleState.EnteringDungeon
                 || lifecycleState == CharacterLifecycleState.ExitingDungeon
+                || lifecycleState == CharacterLifecycleState.PreparingExpedition
+                || lifecycleState == CharacterLifecycleState.DepartingExpedition
+                || lifecycleState == CharacterLifecycleState.ReturningExpedition
                 || lifecycleState == CharacterLifecycleState.OnExpedition
                 || lifecycleState == CharacterLifecycleState.Despawned)
             {

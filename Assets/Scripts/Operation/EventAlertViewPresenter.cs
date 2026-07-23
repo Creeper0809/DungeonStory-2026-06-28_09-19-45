@@ -123,6 +123,7 @@ public sealed class EventAlertViewPresenter : IEventAlertViewPresenter
         if (runtimeRoot == null)
         {
             runtimeRoot = viewUiFactory.CreateRuntimeRoot(canvas);
+            RefreshRuntimeRaycasters();
         }
 
         BringRuntimeUiToFront();
@@ -190,6 +191,8 @@ public sealed class EventAlertViewPresenter : IEventAlertViewPresenter
         {
             detailText = detailPanel.GetComponentInChildren<TMP_Text>(true);
         }
+
+        RefreshRuntimeRaycasters();
     }
 
     public void DestroyRuntimeUI()
@@ -222,7 +225,7 @@ public sealed class EventAlertViewPresenter : IEventAlertViewPresenter
         Button button = buttonFactory.CreateAlertButton(
             buttonRoot,
             record,
-            () => openRecord(record));
+            () => HandleAlertButtonClick(record));
         if (button == null)
         {
             return;
@@ -265,6 +268,20 @@ public sealed class EventAlertViewPresenter : IEventAlertViewPresenter
         }
     }
 
+    private void HandleAlertButtonClick(EventAlertRecord record)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        openRecord(record);
+        if (record.Choices.Count == 1 && record.Choices[0]?.Callback != null)
+        {
+            executeChoice(0);
+        }
+    }
+
     private void LayoutButtons()
     {
         EventAlertLayout.LayoutButtons(buttonRoot, buttonContentRect, buttonViewportRect, buttonScrollRect);
@@ -279,6 +296,27 @@ public sealed class EventAlertViewPresenter : IEventAlertViewPresenter
         else if (detailPanel != null)
         {
             detailPanel.transform.SetAsLastSibling();
+        }
+    }
+
+    private void RefreshRuntimeRaycasters()
+    {
+        if (runtimeRoot == null)
+        {
+            return;
+        }
+
+        GraphicRaycaster[] raycasters =
+            runtimeRoot.GetComponentsInChildren<GraphicRaycaster>(true);
+        foreach (GraphicRaycaster raycaster in raycasters)
+        {
+            if (raycaster == null || !raycaster.enabled)
+            {
+                continue;
+            }
+
+            raycaster.enabled = false;
+            raycaster.enabled = true;
         }
     }
 

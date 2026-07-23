@@ -25,6 +25,7 @@ public static class DungeonAutomationInputState
     private static bool enabled;
     private static bool pointerOverridden;
     private static Vector3 pointerPosition;
+    private static float scrollDeltaY;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetRuntime()
@@ -42,6 +43,7 @@ public static class DungeonAutomationInputState
         enabled = false;
         pointerOverridden = false;
         pointerPosition = Vector3.zero;
+        scrollDeltaY = 0f;
         HeldKeys.Clear();
         KeyDownFrames.Clear();
         for (int index = 0; index < MouseDownFrames.Length; index++)
@@ -82,6 +84,29 @@ public static class DungeonAutomationInputState
         MouseDownFrames[button] = downFrame;
         MouseHeldUntilFrames[button] = downFrame + 1;
         return downFrame;
+    }
+
+    public static void Scroll(float deltaY)
+    {
+        if (!enabled || Mathf.Approximately(deltaY, 0f))
+        {
+            return;
+        }
+
+        scrollDeltaY += deltaY;
+    }
+
+    public static bool TryConsumeScrollDeltaY(out float deltaY)
+    {
+        deltaY = 0f;
+        if (!enabled || Mathf.Approximately(scrollDeltaY, 0f))
+        {
+            return false;
+        }
+
+        deltaY = scrollDeltaY;
+        scrollDeltaY = 0f;
+        return true;
     }
 
     public static bool GetMouseButtonDown(int button)
@@ -148,6 +173,7 @@ public sealed class DungeonPlayerAutomationBridge : IStartable, IDisposable
     private readonly IFirstRunObjectiveRuntime firstRunObjective;
     private readonly IGameDataProvider gameDataProvider;
     private readonly IDungeonSceneComponentQuery sceneQuery;
+    private readonly IMainCameraProvider mainCameraProvider;
 
     private DungeonPlayerAutomationHost host;
 
@@ -155,12 +181,15 @@ public sealed class DungeonPlayerAutomationBridge : IStartable, IDisposable
         IDungeonRunFlowRuntime runFlow,
         IFirstRunObjectiveRuntime firstRunObjective,
         IGameDataProvider gameDataProvider,
-        IDungeonSceneComponentQuery sceneQuery)
+        IDungeonSceneComponentQuery sceneQuery,
+        IMainCameraProvider mainCameraProvider)
     {
         this.runFlow = runFlow ?? throw new ArgumentNullException(nameof(runFlow));
         this.firstRunObjective = firstRunObjective ?? throw new ArgumentNullException(nameof(firstRunObjective));
         this.gameDataProvider = gameDataProvider ?? throw new ArgumentNullException(nameof(gameDataProvider));
         this.sceneQuery = sceneQuery ?? throw new ArgumentNullException(nameof(sceneQuery));
+        this.mainCameraProvider = mainCameraProvider
+            ?? throw new ArgumentNullException(nameof(mainCameraProvider));
     }
 
     public void Start()
@@ -186,7 +215,13 @@ public sealed class DungeonPlayerAutomationBridge : IStartable, IDisposable
         GameObject hostObject = new GameObject("DungeonPlayerAutomationHost");
         UnityEngine.Object.DontDestroyOnLoad(hostObject);
         host = hostObject.AddComponent<DungeonPlayerAutomationHost>();
-        host.Configure(config, runFlow, firstRunObjective, gameDataProvider, sceneQuery);
+        host.Configure(
+            config,
+            runFlow,
+            firstRunObjective,
+            gameDataProvider,
+            sceneQuery,
+            mainCameraProvider);
     }
 
     public void Dispose()
@@ -262,6 +297,7 @@ internal sealed class DungeonPlayerAutomationHost : MonoBehaviour
     private IFirstRunObjectiveRuntime firstRunObjective;
     private IGameDataProvider gameDataProvider;
     private IDungeonSceneComponentQuery sceneQuery;
+    private IMainCameraProvider mainCameraProvider;
     private DungeonPlayerAutomationConfig config;
     private TcpListener listener;
     private Thread listenerThread;
@@ -274,13 +310,15 @@ internal sealed class DungeonPlayerAutomationHost : MonoBehaviour
         IDungeonRunFlowRuntime flow,
         IFirstRunObjectiveRuntime objective,
         IGameDataProvider dataProvider,
-        IDungeonSceneComponentQuery componentQuery)
+        IDungeonSceneComponentQuery componentQuery,
+        IMainCameraProvider cameraProvider)
     {
         config = automationConfig ?? throw new ArgumentNullException(nameof(automationConfig));
         runFlow = flow ?? throw new ArgumentNullException(nameof(flow));
         firstRunObjective = objective ?? throw new ArgumentNullException(nameof(objective));
         gameDataProvider = dataProvider ?? throw new ArgumentNullException(nameof(dataProvider));
         sceneQuery = componentQuery ?? throw new ArgumentNullException(nameof(componentQuery));
+        mainCameraProvider = cameraProvider ?? throw new ArgumentNullException(nameof(cameraProvider));
 
         automationDirectory = Path.Combine(Application.persistentDataPath, "Automation");
         connectionPath = Path.Combine(automationDirectory, "bridge.json");
@@ -460,7 +498,7 @@ internal sealed class DungeonPlayerAutomationHost : MonoBehaviour
         CameraManager cameraManager = sceneQuery.First<CameraManager>(includeInactive: true);
         Vector3 cameraPosition = cameraManager != null
             ? cameraManager.transform.position
-            : Camera.main != null ? Camera.main.transform.position : Vector3.zero;
+            : mainCameraProvider.Camera.transform.position;
 
         AutomationGameStatus status = new AutomationGameStatus
         {

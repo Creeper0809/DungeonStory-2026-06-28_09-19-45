@@ -34,7 +34,7 @@ public interface IDungeonSaveSlotCatalog
 [Serializable]
 public sealed class DungeonGameSaveData
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 14;
 
     public int version = CurrentVersion;
     public string savedAtUtc = string.Empty;
@@ -51,10 +51,24 @@ public sealed class DungeonGameSaveData
     public DungeonOperatingDaySettlementSaveData settlement = new DungeonOperatingDaySettlementSaveData();
     public DungeonEventAlertSaveData alerts = new DungeonEventAlertSaveData();
     public DungeonPhysicalItemSaveData physicalItems = new DungeonPhysicalItemSaveData();
+    public DungeonWorkOrderSaveData workOrders = new DungeonWorkOrderSaveData();
+    public DungeonExteriorActivitySaveData exterior = new DungeonExteriorActivitySaveData();
+    public DungeonWildlifeSaveData wildlife = new DungeonWildlifeSaveData();
+    public DungeonSurvivalSaveData survival = new DungeonSurvivalSaveData();
+    public DungeonDarkSurvivalSaveData darkSurvival = new DungeonDarkSurvivalSaveData();
+    public DungeonCombatEquipmentSaveData combatEquipment = new DungeonCombatEquipmentSaveData();
+    public DungeonCharacterBodyHealthSaveData bodyHealth = new DungeonCharacterBodyHealthSaveData();
+    public DungeonCharacterMedicalSaveData medical = new DungeonCharacterMedicalSaveData();
+    public CharacterCombatCommandSaveData combatCommands = new CharacterCombatCommandSaveData();
+    public DefenseTacticalCoordinatorSaveData tacticalCoordinator =
+        new DefenseTacticalCoordinatorSaveData();
+    public CombatEquipmentMaintenanceSaveData equipmentMaintenance =
+        new CombatEquipmentMaintenanceSaveData();
     public ExpeditionEquipmentSaveData expeditionEquipment = new ExpeditionEquipmentSaveData();
     public DungeonOffenseSaveData offense = new DungeonOffenseSaveData();
     public DungeonInvasionSaveData invasion = new DungeonInvasionSaveData();
     public DungeonRunFlowSaveData runFlow = new DungeonRunFlowSaveData();
+    public DungeonDebugRunSaveData debug = new DungeonDebugRunSaveData();
 }
 
 [Serializable]
@@ -356,6 +370,7 @@ public sealed class DungeonSaveSlotInfo
     public int Day { get; internal set; }
     public int Money { get; internal set; }
     public bool IsValid { get; internal set; }
+    public bool DebugModified { get; internal set; }
 }
 
 public sealed class DungeonSaveSlotCatalog : IDungeonSaveSlotCatalog
@@ -403,6 +418,7 @@ public sealed class DungeonSaveSlotCatalog : IDungeonSaveSlotCatalog
                 info.SceneName = data?.sceneName ?? string.Empty;
                 info.Day = data?.world?.gameData?.day ?? 1;
                 info.Money = data?.world?.gameData?.holdingMoney ?? 0;
+                info.DebugModified = data?.debug != null && data.debug.debugModified;
                 info.IsValid = data != null && data.version == DungeonGameSaveData.CurrentVersion;
             }
             catch
@@ -452,6 +468,7 @@ public sealed class DungeonSaveSlotCatalog : IDungeonSaveSlotCatalog
         public string savedAtUtc;
         public string sceneName;
         public DungeonSaveSlotWorldHeaderData world;
+        public DungeonDebugRunSaveData debug;
     }
 
     [Serializable]
@@ -487,9 +504,21 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
     private readonly IOffenseSaveService offenseSaveService;
     private readonly IInvasionSaveService invasionSaveService;
     private readonly IWorldItemStackRuntime itemStackRuntime;
+    private readonly IWorkOrderRuntime workOrderRuntime;
     private readonly IFacilityShopCatalog facilityCatalog;
     private readonly IRunCharacterCatalog characterCatalog;
     private readonly IDungeonRunFlowRuntime runFlowRuntime;
+    private readonly IExteriorActivityRuntime exteriorActivityRuntime;
+    private readonly IWildlifeRuntime wildlifeRuntime;
+    private readonly ISurvivalFoodRuntime survivalFoodRuntime;
+    private readonly ICharacterDeprivationRuntime deprivationRuntime;
+    private readonly IDungeonDebugModeService debugModeService;
+    private readonly ICombatEquipmentRuntime combatEquipmentRuntime;
+    private readonly ICharacterBodyHealthRuntime bodyHealthRuntime;
+    private readonly ICharacterMedicalRuntime medicalRuntime;
+    private readonly ICharacterCombatCommandRuntime combatCommandRuntime;
+    private readonly IDefenseTacticalCoordinator tacticalCoordinator;
+    private readonly ICombatEquipmentMaintenanceRuntime equipmentMaintenanceRuntime;
 
     public DungeonGameSaveService(
         IModularFacilityWorldSaveService worldSaveService,
@@ -511,7 +540,19 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
         IWorldItemStackRuntime itemStackRuntime,
         IFacilityShopCatalog facilityCatalog,
         IRunCharacterCatalog characterCatalog,
-        IDungeonRunFlowRuntime runFlowRuntime)
+        IDungeonRunFlowRuntime runFlowRuntime,
+        IExteriorActivityRuntime exteriorActivityRuntime = null,
+        IWildlifeRuntime wildlifeRuntime = null,
+        ISurvivalFoodRuntime survivalFoodRuntime = null,
+        IWorkOrderRuntime workOrderRuntime = null,
+        ICharacterDeprivationRuntime deprivationRuntime = null,
+        IDungeonDebugModeService debugModeService = null,
+        ICombatEquipmentRuntime combatEquipmentRuntime = null,
+        ICharacterBodyHealthRuntime bodyHealthRuntime = null,
+        ICharacterMedicalRuntime medicalRuntime = null,
+        ICharacterCombatCommandRuntime combatCommandRuntime = null,
+        IDefenseTacticalCoordinator tacticalCoordinator = null,
+        ICombatEquipmentMaintenanceRuntime equipmentMaintenanceRuntime = null)
     {
         this.worldSaveService = worldSaveService ?? throw new ArgumentNullException(nameof(worldSaveService));
         this.characterWorldSaveService = characterWorldSaveService ?? throw new ArgumentNullException(nameof(characterWorldSaveService));
@@ -533,6 +574,18 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
         this.facilityCatalog = facilityCatalog ?? throw new ArgumentNullException(nameof(facilityCatalog));
         this.characterCatalog = characterCatalog ?? throw new ArgumentNullException(nameof(characterCatalog));
         this.runFlowRuntime = runFlowRuntime ?? throw new ArgumentNullException(nameof(runFlowRuntime));
+        this.exteriorActivityRuntime = exteriorActivityRuntime;
+        this.wildlifeRuntime = wildlifeRuntime;
+        this.survivalFoodRuntime = survivalFoodRuntime;
+        this.workOrderRuntime = workOrderRuntime;
+        this.deprivationRuntime = deprivationRuntime;
+        this.debugModeService = debugModeService;
+        this.combatEquipmentRuntime = combatEquipmentRuntime;
+        this.bodyHealthRuntime = bodyHealthRuntime;
+        this.medicalRuntime = medicalRuntime;
+        this.combatCommandRuntime = combatCommandRuntime;
+        this.tacticalCoordinator = tacticalCoordinator;
+        this.equipmentMaintenanceRuntime = equipmentMaintenanceRuntime;
     }
 
     public DungeonGameSaveData Capture()
@@ -567,6 +620,19 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
         save.settlement = settlementSaveService.Capture();
         save.alerts = alertSaveService.Capture();
         save.physicalItems = itemStackRuntime.Capture();
+        save.workOrders = workOrderRuntime?.Capture() ?? new DungeonWorkOrderSaveData();
+        save.exterior = exteriorActivityRuntime?.Capture() ?? new DungeonExteriorActivitySaveData();
+        save.wildlife = wildlifeRuntime?.Capture() ?? new DungeonWildlifeSaveData();
+        save.survival = survivalFoodRuntime?.Capture() ?? new DungeonSurvivalSaveData();
+        save.darkSurvival = deprivationRuntime?.Capture() ?? new DungeonDarkSurvivalSaveData();
+        save.combatEquipment = combatEquipmentRuntime?.Capture() ?? new DungeonCombatEquipmentSaveData();
+        save.bodyHealth = bodyHealthRuntime?.Capture() ?? new DungeonCharacterBodyHealthSaveData();
+        save.medical = medicalRuntime?.Capture() ?? new DungeonCharacterMedicalSaveData();
+        save.combatCommands = combatCommandRuntime?.Capture() ?? new CharacterCombatCommandSaveData();
+        save.tacticalCoordinator = tacticalCoordinator?.Capture()
+            ?? new DefenseTacticalCoordinatorSaveData();
+        save.equipmentMaintenance = equipmentMaintenanceRuntime?.Capture()
+            ?? new CombatEquipmentMaintenanceSaveData();
         save.offense = offenseSaveService.Capture();
         save.invasion = invasionSaveService.Capture();
         save.runFlow = new DungeonRunFlowSaveData
@@ -579,6 +645,7 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
             finalInvasionDefended = runFlowRuntime.IsFinalInvasionDefended,
             bossCycle = runFlowRuntime.BossCycle
         };
+        save.debug = debugModeService?.Capture() ?? new DungeonDebugRunSaveData();
         return save;
     }
 
@@ -606,7 +673,7 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
         if (saveData.version != DungeonGameSaveData.CurrentVersion)
         {
             report.AddError(
-                $"저장 버전 {saveData.version}은 새 성장 시스템과 호환되지 않습니다. 새 게임을 시작해 주세요.");
+                $"저장 버전 {saveData.version}은 현재 저장 시스템과 호환되지 않습니다. 새 게임을 시작해 주세요.");
             return false;
         }
 
@@ -652,9 +719,33 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
                 grid,
                 saveData.characters ?? new DungeonCharacterWorldSaveData(),
                 report);
+            List<string> combatRestoreWarnings = new List<string>();
+            bodyHealthRuntime?.Restore(saveData.bodyHealth ?? new DungeonCharacterBodyHealthSaveData());
             itemStackRuntime.Restore(saveData.physicalItems ?? new DungeonPhysicalItemSaveData());
+            combatEquipmentRuntime?.Restore(saveData.combatEquipment ?? new DungeonCombatEquipmentSaveData());
+            medicalRuntime?.Restore(
+                saveData.medical ?? new DungeonCharacterMedicalSaveData(),
+                combatRestoreWarnings);
+            tacticalCoordinator?.Restore(
+                saveData.tacticalCoordinator ?? new DefenseTacticalCoordinatorSaveData(),
+                combatRestoreWarnings);
+            equipmentMaintenanceRuntime?.Restore(
+                saveData.equipmentMaintenance ?? new CombatEquipmentMaintenanceSaveData(),
+                combatRestoreWarnings);
+            workOrderRuntime?.Restore(saveData.workOrders ?? new DungeonWorkOrderSaveData(), report);
+            exteriorActivityRuntime?.Restore(saveData.exterior ?? new DungeonExteriorActivitySaveData(), report);
+            wildlifeRuntime?.Restore(saveData.wildlife ?? new DungeonWildlifeSaveData(), report);
+            survivalFoodRuntime?.Restore(saveData.survival ?? new DungeonSurvivalSaveData());
+            deprivationRuntime?.Restore(saveData.darkSurvival ?? new DungeonDarkSurvivalSaveData());
             offenseSaveService.Restore(saveData.offense, report);
             invasionSaveService.Restore(saveData.invasion, report);
+            combatCommandRuntime?.Restore(
+                saveData.combatCommands ?? new CharacterCombatCommandSaveData(),
+                combatRestoreWarnings);
+            foreach (string warning in combatRestoreWarnings)
+            {
+                report.AddWarning(warning);
+            }
             RestoreRunFlow(saveData.runFlow);
             RestoreResearch(saveData.research, report);
             RestoreFacilityShop(saveData.facilityShop, report);
@@ -664,6 +755,7 @@ public sealed class DungeonGameSaveService : IDungeonGameSaveService
             RestoreCodex(saveData.codex, report);
             settlementSaveService.Restore(saveData.settlement, report);
             alertSaveService.Restore(saveData.alerts, report);
+            debugModeService?.Restore(saveData.debug ?? new DungeonDebugRunSaveData());
         }
         catch (Exception exception)
         {

@@ -40,8 +40,16 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         Transform generated = uiRoot.transform.Find(RuntimeViewName);
         if (generated != null
             && (generated.Find("TabBar/GrowthTab") == null
+                || generated.Find("TabBar/HealthTab") == null
+                || generated.Find("TabBar/CombatTab") == null
+                || generated.Find("TabBar/AiTab") == null
                 || generated.Find("Content/GrowthContent/GrowthList") == null
-                || generated.Find("Content/StatusContent/CarrySummaryText") == null))
+                || generated.Find("Content/StatusContent/Thirst") == null
+                || generated.Find("Content/HealthContent/HealthContentViewport/HealthSummaryText") == null
+                || generated.Find("Content/CombatContent/CombatContentViewport/CombatSummaryText") == null
+                || generated.Find("Content/CombatContent/CombatCommands/LoadoutButton") == null
+                || generated.Find("Content/StatusContent/CarrySummaryText") == null
+                || generated.Find("Content/AiContent/AiContentViewport/AiSummaryText") == null))
         {
             UnityEngine.Object.DestroyImmediate(generated.gameObject);
             generated = null;
@@ -121,18 +129,13 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         tabs.childForceExpandWidth = true;
         tabs.childForceExpandHeight = true;
 
-        Button statusTabButton = CreateButton("StatusTab", tabBar, "상태");
-        statusTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-        Button growthTabButton = CreateButton("GrowthTab", tabBar, "성장");
-        growthTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-        Button moodTabButton = CreateButton("MoodTab", tabBar, "기분");
-        moodTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-        Button recordsTabButton = CreateButton("RecordsTab", tabBar, "기록");
-        recordsTabButton.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-        statusTabButton.onClick.AddListener(owner.ShowStatusTab);
-        growthTabButton.onClick.AddListener(owner.ShowGrowthTab);
-        moodTabButton.onClick.AddListener(owner.ShowMoodTab);
-        recordsTabButton.onClick.AddListener(owner.ShowRecordsTab);
+        Button statusTabButton = CreateTabButton("StatusTab", tabBar, "상태", owner.ShowStatusTab);
+        Button healthTabButton = CreateTabButton("HealthTab", tabBar, "건강", owner.ShowHealthTab);
+        Button combatTabButton = CreateTabButton("CombatTab", tabBar, "전투", owner.ShowCombatTab);
+        Button growthTabButton = CreateTabButton("GrowthTab", tabBar, "성장", owner.ShowGrowthTab);
+        Button moodTabButton = CreateTabButton("MoodTab", tabBar, "기분", owner.ShowMoodTab);
+        Button recordsTabButton = CreateTabButton("RecordsTab", tabBar, "기록", owner.ShowRecordsTab);
+        Button aiTabButton = CreateTabButton("AiTab", tabBar, "AI", owner.ShowAiTab);
 
         RectTransform content = CreateRect("Content", view);
         SetStretch(content, new Vector2(14f, 14f), new Vector2(-14f, -132f));
@@ -152,6 +155,7 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         Slider health = CreateMeterRow(statusContent, "Health", "체력", 46f);
         CreateSectionLabel(statusContent, "욕구");
         Slider hunger = CreateMeterRow(statusContent, "Hunger", "포만감", 40f);
+        Slider thirst = CreateMeterRow(statusContent, "Thirst", "갈증", 40f);
         Slider fun = CreateMeterRow(statusContent, "Fun", "재미", 40f);
         Slider sleep = CreateMeterRow(statusContent, "Sleep", "휴식", 40f);
         Slider excretion = CreateMeterRow(statusContent, "Excretion", "배변", 40f);
@@ -165,8 +169,63 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         carrySummary.overflowMode = TextOverflowModes.Ellipsis;
         carrySummary.margin = new Vector4(8f, 4f, 8f, 4f);
         LayoutElement carrySummaryLayout = carrySummary.gameObject.AddComponent<LayoutElement>();
-        carrySummaryLayout.minHeight = 72f;
-        carrySummaryLayout.preferredHeight = 86f;
+        carrySummaryLayout.minHeight = 96f;
+        carrySummaryLayout.preferredHeight = 112f;
+
+        RectTransform healthContent = CreateRect("HealthContent", content);
+        SetStretch(healthContent, Vector2.zero, Vector2.zero);
+        TMP_Text healthSummaryText = CreateScrollableText(
+            "HealthContentViewport",
+            "HealthSummaryText",
+            healthContent,
+            "결핍 건강 정보가 없습니다.",
+            minHeight: 360f,
+            fillParent: true);
+        healthContent.gameObject.SetActive(false);
+
+        RectTransform combatContent = CreateRect("CombatContent", content);
+        SetStretch(combatContent, Vector2.zero, Vector2.zero);
+        RectTransform combatCommands = CreateRect("CombatCommands", combatContent);
+        combatCommands.anchorMin = new Vector2(0f, 1f);
+        combatCommands.anchorMax = new Vector2(1f, 1f);
+        combatCommands.pivot = new Vector2(0.5f, 1f);
+        combatCommands.anchoredPosition = Vector2.zero;
+        combatCommands.sizeDelta = new Vector2(0f, 44f);
+        HorizontalLayoutGroup combatCommandLayout =
+            combatCommands.gameObject.AddComponent<HorizontalLayoutGroup>();
+        combatCommandLayout.spacing = 5f;
+        combatCommandLayout.childAlignment = TextAnchor.MiddleLeft;
+        combatCommandLayout.childControlWidth = true;
+        combatCommandLayout.childControlHeight = true;
+        combatCommandLayout.childForceExpandWidth = true;
+        combatCommandLayout.childForceExpandHeight = true;
+
+        Button loadoutButton = CreateButton("LoadoutButton", combatCommands, "전투 장비");
+        Button weaponButton = CreateButton("WeaponButton", combatCommands, "무기 교체");
+        Button reloadButton = CreateButton("ReloadButton", combatCommands, "재장전");
+        Button fireModeButton = CreateButton("FireModeButton", combatCommands, "조준");
+        Button holdFireButton = CreateButton("HoldFireButton", combatCommands, "사격 허용");
+        Button repairButton = CreateButton("RepairButton", combatCommands, "수리 요청");
+        loadoutButton.onClick.AddListener(owner.ToggleCombatLoadout);
+        weaponButton.onClick.AddListener(owner.CycleCombatWeapon);
+        reloadButton.onClick.AddListener(owner.ReloadCombatWeapon);
+        fireModeButton.onClick.AddListener(owner.CycleCombatFireMode);
+        holdFireButton.onClick.AddListener(owner.ToggleCombatHoldFire);
+        repairButton.onClick.AddListener(owner.RequestCombatEquipmentRepair);
+
+        TMP_Text combatSummaryText = CreateScrollableText(
+            "CombatContentViewport",
+            "CombatSummaryText",
+            combatContent,
+            "전투 정보가 없습니다.",
+            minHeight: 360f,
+            fillParent: true);
+        RectTransform combatViewport = combatSummaryText.transform.parent as RectTransform;
+        if (combatViewport != null)
+        {
+            combatViewport.offsetMax = new Vector2(0f, -50f);
+        }
+        combatContent.gameObject.SetActive(false);
 
         RectTransform growthContent = CreateRect("GrowthContent", content);
         SetStretch(growthContent, Vector2.zero, Vector2.zero);
@@ -230,9 +289,11 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
                 skillLabel.alignment = TextAlignmentOptions.MidlineLeft;
                 skillLabel.textWrappingMode = TextWrappingModes.Normal;
             }
+
             skillButton.onClick.AddListener(() => owner.ToggleSkillAt(capturedIndex));
             skillButtons[i] = skillButton;
         }
+
         growthContent.gameObject.SetActive(false);
 
         RectTransform moodContent = CreateRect("MoodContent", content);
@@ -255,66 +316,35 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
         moodSummaryText.gameObject.AddComponent<LayoutElement>().preferredHeight = 30f;
         CreateSectionLabel(moodContent, "기분 요인");
 
-        RectTransform moodFactorsViewport = CreateRect("MoodFactorsViewport", moodContent);
-        moodFactorsViewport.gameObject.AddComponent<Image>().color = DungeonUiTheme.SurfaceMuted;
-        moodFactorsViewport.gameObject.AddComponent<RectMask2D>();
-        LayoutElement moodFactorsLayout = moodFactorsViewport.gameObject.AddComponent<LayoutElement>();
-        moodFactorsLayout.minHeight = 240f;
-        moodFactorsLayout.flexibleHeight = 1f;
-        ScrollRect moodFactorsScroll = moodFactorsViewport.gameObject.AddComponent<ScrollRect>();
-        moodFactorsScroll.viewport = moodFactorsViewport;
-        moodFactorsScroll.horizontal = false;
-        moodFactorsScroll.vertical = true;
-        moodFactorsScroll.movementType = ScrollRect.MovementType.Clamped;
-        moodFactorsScroll.scrollSensitivity = 28f;
-
-        TMP_Text moodFactorsText = CreateText("MoodFactorsText", moodFactorsViewport, 16f, FontStyles.Normal);
-        moodFactorsText.text = "현재 기분을 바꾸는 요인이 없습니다.";
-        moodFactorsText.color = DungeonUiTheme.TextSecondary;
-        moodFactorsText.alignment = TextAlignmentOptions.TopLeft;
-        moodFactorsText.textWrappingMode = TextWrappingModes.Normal;
-        moodFactorsText.overflowMode = TextOverflowModes.Overflow;
-        moodFactorsText.lineSpacing = 8f;
-        moodFactorsText.margin = new Vector4(14f, 12f, 14f, 12f);
-        moodFactorsText.rectTransform.anchorMin = new Vector2(0f, 1f);
-        moodFactorsText.rectTransform.anchorMax = new Vector2(1f, 1f);
-        moodFactorsText.rectTransform.pivot = new Vector2(0.5f, 1f);
-        moodFactorsText.rectTransform.anchoredPosition = Vector2.zero;
-        moodFactorsText.rectTransform.sizeDelta = Vector2.zero;
-        ContentSizeFitter moodFitter = moodFactorsText.gameObject.AddComponent<ContentSizeFitter>();
-        moodFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        moodFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        moodFactorsScroll.content = moodFactorsText.rectTransform;
+        TMP_Text moodFactorsText = CreateScrollableText(
+            "MoodFactorsViewport",
+            "MoodFactorsText",
+            moodContent,
+            "현재 기분을 바꾸는 요인이 없습니다.",
+            minHeight: 240f);
         moodContent.gameObject.SetActive(false);
 
         RectTransform recordsContent = CreateRect("RecordsContent", content);
         SetStretch(recordsContent, Vector2.zero, Vector2.zero);
-        recordsContent.gameObject.AddComponent<Image>().color = DungeonUiTheme.SurfaceMuted;
-        recordsContent.gameObject.AddComponent<RectMask2D>();
-        ScrollRect recordsScroll = recordsContent.gameObject.AddComponent<ScrollRect>();
-        recordsScroll.viewport = recordsContent;
-        recordsScroll.horizontal = false;
-        recordsScroll.vertical = true;
-        recordsScroll.movementType = ScrollRect.MovementType.Clamped;
-        recordsScroll.scrollSensitivity = 28f;
-
-        TMP_Text logText = CreateText("CharacterLogText", recordsContent, 16f, FontStyles.Normal);
-        logText.color = DungeonUiTheme.TextSecondary;
-        logText.alignment = TextAlignmentOptions.TopLeft;
-        logText.textWrappingMode = TextWrappingModes.Normal;
-        logText.overflowMode = TextOverflowModes.Overflow;
-        logText.lineSpacing = 8f;
-        logText.margin = new Vector4(14f, 12f, 14f, 12f);
-        logText.rectTransform.anchorMin = new Vector2(0f, 1f);
-        logText.rectTransform.anchorMax = new Vector2(1f, 1f);
-        logText.rectTransform.pivot = new Vector2(0.5f, 1f);
-        logText.rectTransform.anchoredPosition = Vector2.zero;
-        logText.rectTransform.sizeDelta = Vector2.zero;
-        ContentSizeFitter logFitter = logText.gameObject.AddComponent<ContentSizeFitter>();
-        logFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        logFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        recordsScroll.content = logText.rectTransform;
+        TMP_Text logText = CreateScrollableText(
+            "RecordsContentViewport",
+            "CharacterLogText",
+            recordsContent,
+            "아직 기록이 없습니다.",
+            minHeight: 360f,
+            fillParent: true);
         recordsContent.gameObject.SetActive(false);
+
+        RectTransform aiContent = CreateRect("AiContent", content);
+        SetStretch(aiContent, Vector2.zero, Vector2.zero);
+        TMP_Text aiSummaryText = CreateScrollableText(
+            "AiContentViewport",
+            "AiSummaryText",
+            aiContent,
+            "AI 판단 기록이 아직 없습니다.",
+            minHeight: 360f,
+            fillParent: true);
+        aiContent.gameObject.SetActive(false);
 
         owner.BindGeneratedView(
             nameText,
@@ -328,24 +358,45 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
             hygiene,
             moodSummaryText,
             moodFactorsText,
+            aiSummaryText,
             carrySummary,
             logText);
         owner.BindGeneratedGrowth(experience, progressionSummary, skillButtons);
+        owner.BindGeneratedSurvival(
+            thirst,
+            healthSummaryText,
+            healthContent.gameObject,
+            healthTabButton);
+        owner.BindGeneratedCombat(
+            combatSummaryText,
+            combatContent.gameObject,
+            combatTabButton,
+            loadoutButton,
+            weaponButton,
+            reloadButton,
+            fireModeButton,
+            holdFireButton,
+            repairButton);
         owner.BindGeneratedTabs(
             statusContent.gameObject,
             growthContent.gameObject,
             moodContent.gameObject,
             recordsContent.gameObject,
+            aiContent.gameObject,
             statusTabButton,
             growthTabButton,
             moodTabButton,
-            recordsTabButton);
+            recordsTabButton,
+            aiTabButton);
         return view;
     }
 
     private void Bind(CharacterSummeryInfo owner, Transform generated)
     {
-        if (owner == null || generated == null) return;
+        if (owner == null || generated == null)
+        {
+            return;
+        }
 
         owner.BindGeneratedView(
             generated.Find("Header/CharacterName")?.GetComponent<TMP_Text>(),
@@ -359,31 +410,109 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
             FindSlider(generated, "Hygiene"),
             generated.Find("Content/MoodContent/MoodSummaryText")?.GetComponent<TMP_Text>(),
             generated.Find("Content/MoodContent/MoodFactorsViewport/MoodFactorsText")?.GetComponent<TMP_Text>(),
+            generated.Find("Content/AiContent/AiContentViewport/AiSummaryText")?.GetComponent<TMP_Text>(),
             generated.Find("Content/StatusContent/CarrySummaryText")?.GetComponent<TMP_Text>(),
-            generated.Find("Content/RecordsContent/CharacterLogText")?.GetComponent<TMP_Text>());
+            generated.Find("Content/RecordsContent/RecordsContentViewport/CharacterLogText")?.GetComponent<TMP_Text>());
+
         Button[] skillButtons = new Button[10];
         for (int i = 0; i < skillButtons.Length; i++)
         {
             skillButtons[i] = generated.Find($"Content/GrowthContent/GrowthList/Skill_{i}")?.GetComponent<Button>();
         }
+
         owner.BindGeneratedGrowth(
             FindSlider(generated, "Experience", "GrowthContent/GrowthList"),
             generated.Find("Content/GrowthContent/GrowthList/ProgressionSummaryText")?.GetComponent<TMP_Text>(),
             skillButtons);
+        owner.BindGeneratedSurvival(
+            FindSlider(generated, "Thirst"),
+            generated.Find("Content/HealthContent/HealthContentViewport/HealthSummaryText")?.GetComponent<TMP_Text>(),
+            generated.Find("Content/HealthContent")?.gameObject,
+            generated.Find("TabBar/HealthTab")?.GetComponent<Button>());
+        owner.BindGeneratedCombat(
+            generated.Find("Content/CombatContent/CombatContentViewport/CombatSummaryText")?.GetComponent<TMP_Text>(),
+            generated.Find("Content/CombatContent")?.gameObject,
+            generated.Find("TabBar/CombatTab")?.GetComponent<Button>(),
+            generated.Find("Content/CombatContent/CombatCommands/LoadoutButton")?.GetComponent<Button>(),
+            generated.Find("Content/CombatContent/CombatCommands/WeaponButton")?.GetComponent<Button>(),
+            generated.Find("Content/CombatContent/CombatCommands/ReloadButton")?.GetComponent<Button>(),
+            generated.Find("Content/CombatContent/CombatCommands/FireModeButton")?.GetComponent<Button>(),
+            generated.Find("Content/CombatContent/CombatCommands/HoldFireButton")?.GetComponent<Button>(),
+            generated.Find("Content/CombatContent/CombatCommands/RepairButton")?.GetComponent<Button>());
         owner.BindGeneratedTabs(
             generated.Find("Content/StatusContent")?.gameObject,
             generated.Find("Content/GrowthContent")?.gameObject,
             generated.Find("Content/MoodContent")?.gameObject,
             generated.Find("Content/RecordsContent")?.gameObject,
+            generated.Find("Content/AiContent")?.gameObject,
             generated.Find("TabBar/StatusTab")?.GetComponent<Button>(),
             generated.Find("TabBar/GrowthTab")?.GetComponent<Button>(),
             generated.Find("TabBar/MoodTab")?.GetComponent<Button>(),
-            generated.Find("TabBar/RecordsTab")?.GetComponent<Button>());
+            generated.Find("TabBar/RecordsTab")?.GetComponent<Button>(),
+            generated.Find("TabBar/AiTab")?.GetComponent<Button>());
     }
 
     private static Slider FindSlider(Transform root, string rowName, string contentName = "StatusContent")
     {
         return root.Find($"Content/{contentName}/{rowName}/Track")?.GetComponent<Slider>();
+    }
+
+    private Button CreateTabButton(string name, Transform parent, string label, UnityEngine.Events.UnityAction onClick)
+    {
+        Button button = CreateButton(name, parent, label);
+        button.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        button.onClick.AddListener(onClick);
+        return button;
+    }
+
+    private TMP_Text CreateScrollableText(
+        string viewportName,
+        string textName,
+        Transform parent,
+        string defaultText,
+        float minHeight,
+        bool fillParent = false)
+    {
+        RectTransform viewport = CreateRect(viewportName, parent);
+        Image image = viewport.gameObject.AddComponent<Image>();
+        image.color = DungeonUiTheme.SurfaceMuted;
+        viewport.gameObject.AddComponent<RectMask2D>();
+        if (fillParent)
+        {
+            SetStretch(viewport, Vector2.zero, Vector2.zero);
+        }
+        else
+        {
+            LayoutElement viewportLayout = viewport.gameObject.AddComponent<LayoutElement>();
+            viewportLayout.minHeight = minHeight;
+            viewportLayout.flexibleHeight = 1f;
+        }
+
+        ScrollRect scroll = viewport.gameObject.AddComponent<ScrollRect>();
+        scroll.viewport = viewport;
+        scroll.horizontal = false;
+        scroll.vertical = true;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+        scroll.scrollSensitivity = 28f;
+
+        TMP_Text text = CreateText(textName, viewport, 16f, FontStyles.Normal);
+        text.text = defaultText;
+        text.color = DungeonUiTheme.TextSecondary;
+        text.alignment = TextAlignmentOptions.TopLeft;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.overflowMode = TextOverflowModes.Overflow;
+        text.lineSpacing = 8f;
+        text.margin = new Vector4(14f, 12f, 14f, 12f);
+        text.rectTransform.anchorMin = new Vector2(0f, 1f);
+        text.rectTransform.anchorMax = new Vector2(1f, 1f);
+        text.rectTransform.pivot = new Vector2(0.5f, 1f);
+        text.rectTransform.anchoredPosition = Vector2.zero;
+        text.rectTransform.sizeDelta = Vector2.zero;
+        ContentSizeFitter fitter = text.gameObject.AddComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        scroll.content = text.rectTransform;
+        return text;
     }
 
     private TMP_Text CreateSectionLabel(Transform parent, string text)
@@ -509,7 +638,7 @@ public sealed class CharacterSummaryRuntimeLogFactory : ICharacterSummaryRuntime
             wrapper.anchorMax = Vector2.zero;
             wrapper.pivot = Vector2.zero;
             wrapper.anchoredPosition = new Vector2(24f, 80f);
-            wrapper.sizeDelta = new Vector2(460f, 700f);
+            wrapper.sizeDelta = new Vector2(500f, 700f);
         }
 
         RectTransform rootRect = uiRoot.GetComponent<RectTransform>();

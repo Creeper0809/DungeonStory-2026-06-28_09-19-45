@@ -471,7 +471,8 @@ public static class StockSupplyService
             return false;
         }
 
-        if (gameData.holdingMoney.Value < offer.cost)
+        if (!DungeonDebugRuntimeRules.ShouldSkipCosts()
+            && gameData.holdingMoney.Value < offer.cost)
         {
             result = Fail(offer.category, offer.amount, offer.cost, offer.sourceLabel, "자금 부족");
             StockSupplyEvent.Trigger(result);
@@ -485,7 +486,10 @@ public static class StockSupplyService
                 out int spawned,
                 out _))
         {
-            gameData.holdingMoney.Value -= offer.cost;
+            if (!DungeonDebugRuntimeRules.ShouldSkipCosts())
+            {
+                gameData.holdingMoney.Value -= offer.cost;
+            }
             bool stackSuccess = spawned == offer.amount;
             result = new StockSupplyResult(
                 stackSuccess,
@@ -506,7 +510,10 @@ public static class StockSupplyService
             return false;
         }
 
-        gameData.holdingMoney.Value -= offer.cost;
+        if (!DungeonDebugRuntimeRules.ShouldSkipCosts())
+        {
+            gameData.holdingMoney.Value -= offer.cost;
+        }
         int delivered = DepositToWarehouses(warehouses, offer.category, offer.amount);
         bool success = delivered == offer.amount;
         result = new StockSupplyResult(

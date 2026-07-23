@@ -46,6 +46,8 @@ MonoBehaviour:
     - rid: 7302562995605602320
     - rid: 7302562995605602321
     - rid: 7302562995605602322
+    - rid: 7302563106683093116
+    - rid: 7302563106683093117
   width: 2
   height: 1
   layer: 4
@@ -95,3 +97,22 @@ MonoBehaviour:
         settings: {fileID: 0}
         intensity: 1.15
         radius: 4.2
+    - rid: 7302563106683093116
+      type: {class: BuildingFuelConsumerAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFuelConsumerAbility
+        fuelPerRefuel: 1
+        workSeconds: 0.8
+        warmth: 3
+        lightSafety: 18
+    - rid: 7302563106683093117
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 0
+          capacity: 1
+          useDuration: 1
+          requiredWorkers: 1
+          supportedWorkTypes: 65536
+          disabledWhenDamaged: 1

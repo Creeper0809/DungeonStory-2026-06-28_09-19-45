@@ -22,6 +22,12 @@ public static class DungeonReleaseBuildPipeline
     private const string PlaytestProductName = "DungeonStoryPlaytest";
     private const string PlaytestApplicationIdentifier = "com.dungeonstory.game.playtest";
     private const string Version = "0.1.0";
+    private static readonly string[] ProductScenePaths =
+    {
+        "Assets/Scenes/TitleScene.unity",
+        "Assets/Scenes/StartPreparationScene.unity",
+        "Assets/Scenes/GameplayScene.unity"
+    };
 
     [MenuItem("DungeonStory/Build/Validate Release Configuration")]
     public static void ValidateReleaseConfigurationMenu()
@@ -81,8 +87,10 @@ public static class DungeonReleaseBuildPipeline
         List<string> lines = new List<string>();
         string[] scenes = GetEnabledScenes();
         Check(lines, scenes.Length > 0, "SCENES", $"enabled={scenes.Length}");
-        Check(lines, scenes.Contains("Assets/Scenes/SampleScene.unity", StringComparer.Ordinal),
-            "GAME_SCENE", string.Join(",", scenes));
+        Check(lines,
+            ProductScenePaths.All(scene => scenes.Contains(scene, StringComparer.Ordinal)),
+            "PRODUCT_SCENES",
+            string.Join(",", ProductScenePaths));
         Check(lines, PlayerSettings.companyName == CompanyName,
             "COMPANY", PlayerSettings.companyName);
         Check(lines, PlayerSettings.productName == expectedProductName,
@@ -139,7 +147,7 @@ public static class DungeonReleaseBuildPipeline
             : BuildOptions.CompressWithLz4HC | BuildOptions.StrictMode;
         BuildPlayerOptions player = new BuildPlayerOptions
         {
-            scenes = GetEnabledScenes(),
+            scenes = GetProductScenesForBuild(),
             locationPathName = outputPath,
             target = BuildTarget.StandaloneWindows64,
             options = options
@@ -187,6 +195,11 @@ public static class DungeonReleaseBuildPipeline
             .Where(scene => scene != null && scene.enabled && !string.IsNullOrWhiteSpace(scene.path))
             .Select(scene => scene.path)
             .ToArray();
+    }
+
+    private static string[] GetProductScenesForBuild()
+    {
+        return ProductScenePaths.ToArray();
     }
 
     private static void Check(ICollection<string> lines, bool passed, string id, string detail)

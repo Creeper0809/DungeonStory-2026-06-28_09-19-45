@@ -7,12 +7,16 @@ public class GridCell
     private static readonly GridLayer[] SelectionPriority =
     {
         GridLayer.Character,
-        GridLayer.Item,
-        GridLayer.Building,
+        GridLayer.DownedCharacter,
+        GridLayer.Wildlife,
+            GridLayer.Item,
+            GridLayer.Construction,
+            GridLayer.Filth,
+            GridLayer.Building,
         GridLayer.WallFixture,
         GridLayer.CeilingFixture,
-        GridLayer.FloorOverlay,
-        GridLayer.Hallway
+            GridLayer.FloorOverlay,
+            GridLayer.Hallway
     };
 
     private readonly Dictionary<GridLayer, IGridOccupant> occupants;
@@ -22,8 +26,11 @@ public class GridCell
 
     public Vector2Int Position { get; }
     public GridCellAreaType AreaType { get; private set; }
+    public GridCellTerrainType TerrainType { get; private set; }
     public IReadOnlyList<GridTraversalLink> TraversalLinks => traversalLinksView;
-    public bool IsWalkableArea => GridCellAreaRules.IsWalkableArea(AreaType);
+    public bool IsWalkableArea => GridCellAreaRules.IsWalkableArea(AreaType)
+        && TerrainType != GridCellTerrainType.DeepWater;
+    public float TerrainMoveSpeedMultiplier => TerrainType == GridCellTerrainType.ShallowWater ? 0.65f : 1f;
     public bool IsBuildableArea => GridCellAreaRules.IsBuildableArea(AreaType);
     public bool AllowsItemDrop => GridCellAreaRules.AllowsItemDrop(AreaType);
 
@@ -34,6 +41,7 @@ public class GridCell
         traversalLinksView = ReadOnlyView.List(traversalLinks);
         isBuildable = true;
         AreaType = GridCellAreaType.DungeonInterior;
+        TerrainType = GridCellTerrainType.Dry;
         Position = pos;
     }
     public IGridOccupant GetOccupant(GridLayer layer = GridLayer.Building)
@@ -153,6 +161,21 @@ public class GridCell
         }
 
         AreaType = areaType;
+        return true;
+    }
+    public bool SetTerrainType(GridCellTerrainType terrainType)
+    {
+        if (!Enum.IsDefined(typeof(GridCellTerrainType), terrainType))
+        {
+            terrainType = GridCellTerrainType.Dry;
+        }
+
+        if (TerrainType == terrainType)
+        {
+            return false;
+        }
+
+        TerrainType = terrainType;
         return true;
     }
     public bool HasOccupantInLayer(GridLayer layer = GridLayer.Building)

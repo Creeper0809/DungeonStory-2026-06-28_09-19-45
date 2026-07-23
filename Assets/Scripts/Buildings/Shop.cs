@@ -18,6 +18,8 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
     private List<RemainStock> stocks = new List<RemainStock>();
     private CharacterActor worker;
     private int waitingCheckoutCount;
+    private bool checkoutServiceAlertRaised;
+    private float nextCheckoutAbandonAlertTime;
     private StockInfo baseStock;
     private GameData gameData;
     private IGameDataProvider gameDataProvider;
@@ -101,6 +103,7 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
         EnsureStockInitialized();
         if (!TryBeginUse(actor, out string failureReason))
         {
+            actor?.GetAbility<AbilityShopping>()?.SetVisitOutcome(this, ShoppingVisitOutcome.Failed);
             actor?.AddActivity(CharacterActivityEvent.Facility(
                 CharacterActivityKinds.Shopping,
                 CharacterActivityOutcomes.Failed,
@@ -115,6 +118,7 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
         AbilityMove moveable = actor != null ? actor.GetAbility<AbilityMove>() : null;
         if (shopable == null || moveable == null)
         {
+            shopable?.SetVisitOutcome(this, ShoppingVisitOutcome.Failed);
             EndUse(actor);
             yield break;
         }
@@ -147,6 +151,7 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
 
         if (cart.Count == 0)
         {
+            shopable.SetVisitOutcome(this, ShoppingVisitOutcome.Failed);
             actor?.AddActivity(CharacterActivityEvent.Facility(
                 CharacterActivityKinds.Shopping,
                 CharacterActivityOutcomes.Failed,
@@ -161,9 +166,16 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
         Vector2 endPos = GetFacilityAnchorWorldPosition(FacilityAnchorPurposeIds.Checkout, actor.transform.position);
         actor?.Brain?.SetActionPhase("\uACC4\uC0B0\uB300 \uC774\uB3D9", this);
         yield return moveable.Move2PosBySpeed(endPos, 1f, currentAction);
-        yield return WaitForServingWorker(actor);
+        CheckoutWaitSession checkoutWait = new CheckoutWaitSession();
+        yield return WaitForServingWorkerWithPatience(actor, checkoutWait);
+        if (checkoutWait.Abandoned)
+        {
+            EndUse(actor);
+            yield break;
+        }
         if (!CanServeCustomer(actor, out string serviceFailureReason))
         {
+            shopable.SetVisitOutcome(this, ShoppingVisitOutcome.Failed);
             actor?.AddActivity(CharacterActivityEvent.Facility(
                 CharacterActivityKinds.Shopping,
                 CharacterActivityOutcomes.Cancelled,
@@ -178,6 +190,7 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
         yield return RunCheckoutService(actor);
         if (TryResolveCheckoutCrime(actor, cart))
         {
+            shopable.SetVisitOutcome(this, ShoppingVisitOutcome.Completed);
             EndUse(actor);
             yield break;
         }
@@ -210,6 +223,7 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
 
         if (purchaseCount == 0)
         {
+            shopable.SetVisitOutcome(this, ShoppingVisitOutcome.Failed);
             actor?.AddActivity(CharacterActivityEvent.Facility(
                 CharacterActivityKinds.Shopping,
                 CharacterActivityOutcomes.Failed,
@@ -261,6 +275,7 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
             actor,
             this,
             RoomExperienceActivity.Shopping);
+        shopable.SetVisitOutcome(this, ShoppingVisitOutcome.Completed);
         yield return new WaitForSeconds(0.5f);
         EndUse(actor);
     }
@@ -454,7 +469,7 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
         }
     }
 
-    private IEnumerator WaitForServingWorker(CharacterActor actor)
+    private IEnumerator WaitForServingWorkerWithPatience(CharacterActor actor, CheckoutWaitSession session)
     {
         if (!ShouldWaitForServingWorker(actor))
         {
@@ -462,12 +477,20 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
         }
 
         waitingCheckoutCount++;
+        int queuePosition = waitingCheckoutCount;
+        CustomerCheckoutPatienceProfile patience = CustomerCheckoutPatienceRules.Create(actor, queuePosition);
+        CustomerCheckoutWaitStage stage = CustomerCheckoutWaitStage.Waiting;
+        float elapsedSeconds = 0f;
         MarkFacilityDynamicStateDirty();
         RequireWorkforceReplanService().RequestIdleWorkersToReplan();
+        actor?.Brain?.SetActionPhase(
+            "계산 대기",
+            this,
+            CustomerCheckoutPatienceRules.GetQueueDetail(patience, elapsedSeconds, stage));
         actor?.AddActivity(CharacterActivityEvent.Facility(
             CharacterActivityKinds.Shopping,
             CharacterActivityOutcomes.Blocked,
-            $"{objectNameOrDefault()} 계산 대기: 직원 없음",
+            $"{objectNameOrDefault()}에서 계산할 직원을 기다리기 시작했다.",
             this,
             actionId: "checkout:staffed",
             reasonCode: "no-serving-worker",
@@ -478,24 +501,147 @@ public class Shop : BuildableObject, IRetailFacility, IRestockableFacility, IRet
         {
             while (ShouldWaitForServingWorker(actor))
             {
+                CustomerCheckoutWaitStage nextStage = CustomerCheckoutPatienceRules.GetStage(
+                    patience,
+                    elapsedSeconds);
+                if (nextStage != stage)
+                {
+                    stage = nextStage;
+                    HandleCheckoutWaitStage(actor, patience, stage, elapsedSeconds);
+                    if (stage == CustomerCheckoutWaitStage.Abandoned)
+                    {
+                        session.Abandoned = true;
+                        break;
+                    }
+                }
+
+                actor?.Brain?.SetActionPhase(
+                    "계산 대기",
+                    this,
+                    CustomerCheckoutPatienceRules.GetQueueDetail(patience, elapsedSeconds, stage));
                 yield return wait;
+                elapsedSeconds += CheckoutWaitPollSeconds;
             }
         }
         finally
         {
             waitingCheckoutCount = Mathf.Max(0, waitingCheckoutCount - 1);
+            if (waitingCheckoutCount == 0)
+            {
+                checkoutServiceAlertRaised = false;
+            }
             MarkFacilityDynamicStateDirty();
         }
 
-        if (HasServingWorker)
+        if (!session.Abandoned && HasServingWorker)
         {
+            actor?.Brain?.SetActionPhase("계산 중", this, $"{Mathf.CeilToInt(elapsedSeconds)}초 기다림");
             actor?.AddActivity(CharacterActivityEvent.Facility(
                 CharacterActivityKinds.Shopping,
                 CharacterActivityOutcomes.Started,
-                $"{objectNameOrDefault()} 계산 시작",
+                $"{objectNameOrDefault()}에서 계산을 시작했다.",
                 this,
                 actionId: "checkout:staffed"));
         }
+    }
+
+    private void HandleCheckoutWaitStage(
+        CharacterActor actor,
+        CustomerCheckoutPatienceProfile patience,
+        CustomerCheckoutWaitStage stage,
+        float elapsedSeconds)
+    {
+        if (actor == null)
+        {
+            return;
+        }
+
+        string actorName = actor.Identity != null ? actor.Identity.DisplayName : actor.name;
+        switch (stage)
+        {
+            case CustomerCheckoutWaitStage.Restless:
+                actor.ApplyMoodFactor(
+                    $"checkout-wait:{GetInstanceID()}:restless",
+                    "계산대가 오래 걸림",
+                    -1.5f,
+                    90f,
+                    1);
+                actor.AddActivity(CharacterActivityEvent.Facility(
+                    CharacterActivityKinds.Shopping,
+                    CharacterActivityOutcomes.Progress,
+                    $"{actorName}은 계산 줄이 좀처럼 줄지 않아 초조해졌다.",
+                    this,
+                    actionId: "checkout:waiting",
+                    reasonCode: "queue-restless",
+                    value: elapsedSeconds,
+                    bubbleEligible: true));
+                break;
+
+            case CustomerCheckoutWaitStage.RequestingService:
+                RequireWorkforceReplanService().RequestIdleWorkersToReplan();
+                actor.AddActivity(CharacterActivityEvent.Facility(
+                    CharacterActivityKinds.Shopping,
+                    CharacterActivityOutcomes.Responded,
+                    patience.PatienceMultiplier >= 1.1f
+                        ? $"{actorName}은 계산을 도와줄 직원을 불렀다."
+                        : $"{actorName}은 더 기다리기 어렵다며 직원을 찾았다.",
+                    this,
+                    actionId: "checkout:service-request",
+                    reasonCode: "customer-called-worker",
+                    value: elapsedSeconds,
+                    bubbleEligible: true));
+                if (!checkoutServiceAlertRaised)
+                {
+                    checkoutServiceAlertRaised = true;
+                    EventAlertService.Raise(
+                        "계산 지원 필요",
+                        $"{actorName}이(가) {objectNameOrDefault()}에서 계산 직원을 찾고 있습니다.",
+                        EventAlertImportance.Low,
+                        "손님");
+                }
+                break;
+
+            case CustomerCheckoutWaitStage.Abandoned:
+                actor.ApplyMoodFactor(
+                    $"checkout-wait:{GetInstanceID()}:abandoned",
+                    "기다리다 구매를 포기함",
+                    patience.AbandonMoodPenalty,
+                    180f,
+                    1);
+                actor.SocialMemory?.RememberFacilityExperience(
+                    this,
+                    patience.AbandonSentiment,
+                    "계산이 너무 늦어 구매를 포기했다.");
+                actor.GetAbility<AbilityShopping>()?.SetVisitOutcome(this, ShoppingVisitOutcome.Abandoned);
+                actor.Brain?.SetActionPhase(
+                    "구매 포기",
+                    this,
+                    $"{Mathf.CeilToInt(elapsedSeconds)}초 기다린 뒤 다른 곳을 찾음");
+                actor.AddActivity(CharacterActivityEvent.Facility(
+                    CharacterActivityKinds.Shopping,
+                    CharacterActivityOutcomes.Cancelled,
+                    $"{actorName}은 계산을 기다리다 구매를 포기했다.",
+                    this,
+                    actionId: "checkout:abandoned",
+                    reasonCode: "patience-exhausted",
+                    value: elapsedSeconds,
+                    bubbleEligible: true));
+                if (Time.time >= nextCheckoutAbandonAlertTime)
+                {
+                    nextCheckoutAbandonAlertTime = Time.time + 5f;
+                    EventAlertService.Raise(
+                        "손님이 구매를 포기함",
+                        $"{actorName}이(가) {objectNameOrDefault()}의 긴 계산 대기 때문에 다른 곳을 찾습니다.",
+                        EventAlertImportance.Medium,
+                        "손님");
+                }
+                break;
+        }
+    }
+
+    private sealed class CheckoutWaitSession
+    {
+        public bool Abandoned { get; set; }
     }
 
     private bool ShouldWaitForServingWorker(CharacterActor actor)

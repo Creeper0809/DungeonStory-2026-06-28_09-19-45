@@ -104,7 +104,7 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
             gameData = ModularFacilityGameDataSaveData.From(gameData),
             buildings = grid.FindAllOccupants(null)
                 .OfType<BuildableObject>()
-                .Where(building => building != null && !building.IsGridDestroyed && building.BuildingData != null)
+                .Where(IsPersistentWorldBuilding)
                 .OrderBy(building => (int)building.BuildingData.Placement.Layer)
                 .ThenBy(building => building.centerPos.y)
                 .ThenBy(building => building.centerPos.x)
@@ -199,7 +199,7 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
     {
         List<BuildableObject> existing = grid.FindAllOccupants(null)
             .OfType<BuildableObject>()
-            .Where(building => building != null && !building.IsGridDestroyed && building.BuildingData != null)
+            .Where(IsPersistentWorldBuilding)
             .Distinct()
             .OrderByDescending(building => (int)building.BuildingData.Placement.Layer)
             .ThenByDescending(building => building.centerPos.y)
@@ -224,6 +224,15 @@ public sealed class ModularFacilityWorldSaveService : IModularFacilityWorldSaveS
             building.DestroySelf();
             report.clearedCount++;
         }
+    }
+
+    private static bool IsPersistentWorldBuilding(BuildableObject building)
+    {
+        return building != null
+            && !building.IsGridDestroyed
+            && building.BuildingData != null
+            && building.BuildingData.id >= 0
+            && building is not ConstructionSite;
     }
 
     private void RestoreBuilding(

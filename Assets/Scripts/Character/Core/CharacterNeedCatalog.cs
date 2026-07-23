@@ -249,6 +249,47 @@ public static class CharacterNeedCatalog
             .Max();
     }
 
+    public static bool TryGetStrongestUrgency(
+        CharacterActor actor,
+        CharacterNeedTag requiredTag,
+        out CharacterNeedDefinition strongest,
+        out float urgency,
+        bool applySurvivalWeight = true)
+    {
+        strongest = null;
+        urgency = 0f;
+        foreach (CharacterNeedDefinition definition in All)
+        {
+            if (!definition.HasTag(requiredTag))
+            {
+                continue;
+            }
+
+            float candidate = definition.GetUrgency(actor)
+                * (applySurvivalWeight ? definition.SurvivalWeight : 1f);
+            if (strongest != null && candidate <= urgency)
+            {
+                continue;
+            }
+
+            strongest = definition;
+            urgency = candidate;
+        }
+
+        urgency = Mathf.Clamp01(urgency);
+        return strongest != null;
+    }
+
+    public static float GetWeightedUrgency(CharacterActor actor, CharacterCondition condition)
+    {
+        if (!TryGet(condition, out CharacterNeedDefinition definition))
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp01(definition.GetUrgency(actor) * definition.SurvivalWeight);
+    }
+
     public static void ResetToBuiltIns()
     {
         ById.Clear();
@@ -284,6 +325,12 @@ public static class CharacterNeedCatalog
             CharacterNeedTag.Survival | CharacterNeedTag.DirectorRoutine | CharacterNeedTag.MoodInteraction,
             1f,
             new CharacterNeedMoodProfile(15f, "굶주림", -18f, 35f, "허기짐", -9f, 85f, "배가 든든함", 4f));
+        RegisterBuiltIn(
+            "need:thirst", CharacterCondition.THIRST, "갈증", 15, 100f, 85f,
+            FacilityRole.None,
+            CharacterNeedTag.Survival | CharacterNeedTag.DirectorRoutine | CharacterNeedTag.MoodInteraction,
+            1.15f,
+            new CharacterNeedMoodProfile(15f, "심한 갈증", -18f, 35f, "목이 마름", -9f, 85f, "갈증이 없음", 3f));
         RegisterBuiltIn(
             "need:sleep", CharacterCondition.SLEEP, "휴식", 20, 100f, 85f,
             FacilityRole.Rest,

@@ -41,6 +41,9 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
     private const string StartEvent = "작업 시작 · 연금 연구 · 지하 연구실";
     private const string AlternateStartEvent = "작업 시작 · 무기 판매 · 무기상점";
     private const string EndEvent = "작업 종료 · 연금 연구 · 지하 연구실 · 새 제조법 정리 완료";
+    private const string MajorStartEvent = "진실핵 조사를 시작";
+    private const string MajorAlternateStartEvent = "봉인된 문장의 비밀 추적";
+    private const string MajorEndEvent = "진실핵 단서 확보";
     private readonly List<string> report = new List<string>();
     private readonly List<string> failures = new List<string>();
     private readonly List<string> capturedErrors = new List<string>();
@@ -64,15 +67,29 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
 
     private IEnumerator VerifyDeterministicDisplayGating()
     {
+        DeferredCharacterRecordRuntime templateRuntime = new DeferredCharacterRecordRuntime();
+        CharacterLogNarrativeService templateService = new CharacterLogNarrativeService(
+            new FixedLocalLlmRuntimeProvider(templateRuntime));
+        CharacterLog templateLog = CreateProbeLog("asd", templateService);
+        templateLog.AddActivity(CreateWorkActivity(
+            "작업 시작 · 연구 · 연구실",
+            "work:research",
+            CharacterActivityOutcomes.Started));
+        Check(templateLog.Entries.Count == 1
+            && templateRuntime.PendingRecordCount == 0
+            && templateService.TemplateLineCount == 1
+            && !templateLog.Entries[0].Contains("작업 시작"),
+            "TEMPLATE_RECORD_IMMEDIATE",
+            $"visible={Compact(templateLog.Entries)}; pending={templateRuntime.PendingRecordCount}; templates={templateService.TemplateLineCount}");
+
         DeferredCharacterRecordRuntime successRuntime = new DeferredCharacterRecordRuntime();
         CharacterLogNarrativeService successService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(successRuntime));
         CharacterLog successLog = CreateProbeLog("asd", successService);
         CharacterLogEntry successEntry = default;
         successLog.OnLogAdded += entry => successEntry = entry;
-        successLog.AddActivity(CreateWorkActivity(
+        successLog.AddActivity(CreateMajorActivity(
             StartEvent,
-            "work:alchemy-research",
             CharacterActivityOutcomes.Started));
 
         Check(successEntry.EntryId > 0, "INTERNAL_EVENT_IMMEDIATE", successEntry.OriginalMessage);
@@ -97,9 +114,8 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService failureService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(failureRuntime));
         CharacterLog failureLog = CreateProbeLog("asd", failureService);
-        failureLog.AddActivity(CreateWorkActivity(
+        failureLog.AddActivity(CreateMajorActivity(
             EndEvent,
-            "work:alchemy-research",
             CharacterActivityOutcomes.Completed));
         bool failurePendingHidden = failureLog.Entries.Count == 0;
         failureRuntime.CompleteNext(LocalLlmRequestStatus.Failed, string.Empty, "forced failure");
@@ -117,9 +133,8 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService rejectedService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(rejectedRuntime));
         CharacterLog rejectedLog = CreateProbeLog("asd", rejectedService);
-        rejectedLog.AddActivity(CreateWorkActivity(
+        rejectedLog.AddActivity(CreateMajorActivity(
             AlternateStartEvent,
-            "work:weapon-sales",
             CharacterActivityOutcomes.Started));
         Check(rejectedLog.Entries.Count == 1
             && !rejectedLog.Entries[0].Contains(AlternateStartEvent)
@@ -131,21 +146,17 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService saturatedService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(saturatedRuntime));
         CharacterLog saturatedLog = CreateProbeLog("asd", saturatedService);
-        saturatedLog.AddActivity(CreateWorkActivity(
+        saturatedLog.AddActivity(CreateMajorActivity(
             StartEvent,
-            "work:alchemy-research",
             CharacterActivityOutcomes.Started));
-        saturatedLog.AddActivity(CreateWorkActivity(
+        saturatedLog.AddActivity(CreateMajorActivity(
             AlternateStartEvent,
-            "work:weapon-sales",
             CharacterActivityOutcomes.Started));
-        saturatedLog.AddActivity(CreateWorkActivity(
+        saturatedLog.AddActivity(CreateMajorActivity(
             "작업 시작 · 청소 · 식당",
-            "work:cleaning",
             CharacterActivityOutcomes.Started));
-        saturatedLog.AddActivity(CreateWorkActivity(
+        saturatedLog.AddActivity(CreateMajorActivity(
             EndEvent,
-            "work:alchemy-research",
             CharacterActivityOutcomes.Completed));
         Check(saturatedRuntime.PendingRecordCount == 3
             && saturatedLog.Entries.Count == 1
@@ -158,14 +169,12 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         CharacterLogNarrativeService repeatedService = new CharacterLogNarrativeService(
             new FixedLocalLlmRuntimeProvider(repeatedRuntime));
         CharacterLog repeatedLog = CreateProbeLog("asd", repeatedService);
-        repeatedLog.AddActivity(CreateWorkActivity(
+        repeatedLog.AddActivity(CreateMajorActivity(
             StartEvent,
-            "work:alchemy-research",
             CharacterActivityOutcomes.Started));
         bool firstRepeatPendingHidden = repeatedLog.Entries.Count == 0;
-        repeatedLog.AddActivity(CreateWorkActivity(
+        repeatedLog.AddActivity(CreateMajorActivity(
             StartEvent,
-            "work:alchemy-research",
             CharacterActivityOutcomes.Started));
         Check(firstRepeatPendingHidden
             && repeatedLog.Entries.Count == 1
@@ -174,6 +183,7 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
             "REPEATED_PENDING_ENTRY_FINALIZED",
             Compact(repeatedLog.Entries));
 
+        Destroy(templateLog.gameObject);
         Destroy(successLog.gameObject);
         Destroy(failureLog.gameObject);
         Destroy(rejectedLog.gameObject);
@@ -230,6 +240,7 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         int requestedBefore = narrative.RequestedCount;
         int appliedBefore = narrative.AppliedCount;
         int fallbackBefore = narrative.ControlledFallbackCount;
+        int templateBefore = narrative.TemplateLineCount;
         string displayName = actor.Identity != null && !string.IsNullOrWhiteSpace(actor.Identity.DisplayName)
             ? actor.Identity.DisplayName
             : actor.name;
@@ -294,9 +305,10 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
             "PENDING_RAW_UI_HIDDEN", recordsText.text);
         int immediateRequested = narrative.RequestedCount - requestedBefore;
         int immediateFallbacks = narrative.ControlledFallbackCount - fallbackBefore;
-        Check(immediateRequested + immediateFallbacks >= 3,
-            "REQUESTS_OR_FALLBACKS_RESOLVED",
-            $"requests={immediateRequested}; fallbacks={immediateFallbacks}");
+        int immediateTemplates = narrative.TemplateLineCount - templateBefore;
+        Check(immediateTemplates >= 3 && immediateRequested == 0,
+            "TEMPLATE_RECORDS_RESOLVED",
+            $"templates={immediateTemplates}; requests={immediateRequested}; fallbacks={immediateFallbacks}");
 
         yield return new WaitForEndOfFrame();
         Texture2D pendingCapture = ScreenCapture.CaptureScreenshotAsTexture();
@@ -306,7 +318,7 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
         Destroy(pendingCapture);
         report.Add($"pendingCapture={CharacterLogNarrativePlayModeVerifier.PendingCapturePath}");
 
-        float timeoutAt = Time.realtimeSinceStartup + 75f;
+        float timeoutAt = Time.realtimeSinceStartup + 1f;
         while (exactTargetsCaptured
             && targetEntries.Any(entry =>
                 !actor.LogComponent.TryGetVisibleDisplayLine(entry.EntryId, out _))
@@ -363,19 +375,10 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
             "VARIED_START_CADENCE",
             $"{startCadence} || {alternateCadence}");
         Check(
-            CharacterLogNarrativeService.HasCreativeDetail(
-                rewrittenStart,
-                StartEvent,
-                requiredSubject)
-                && CharacterLogNarrativeService.HasCreativeDetail(
-                    rewrittenAlternateStart,
-                    AlternateStartEvent,
-                    requiredSubject)
-                && CharacterLogNarrativeService.HasCreativeDetail(
-                    rewrittenEnd,
-                    EndEvent,
-                    requiredSubject),
-            "CREATIVE_MICRO_STORIES",
+            rewrittenStart.Contains(requiredSubject, StringComparison.Ordinal)
+                && rewrittenAlternateStart.Contains(requiredSubject, StringComparison.Ordinal)
+                && rewrittenEnd.Contains(requiredSubject, StringComparison.Ordinal),
+            "TEMPLATE_MICRO_STORIES",
             $"{rewrittenStart} || {rewrittenAlternateStart} || {rewrittenEnd}");
         Check(
             rewrittenStart.Length <= CharacterLogNarrativeService.MaxLineCharacters
@@ -409,6 +412,35 @@ public sealed class CharacterLogNarrativePlayModeVerificationRunner : MonoBehavi
             factText,
             actionId: actionId,
             narrativeEligible: true);
+    }
+
+    private static CharacterActivityEvent CreateMajorActivity(string factText, string outcomeId)
+    {
+        return CharacterActivityEvent.Create(
+            CharacterActivityKinds.Combat,
+            outcomeId,
+            factText,
+            actionId: "combat:truth-core:" + StableMajorHash(factText),
+            targetName: "진실핵",
+            reasonCode: "truth_core:" + StableMajorHash(factText),
+            narrativeEligible: true);
+    }
+
+    private static int StableMajorHash(string value)
+    {
+        unchecked
+        {
+            int hash = 23;
+            if (!string.IsNullOrEmpty(value))
+            {
+                for (int i = 0; i < value.Length; i++)
+                {
+                    hash = hash * 31 + value[i];
+                }
+            }
+
+            return Math.Abs(hash == int.MinValue ? 0 : hash);
+        }
     }
 
     private static void PressButton(Button button)

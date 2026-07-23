@@ -33,7 +33,12 @@ public sealed class AIHaul : AIActionSet
             WorkPriorityLevel.Priority3 => 0.48f,
             _ => 0f
         };
-        return Mathf.Clamp01(baseScore * priorityWeight);
+        CharacterAiDecisionContext context = CharacterAiDecisionContext.Capture(actor, CharacterAiBranch.Work);
+        float loadWindow = Mathf.Lerp(1f, 0.72f, context.CarryLoad);
+        float pressureBoost = Mathf.Lerp(1f, 1.24f, Mathf.Max(context.FoodStockPressure, context.WaterStockPressure));
+        float pathStability = Mathf.Lerp(0.86f, 1.08f, context.PathConfidence);
+        float failureDrag = Mathf.Lerp(1f, 0.78f, context.RecentFailurePressure);
+        return Mathf.Clamp01(baseScore * priorityWeight * loadWindow * pressureBoost * pathStability * failureDrag);
     }
 
     public override bool CanStart(CharacterActor actor)

@@ -62,11 +62,21 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
 
     private readonly Dictionary<string, SlotView> slots = new Dictionary<string, SlotView>();
     private GameObject runtimeRoot;
+    private GameObject titleMainScreen;
     private Button continueButton;
     private TMP_Text statusText;
     private GameObject difficultyModal;
+    private GameObject newRunConfirmModal;
+    private DungeonDifficulty selectedDifficulty = DungeonDifficulty.Normal;
+    private TMP_Text difficultyNameText;
+    private TMP_Text difficultyMultiplierText;
+    private TMP_Text difficultyDescriptionText;
+    private TMP_Text difficultyEmblemText;
+    private TMP_Text difficultyWarningText;
+    private readonly List<DifficultyRowView> difficultyRows = new List<DifficultyRowView>();
     private string confirmationKey = string.Empty;
     private float confirmationExpiresAt;
+    private bool newRunWillOverwriteSaves;
 
     public DungeonTitleUiController(
         IDungeonSaveSlotCatalog slotCatalog,
@@ -110,24 +120,28 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
         runtimeRoot.transform.SetParent(parent, false);
         Stretch(runtimeRoot.GetComponent<RectTransform>());
 
-        Image background = CreateImage(runtimeRoot.transform, "TitleBackground", DungeonUiTheme.SurfaceMuted);
+        titleMainScreen = new GameObject("TitleMainScreen", typeof(RectTransform));
+        titleMainScreen.transform.SetParent(runtimeRoot.transform, false);
+        Stretch(titleMainScreen.GetComponent<RectTransform>());
+
+        Image background = CreateImage(titleMainScreen.transform, "TitleBackground", DungeonUiTheme.SurfaceMuted);
         Stretch(background.rectTransform);
         background.raycastTarget = true;
 
-        Image topBand = CreateImage(runtimeRoot.transform, "TitleTopBand", DungeonUiTheme.Surface);
+        Image topBand = CreateImage(titleMainScreen.transform, "TitleTopBand", DungeonUiTheme.Surface);
         SetRect(topBand.rectTransform, new Vector2(0f, 0.9f), Vector2.one, Vector2.zero, Vector2.zero);
 
-        Image accentBand = CreateImage(runtimeRoot.transform, "TitleAccentBand", DungeonUiTheme.Accent);
+        Image accentBand = CreateImage(titleMainScreen.transform, "TitleAccentBand", DungeonUiTheme.Accent);
         SetRect(accentBand.rectTransform, new Vector2(0f, 0.895f), new Vector2(1f, 0.9f), Vector2.zero, Vector2.zero);
 
-        Transform brand = CreatePanel(runtimeRoot.transform, "TitleBrand", new Vector2(0.07f, 0.14f), new Vector2(0.48f, 0.84f), false);
+        Transform brand = CreatePanel(titleMainScreen.transform, "TitleBrand", new Vector2(0.07f, 0.14f), new Vector2(0.48f, 0.84f), false);
         CreateBranding(brand);
 
-        Transform savePanel = CreatePanel(runtimeRoot.transform, "TitleSavePanel", new Vector2(0.52f, 0.14f), new Vector2(0.93f, 0.84f), true);
+        Transform savePanel = CreatePanel(titleMainScreen.transform, "TitleSavePanel", new Vector2(0.52f, 0.14f), new Vector2(0.93f, 0.84f), true);
         CreateSavePanel(savePanel);
         CreateDifficultyModal(runtimeRoot.transform);
 
-        TMP_Text version = CreateText(runtimeRoot.transform, "VersionText", Application.version, 15f, TextAlignmentOptions.BottomRight);
+        TMP_Text version = CreateText(titleMainScreen.transform, "VersionText", Application.version, 15f, TextAlignmentOptions.BottomRight);
         SetRect(version.rectTransform, new Vector2(0.76f, 0.035f), new Vector2(0.93f, 0.09f), Vector2.zero, Vector2.zero);
         version.color = DungeonUiTheme.TextSecondary;
     }
@@ -214,11 +228,7 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
 
     private void StartNewGame()
     {
-        bool hasSave = slots.Keys.Any(slotCatalog.HasSave);
-        if (hasSave && !Confirm("new-run", "새 게임은 기존 실행 저장을 지웁니다. 다시 눌러 시작하세요."))
-        {
-            return;
-        }
+        newRunWillOverwriteSaves = slots.Keys.Any(slotCatalog.HasSave);
 
         if (!ShowDifficultySelection())
         {
@@ -229,6 +239,13 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
     private bool ShowDifficultySelection()
     {
         ClearConfirmation();
+        SelectDifficulty(selectedDifficulty);
+        UpdateDifficultyWarning();
+        if (titleMainScreen != null)
+        {
+            titleMainScreen.SetActive(false);
+        }
+
         difficultyModal.SetActive(true);
         return true;
     }
@@ -238,8 +255,78 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
         difficultyModal.SetActive(false);
         if (!sceneNavigator.StartNewGame(difficulty))
         {
+            ShowTitleMainScreen();
             SetStatus("게임 화면으로 전환할 수 없습니다.", true);
         }
+    }
+
+    private void ShowTitleMainScreen()
+    {
+        if (difficultyModal != null)
+        {
+            difficultyModal.SetActive(false);
+        }
+
+        if (titleMainScreen != null)
+        {
+            titleMainScreen.SetActive(true);
+        }
+
+        newRunWillOverwriteSaves = false;
+    }
+
+    private void ShowNewRunConfirmModal()
+    {
+        ClearConfirmation();
+        SetStatus(string.Empty, false);
+        newRunConfirmModal.SetActive(true);
+    }
+
+    private void ConfirmNewRunOverwrite()
+    {
+        newRunConfirmModal.SetActive(false);
+        if (!ShowDifficultySelection())
+        {
+            SetStatus("이미 화면을 전환하고 있거나 Gameplay 씬을 찾을 수 없습니다.", true);
+        }
+    }
+
+    private void CreateNewRunConfirmModal(Transform parent)
+    {
+        newRunConfirmModal = new GameObject("NewRunConfirmModal", typeof(RectTransform));
+        newRunConfirmModal.transform.SetParent(parent, false);
+        Stretch(newRunConfirmModal.GetComponent<RectTransform>());
+
+        Image scrim = CreateImage(newRunConfirmModal.transform, "NewRunConfirmScrim", DungeonUiTheme.ModalScrim);
+        Stretch(scrim.rectTransform);
+        scrim.raycastTarget = true;
+
+        Transform panel = CreatePanel(
+            newRunConfirmModal.transform,
+            "NewRunConfirmPanel",
+            new Vector2(0.34f, 0.35f),
+            new Vector2(0.66f, 0.65f),
+            true);
+
+        TMP_Text heading = CreateText(panel, "NewRunConfirmHeading", "새 게임 시작", 30f, TextAlignmentOptions.MidlineLeft);
+        SetRect(heading.rectTransform, new Vector2(0.08f, 0.74f), new Vector2(0.92f, 0.92f), Vector2.zero, Vector2.zero);
+        heading.fontStyle = FontStyles.Bold;
+
+        TMP_Text body = CreateText(
+            panel,
+            "NewRunConfirmBody",
+            "새 게임을 시작하면 기존 실행 저장이 지워집니다.\n계속 진행할까요?",
+            20f,
+            TextAlignmentOptions.TopLeft);
+        SetRect(body.rectTransform, new Vector2(0.08f, 0.36f), new Vector2(0.92f, 0.7f), Vector2.zero, Vector2.zero);
+        body.textWrappingMode = TextWrappingModes.Normal;
+        body.color = DungeonUiTheme.TextSecondary;
+
+        CreateButton(panel, "NewRunConfirmCancelButton", "취소", () => newRunConfirmModal.SetActive(false),
+            new Vector2(0.08f, 0.12f), new Vector2(0.42f, 0.28f));
+        CreateButton(panel, "NewRunConfirmConfirmButton", "새 게임", ConfirmNewRunOverwrite,
+            new Vector2(0.58f, 0.12f), new Vector2(0.92f, 0.28f), selected: true, destructive: true);
+        newRunConfirmModal.SetActive(false);
     }
 
     private void CreateDifficultyModal(Transform parent)
@@ -248,36 +335,220 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
         difficultyModal.transform.SetParent(parent, false);
         Stretch(difficultyModal.GetComponent<RectTransform>());
 
-        Image scrim = CreateImage(difficultyModal.transform, "DifficultyScrim", DungeonUiTheme.ModalScrim);
+        Image scrim = CreateImage(difficultyModal.transform, "DifficultyScreenBackground", DungeonUiTheme.SurfaceMuted);
         Stretch(scrim.rectTransform);
         scrim.raycastTarget = true;
 
         Transform panel = CreatePanel(
             difficultyModal.transform,
             "DifficultyPanel",
-            new Vector2(0.31f, 0.3f),
-            new Vector2(0.69f, 0.7f),
+            new Vector2(0.18f, 0.13f),
+            new Vector2(0.82f, 0.87f),
             true);
-        TMP_Text heading = CreateText(panel, "DifficultyHeading", "난이도 선택", 34f, TextAlignmentOptions.Center);
-        SetRect(heading.rectTransform, new Vector2(0.06f, 0.78f), new Vector2(0.94f, 0.94f), Vector2.zero, Vector2.zero);
+        panel.GetComponent<Image>().color = new Color(0.02f, 0.025f, 0.03f, 0.96f);
+
+        TMP_Text heading = CreateText(panel, "DifficultyHeading", "난이도 선택", 34f, TextAlignmentOptions.MidlineLeft);
+        SetRect(heading.rectTransform, new Vector2(0.055f, 0.89f), new Vector2(0.42f, 0.97f), Vector2.zero, Vector2.zero);
         heading.fontStyle = FontStyles.Bold;
+        heading.text = "난이도 선택";
 
-        TMP_Text easy = CreateText(panel, "EasyInfo", "Easy\n적 체력 · 공격 80%", 17f, TextAlignmentOptions.Center);
-        SetRect(easy.rectTransform, new Vector2(0.04f, 0.48f), new Vector2(0.31f, 0.7f), Vector2.zero, Vector2.zero);
-        TMP_Text normal = CreateText(panel, "NormalInfo", "Normal\n기본 전투 수치", 17f, TextAlignmentOptions.Center);
-        SetRect(normal.rectTransform, new Vector2(0.365f, 0.48f), new Vector2(0.635f, 0.7f), Vector2.zero, Vector2.zero);
-        TMP_Text hard = CreateText(panel, "HardInfo", "Hard\n체력 125% · 공격 120%", 17f, TextAlignmentOptions.Center);
-        SetRect(hard.rectTransform, new Vector2(0.69f, 0.48f), new Vector2(0.96f, 0.7f), Vector2.zero, Vector2.zero);
+        Transform listPanel = CreatePanel(panel, "DifficultyList", new Vector2(0.045f, 0.18f), new Vector2(0.32f, 0.84f), false);
+        listPanel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.38f);
+        CreateDifficultyRow(listPanel, "DifficultyEasyButton", DungeonDifficulty.Easy, "쉬움", "적 80%", 0.69f);
+        CreateDifficultyRow(listPanel, "DifficultyNormalButton", DungeonDifficulty.Normal, "보통", "기본", 0.47f);
+        CreateDifficultyRow(listPanel, "DifficultyHardButton", DungeonDifficulty.Hard, "어려움", "적 125%", 0.25f);
 
-        CreateButton(panel, "DifficultyEasyButton", "Easy", () => BeginNewGame(DungeonDifficulty.Easy),
-            new Vector2(0.04f, 0.28f), new Vector2(0.31f, 0.46f));
-        CreateButton(panel, "DifficultyNormalButton", "Normal", () => BeginNewGame(DungeonDifficulty.Normal),
-            new Vector2(0.365f, 0.28f), new Vector2(0.635f, 0.46f), selected: true);
-        CreateButton(panel, "DifficultyHardButton", "Hard", () => BeginNewGame(DungeonDifficulty.Hard),
-            new Vector2(0.69f, 0.28f), new Vector2(0.96f, 0.46f));
-        CreateButton(panel, "DifficultyCancelButton", "취소", () => difficultyModal.SetActive(false),
-            new Vector2(0.365f, 0.07f), new Vector2(0.635f, 0.21f));
+        Image divider = CreateImage(panel, "DifficultyDivider", DungeonUiTheme.TextSecondary);
+        SetRect(divider.rectTransform, new Vector2(0.36f, 0.19f), new Vector2(0.362f, 0.84f), Vector2.zero, Vector2.zero);
+        divider.color = new Color(DungeonUiTheme.TextSecondary.r, DungeonUiTheme.TextSecondary.g, DungeonUiTheme.TextSecondary.b, 0.6f);
+
+        difficultyEmblemText = CreateText(panel, "DifficultyEmblem", "翼", 84f, TextAlignmentOptions.Center);
+        SetRect(difficultyEmblemText.rectTransform, new Vector2(0.72f, 0.67f), new Vector2(0.9f, 0.88f), Vector2.zero, Vector2.zero);
+        difficultyEmblemText.color = DungeonUiTheme.TextPrimary;
+
+        difficultyNameText = CreateText(panel, "DifficultyName", string.Empty, 34f, TextAlignmentOptions.MidlineRight);
+        SetRect(difficultyNameText.rectTransform, new Vector2(0.56f, 0.58f), new Vector2(0.9f, 0.68f), Vector2.zero, Vector2.zero);
+        difficultyNameText.fontStyle = FontStyles.Bold;
+
+        difficultyMultiplierText = CreateText(panel, "DifficultyExperience", string.Empty, 24f, TextAlignmentOptions.MidlineLeft);
+        SetRect(difficultyMultiplierText.rectTransform, new Vector2(0.055f, 0.08f), new Vector2(0.28f, 0.16f), Vector2.zero, Vector2.zero);
+        difficultyMultiplierText.fontStyle = FontStyles.Bold;
+        difficultyMultiplierText.color = DungeonUiTheme.Accent;
+
+        difficultyDescriptionText = CreateText(panel, "DifficultyDescription", string.Empty, 20f, TextAlignmentOptions.TopRight);
+        SetRect(difficultyDescriptionText.rectTransform, new Vector2(0.43f, 0.24f), new Vector2(0.9f, 0.54f), Vector2.zero, Vector2.zero);
+        difficultyDescriptionText.textWrappingMode = TextWrappingModes.Normal;
+
+        difficultyWarningText = CreateText(panel, "DifficultyOverwriteWarning", string.Empty, 17f, TextAlignmentOptions.MidlineLeft);
+        SetRect(difficultyWarningText.rectTransform, new Vector2(0.43f, 0.13f), new Vector2(0.9f, 0.2f), Vector2.zero, Vector2.zero);
+        difficultyWarningText.color = DungeonUiTheme.Warning;
+        difficultyWarningText.textWrappingMode = TextWrappingModes.Normal;
+
+        CreateButton(panel, "DifficultyCancelButton", "이전", () => difficultyModal.SetActive(false),
+            new Vector2(0.055f, 0.03f), new Vector2(0.18f, 0.11f));
+        CreateButton(panel, "DifficultyNextButton", "다음", () => BeginNewGame(selectedDifficulty),
+            new Vector2(0.78f, 0.03f), new Vector2(0.94f, 0.11f), selected: true);
+        SelectDifficulty(DungeonDifficulty.Normal);
         difficultyModal.SetActive(false);
+    }
+
+    private void CreateDifficultyRow(
+        Transform parent,
+        string buttonName,
+        DungeonDifficulty difficulty,
+        string label,
+        string multiplier,
+        float bottom)
+    {
+        Button button = CreateButton(
+            parent,
+            buttonName,
+            $"{label}\n{multiplier}",
+            () => SelectDifficulty(difficulty),
+            new Vector2(0.06f, bottom),
+            new Vector2(0.94f, bottom + 0.16f),
+            selectedDifficulty == difficulty);
+        TMP_Text text = button.GetComponentInChildren<TMP_Text>();
+        if (text != null)
+        {
+            text.alignment = TextAlignmentOptions.MidlineLeft;
+            text.fontSize = 18f;
+            text.fontSizeMin = 13f;
+            text.textWrappingMode = TextWrappingModes.Normal;
+        }
+
+        difficultyRows.Add(new DifficultyRowView(difficulty, button));
+    }
+
+    private void SelectDifficulty(DungeonDifficulty difficulty)
+    {
+        selectedDifficulty = DungeonDifficultyRules.Normalize((int)difficulty);
+        foreach (DifficultyRowView row in difficultyRows)
+        {
+            if (row?.Button == null)
+            {
+                continue;
+            }
+
+            row.Button.image.color = row.Difficulty == selectedDifficulty
+                ? new Color(DungeonUiTheme.TextPrimary.r, DungeonUiTheme.TextPrimary.g, DungeonUiTheme.TextPrimary.b, 0.26f)
+                : new Color(0f, 0f, 0f, 0.28f);
+        }
+
+        if (difficultyNameText != null)
+        {
+            difficultyNameText.text = DifficultyNameText(selectedDifficulty);
+        }
+
+        if (difficultyMultiplierText != null)
+        {
+            difficultyMultiplierText.text = DifficultyModifierTextLocalized(selectedDifficulty);
+        }
+
+        if (difficultyDescriptionText != null)
+        {
+            difficultyDescriptionText.text = DifficultyDescriptionLocalized(selectedDifficulty);
+        }
+
+        UpdateDifficultyWarning();
+
+        if (difficultyEmblemText != null)
+        {
+            difficultyEmblemText.text = selectedDifficulty == DungeonDifficulty.Hard
+                ? "III"
+                : selectedDifficulty == DungeonDifficulty.Easy
+                    ? "I"
+                    : "II";
+        }
+    }
+
+    private void UpdateDifficultyWarning()
+    {
+        if (difficultyWarningText == null)
+        {
+            return;
+        }
+
+        difficultyWarningText.text = newRunWillOverwriteSaves
+            ? "다음을 누르면 기존 실행 저장을 지우고 새 게임을 시작합니다."
+            : string.Empty;
+        difficultyWarningText.gameObject.SetActive(newRunWillOverwriteSaves);
+    }
+
+    private static string DifficultyNameText(DungeonDifficulty difficulty)
+    {
+        return difficulty switch
+        {
+            DungeonDifficulty.Easy => "쉬움",
+            DungeonDifficulty.Hard => "어려움",
+            _ => "보통"
+        };
+    }
+
+    private static string DifficultyRowSubtitle(DungeonDifficulty difficulty)
+    {
+        return difficulty switch
+        {
+            DungeonDifficulty.Easy => "적 80%",
+            DungeonDifficulty.Hard => "적 125%",
+            _ => "기본"
+        };
+    }
+
+    private static string DifficultyModifierTextLocalized(DungeonDifficulty difficulty)
+    {
+        return difficulty switch
+        {
+            DungeonDifficulty.Easy => "전투 보정  적 체력 80% · 공격 80%",
+            DungeonDifficulty.Hard => "전투 보정  적 체력 125% · 공격 120% · 주도권 110%",
+            _ => "전투 보정  기본 수치"
+        };
+    }
+
+    private static string DifficultyDescriptionLocalized(DungeonDifficulty difficulty)
+    {
+        return difficulty switch
+        {
+            DungeonDifficulty.Easy =>
+                "1. 적 전투 수치가 낮아집니다.\n2. 초반 침입 압박이 완만합니다.\n3. 시스템을 익히기 좋은 난이도입니다.",
+            DungeonDifficulty.Hard =>
+                "1. 적 체력 125%, 공격 120%, 주도권 110%.\n2. 침입과 오펜스 실패 압박이 큽니다.\n3. 장비와 회복 순환을 적극적으로 요구합니다.",
+            _ =>
+                "1. 기본 전투 수치로 시작합니다.\n2. 운영, 방어, 오펜스를 고르게 요구합니다.\n3. 권장 기준 난이도입니다."
+        };
+    }
+
+    private static string DifficultyName(DungeonDifficulty difficulty)
+    {
+        return difficulty switch
+        {
+            DungeonDifficulty.Easy => "쉬움",
+            DungeonDifficulty.Hard => "어려움",
+            _ => "보통"
+        };
+    }
+
+    private static string DifficultyModifierText(DungeonDifficulty difficulty)
+    {
+        return difficulty switch
+        {
+            DungeonDifficulty.Easy => "전투 보정  적 체력 80% · 공격 80%",
+            DungeonDifficulty.Hard => "전투 보정  적 체력 125% · 공격 120% · 주도권 110%",
+            _ => "전투 보정  기본 수치"
+        };
+    }
+
+    private static string DifficultyDescription(DungeonDifficulty difficulty)
+    {
+        return difficulty switch
+        {
+            DungeonDifficulty.Easy =>
+                "1. 적 체력과 공격력이 낮아집니다.\n2. 초반 침입 압박이 완만합니다.\n3. 시작 파티 실험에 적합합니다.",
+            DungeonDifficulty.Hard =>
+                "1. 적 체력 125%, 공격 120%, 주도권 110%.\n2. 침입과 오펜스 손실 압박이 큽니다.\n3. 장비와 회복 순환을 전제로 합니다.",
+            _ =>
+                "1. 기본 전투 수치로 시작합니다.\n2. 운영, 방어, 오펜스를 고르게 요구합니다.\n3. 권장 기준 난이도입니다."
+        };
     }
 
     private void LoadSlot(string slotId)
@@ -364,7 +635,8 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
         string date = timestamp == DateTime.MinValue
             ? "저장 시각 없음"
             : timestamp.ToLocalTime().ToString("M월 d일 HH:mm", CultureInfo.CurrentCulture);
-        return $"{date}\n{Mathf.Max(1, info.Day)}일차 · {Mathf.Max(0, info.Money):N0} 골드";
+        string debugBadge = info.DebugModified ? " · 디버그 사용" : string.Empty;
+        return $"{date}\n{Mathf.Max(1, info.Day)}일차 · {Mathf.Max(0, info.Money):N0} 골드{debugBadge}";
     }
 
     private static DateTime ParseSavedAt(string value)
@@ -424,6 +696,12 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
         bool selected = false,
         bool destructive = false)
     {
+        label = LocalizeButtonLabel(name, label);
+        if (string.Equals(name, "DifficultyCancelButton", StringComparison.Ordinal))
+        {
+            action = ShowTitleMainScreen;
+        }
+
         GameObject buttonObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
         buttonObject.transform.SetParent(parent, false);
         SetRect(buttonObject.GetComponent<RectTransform>(), anchorMin, anchorMax, Vector2.zero, Vector2.zero);
@@ -433,6 +711,25 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
         Stretch(text.rectTransform);
         DungeonUiTheme.StyleButton(button, selected, destructive);
         return button;
+    }
+
+    private static string LocalizeButtonLabel(string name, string fallback)
+    {
+        return name switch
+        {
+            "ContinueLatestButton" => "이어하기",
+            "StartNewRunButton" => "새 게임",
+            "StartupSettingsButton" => "설정",
+            "StartupQuitButton" => "종료",
+            "DifficultyEasyButton" => DifficultyNameText(DungeonDifficulty.Easy) + "\n" + DifficultyRowSubtitle(DungeonDifficulty.Easy),
+            "DifficultyNormalButton" => DifficultyNameText(DungeonDifficulty.Normal) + "\n" + DifficultyRowSubtitle(DungeonDifficulty.Normal),
+            "DifficultyHardButton" => DifficultyNameText(DungeonDifficulty.Hard) + "\n" + DifficultyRowSubtitle(DungeonDifficulty.Hard),
+            "DifficultyCancelButton" => "이전",
+            "DifficultyNextButton" => "다음",
+            _ when name != null && name.StartsWith("LoadButton_", StringComparison.Ordinal) => "불러오기",
+            _ when name != null && name.StartsWith("DeleteButton_", StringComparison.Ordinal) => "삭제",
+            _ => fallback
+        };
     }
 
     private TMP_Text CreateText(Transform parent, string name, string value, float size, TextAlignmentOptions alignment)
@@ -497,5 +794,17 @@ public sealed class DungeonTitleUiController : IStartable, IDisposable
         public TMP_Text Metadata { get; }
         public Button Load { get; }
         public Button Delete { get; }
+    }
+
+    private sealed class DifficultyRowView
+    {
+        public DifficultyRowView(DungeonDifficulty difficulty, Button button)
+        {
+            Difficulty = difficulty;
+            Button = button;
+        }
+
+        public DungeonDifficulty Difficulty { get; }
+        public Button Button { get; }
     }
 }

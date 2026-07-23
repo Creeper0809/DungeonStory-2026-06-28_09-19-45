@@ -118,6 +118,7 @@ public class AIRest : AIActionSet
         {
             return work.IsOffDuty
                 || work.ShouldUseRestProtection()
+                || CharacterNeedCatalog.GetWeightedUrgency(actor, CharacterCondition.SLEEP) >= 0.35f
                 || FacilityCandidateScorer.GetExpeditionRecoveryNeed(actor) >= 0.1f;
         }
 

@@ -28,6 +28,7 @@ public sealed class GridBuildingObjectFactory : IGridBuildingObjectFactory
         GameObject placedObject = new GameObject();
         placedObject.name = buildingData.objectName;
         placedObject.transform.position = instantiatePos;
+        DungeonRuntimeHierarchy.Parent(placedObject, DungeonRuntimeHierarchy.Buildings);
 
         if (buildingData.UsesIndependentRenderer)
         {

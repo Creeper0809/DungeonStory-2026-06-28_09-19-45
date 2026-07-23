@@ -8,7 +8,11 @@ public enum StockCategory
     Food = 0,
     General = 1,
     Weapon = 2,
-    Mana = 3
+    Mana = 3,
+    Water = 4,
+    Medicine = 5,
+    Fuel = 6,
+    Ammunition = 7
 }
 
 [CreateAssetMenu(menuName = "DungeonStory/Building/SaleItem", order = 0)]

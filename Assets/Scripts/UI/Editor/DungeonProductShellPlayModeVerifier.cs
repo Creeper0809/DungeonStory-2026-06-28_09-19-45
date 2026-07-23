@@ -353,8 +353,28 @@ public sealed class DungeonProductShellVerificationRunner : MonoBehaviour
                 "DIFFICULTY_MODAL", "New Game opens difficulty selection through pointer input");
             yield return Capture(DungeonProductShellPlayModeVerifier.DifficultyCapturePath, "DIFFICULTY_CAPTURE");
             yield return Click(FindSceneComponent<Button>("DifficultyHardButton"));
+            yield return Click(FindSceneComponent<Button>("DifficultyNextButton"));
             Check(!navigator.StartNewGame(DungeonDifficulty.Normal),
                 "DUPLICATE_TRANSITION", "duplicate scene request is rejected after difficulty selection");
+            yield return WaitForCondition(
+                () => SceneManager.GetActiveScene().name == DungeonSceneNavigator.PreparationSceneName
+                    && FindSceneComponent<Button>("PreparationOwnerNextButton") != null,
+                10f);
+            Button preparationOwner = Resources.FindObjectsOfTypeAll<Button>()
+                .FirstOrDefault(candidate => candidate != null
+                    && candidate.gameObject.scene.IsValid()
+                    && candidate.gameObject.activeInHierarchy
+                    && candidate.interactable
+                    && candidate.name.StartsWith("OwnerCandidate_", StringComparison.Ordinal));
+            Check(preparationOwner != null,
+                "PREPARATION_OWNER",
+                "StartPreparationScene exposes owner choices after difficulty selection");
+            yield return Click(preparationOwner);
+            yield return Click(FindSceneComponent<Button>("PreparationOwnerNextButton"));
+            yield return WaitForCondition(
+                () => FindSceneComponent<Button>("PreparationStartRunButton")?.interactable == true,
+                10f);
+            yield return StartPartyPlayModeTestDriver.CompleteIfVisible(30f);
             yield return WaitForCondition(
                 () => SceneManager.GetActiveScene().name == DungeonSceneNavigator.GameplaySceneName && FindScope() != null,
                 10f);
@@ -383,11 +403,12 @@ public sealed class DungeonProductShellVerificationRunner : MonoBehaviour
                     && candidate.gameObject.scene.IsValid()
                     && candidate.gameObject.activeInHierarchy
                     && candidate.name.StartsWith("OwnerOption_", StringComparison.Ordinal));
-            yield return Click(ownerButton);
-            yield return StartPartyPlayModeTestDriver.CompleteIfVisible();
+            Check(ownerButton == null,
+                "NO_GAMEPLAY_OWNER_SELECTION",
+                "prepared runs do not show the legacy gameplay owner selection");
             Check(ownerManager != null && ownerManager.CurrentOwnerActor != null,
-                "OWNER_SELECTED", "owner selection starts a playable run through pointer input");
-            Check(Time.timeScale > 0f, "RUN_RESUMED", $"clock resumes after owner selection; timeScale={Time.timeScale:0.##}");
+                "OWNER_SELECTED", "prepared owner is spawned when gameplay loads");
+            Check(Time.timeScale > 0f, "RUN_RESUMED", $"clock resumes after prepared start; timeScale={Time.timeScale:0.##}");
 
             yield return new WaitForSecondsRealtime(1f);
             IRunVariableRuntimeProvider runVariables = scope.Container.Resolve<IRunVariableRuntimeProvider>();

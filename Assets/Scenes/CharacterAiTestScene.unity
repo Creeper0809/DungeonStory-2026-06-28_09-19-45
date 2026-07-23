@@ -6856,7 +6856,12 @@ MonoBehaviour:
   speed: 8
   edgeThreshold: 7
   enableEdgeScroll: 0
+  enableZoom: 1
   movementPadding: {x: 4, y: 1}
+  zoomBounds: {x: 3.25, y: 10.5}
+  wheelZoomStep: 0.85
+  keyboardZoomSpeed: 4.5
+  blockWheelZoomOverUi: 1
   maxBound: {x: 1, y: 9}
   minBound: {x: -32, y: 0}
 --- !u!1 &524865088

@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c1f33ba710215f49996f15d8ac1a162, type: 3}
+  m_Name: WildlifeHabitatDecorationPalette
+  m_EditorClassIdentifier: Assembly-CSharp::WildlifeHabitatDecorationPaletteSO
+  flowerSprites:
+  - {fileID: 21300000, guid: 3470d0eec06343546817bcaa5fc148fc, type: 3}
+  - {fileID: 21300000, guid: 981cc6b4f02dfc145875dfeb02bb1a80, type: 3}
+  - {fileID: 21300000, guid: 6dfebbe83b8d9d34f97b43329a7e022b, type: 3}
+  - {fileID: 21300000, guid: e366cef49f6365f419792351322615ca, type: 3}
+  - {fileID: 21300000, guid: 411dadf0e855bdb4582333d0d2a05018, type: 3}
+  - {fileID: 21300000, guid: 57ac12a5ee279494ebf65a6efe8edee0, type: 3}
+  treeSprites:
+  - {fileID: 21300000, guid: fdf008b2524091649883b54e388664ae, type: 3}
+  - {fileID: 21300000, guid: 2af6f79cec7c3904e85bf0fbf0f44c55, type: 3}
+  - {fileID: 21300000, guid: 3b347d31136330f44afa3bdd53f25eee, type: 3}
+  rockSprites:
+  - {fileID: 21300000, guid: a3c70fc0c72e8084d958211b3767370b, type: 3}
+  - {fileID: 21300000, guid: d92ed29220dd75042a86543e28c3a02e, type: 3}
+  - {fileID: 21300000, guid: df47b7751f4ea284385518a71ad186d2, type: 3}
+  flowersPerGrassPatch: 5
+  flowersPerBrushPatch: 3
+  scatteredTreeSpacing: 18
+  scatteredRockSpacing: 9

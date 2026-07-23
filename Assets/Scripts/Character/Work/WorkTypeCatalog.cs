@@ -59,8 +59,8 @@ public static class WorkTypeCatalog
         {
             EnsureInitialized();
             return ById.Values
-                .OrderBy((definition) => definition.SortOrder)
-                .ThenBy((definition) => definition.Id, StringComparer.Ordinal)
+                .OrderBy(definition => definition.SortOrder)
+                .ThenBy(definition => definition.Id, StringComparer.Ordinal)
                 .ToArray();
         }
     }
@@ -115,7 +115,7 @@ public static class WorkTypeCatalog
 
     public static IEnumerable<WorkTypeDefinition> Enumerate(FacilityWorkType workTypes)
     {
-        return All.Where((definition) => (workTypes & definition.Type) != 0);
+        return All.Where(definition => (workTypes & definition.Type) != 0);
     }
 
     public static void ResetToBuiltIns()
@@ -149,14 +149,22 @@ public static class WorkTypeCatalog
     {
         RegisterBuiltIn("work:operate", FacilityWorkType.Operate, "운영", 10, WorkPriorityLevel.Priority1, "building:use");
         RegisterBuiltIn("work:restock", FacilityWorkType.Restock, "보충", 20, WorkPriorityLevel.Priority2, "building:stock");
+        RegisterBuiltIn("work:construct", FacilityWorkType.Construct, "건설", 25, WorkPriorityLevel.Priority2, "building:construct");
         RegisterBuiltIn("work:repair", FacilityWorkType.Repair, "수리", 30, WorkPriorityLevel.Priority2, "building:durability");
         RegisterBuiltIn("work:clean", FacilityWorkType.Clean, "청소", 40, WorkPriorityLevel.Priority3, "building:cleaning");
         RegisterBuiltIn("work:research", FacilityWorkType.Research, "연구", 50, WorkPriorityLevel.Priority2, "building:research");
         RegisterBuiltIn("work:guard", FacilityWorkType.Guard, "경비", 60, WorkPriorityLevel.Priority3, "building:security");
+        RegisterBuiltIn("work:reception", FacilityWorkType.Reception, "응대", 65, WorkPriorityLevel.Priority2, "exterior:reception");
         RegisterBuiltIn("work:rescue", FacilityWorkType.Rescue, "구조", 70, WorkPriorityLevel.Priority2, "character:rescue");
         RegisterBuiltIn("work:rest", FacilityWorkType.Rest, "휴식", 80, WorkPriorityLevel.Priority3, "character:rest");
-        RegisterBuiltIn("work:craft", FacilityWorkType.Craft, "Craft", 90, WorkPriorityLevel.Priority2, "building:craft");
+        RegisterBuiltIn("work:craft", FacilityWorkType.Craft, "제작", 90, WorkPriorityLevel.Priority2, "building:craft");
         RegisterBuiltIn("work:haul", FacilityWorkType.Haul, "운반", 95, WorkPriorityLevel.Priority2, "item:haul");
+        RegisterBuiltIn("work:hunt", FacilityWorkType.Hunt, "사냥", 96, WorkPriorityLevel.Priority2, "wildlife:hunt");
+        RegisterBuiltIn("work:butcher", FacilityWorkType.Butcher, "도축", 97, WorkPriorityLevel.Priority2, "wildlife:butcher");
+        RegisterBuiltIn("work:draw-water", FacilityWorkType.DrawWater, "급수", 98, WorkPriorityLevel.Priority2, "survival:water");
+        RegisterBuiltIn("work:cook", FacilityWorkType.Cook, "조리", 99, WorkPriorityLevel.Priority2, "survival:cook");
+        RegisterBuiltIn("work:treat", FacilityWorkType.Treat, "치료", 100, WorkPriorityLevel.Priority2, "survival:treat");
+        RegisterBuiltIn("work:refuel", FacilityWorkType.Refuel, "연료 보충", 101, WorkPriorityLevel.Priority2, "survival:fuel");
     }
 
     private static void RegisterBuiltIn(

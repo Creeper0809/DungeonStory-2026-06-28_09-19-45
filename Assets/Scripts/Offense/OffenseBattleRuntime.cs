@@ -38,6 +38,9 @@ public sealed class OffenseBattleRuntime :
     private readonly ICharacterWorldSaveService characterSaveService;
     private readonly IRunVariableRuntimeProvider runVariableRuntimeProvider;
     private readonly IExpeditionEquipmentRuntime equipmentRuntime;
+    private readonly ICombatResolutionService combatResolution;
+    private readonly ICombatEquipmentRuntime combatEquipmentRuntime;
+    private readonly ICharacterBodyHealthRuntime bodyHealthRuntime;
     private readonly Dictionary<string, CharacterActor> actorsById =
         new Dictionary<string, CharacterActor>(StringComparer.Ordinal);
     private bool started;
@@ -46,13 +49,19 @@ public sealed class OffenseBattleRuntime :
     public OffenseBattleRuntime(
         ICharacterWorldSaveService characterSaveService,
         IRunVariableRuntimeProvider runVariableRuntimeProvider,
-        IExpeditionEquipmentRuntime equipmentRuntime = null)
+        IExpeditionEquipmentRuntime equipmentRuntime = null,
+        ICombatResolutionService combatResolution = null,
+        ICombatEquipmentRuntime combatEquipmentRuntime = null,
+        ICharacterBodyHealthRuntime bodyHealthRuntime = null)
     {
         this.characterSaveService = characterSaveService
             ?? throw new ArgumentNullException(nameof(characterSaveService));
         this.runVariableRuntimeProvider = runVariableRuntimeProvider
             ?? throw new ArgumentNullException(nameof(runVariableRuntimeProvider));
         this.equipmentRuntime = equipmentRuntime;
+        this.combatResolution = combatResolution;
+        this.combatEquipmentRuntime = combatEquipmentRuntime;
+        this.bodyHealthRuntime = bodyHealthRuntime;
     }
 
     public OffenseBattleSession Session { get; private set; }
@@ -99,12 +108,15 @@ public sealed class OffenseBattleRuntime :
             CharacterActor actor = member.Actor;
             string persistentId = characterSaveService.GetOrAssignPersistentId(actor);
             actorsById[persistentId] = actor;
-            combatants.Add(OffenseEncounterCatalog.CreateAlly(
+            OffenseBattleCombatant combatant = OffenseEncounterCatalog.CreateAlly(
                 actor,
                 persistentId,
                 member.Formation,
                 member.Stress,
-                equipmentRuntime?.GetCombatBonuses(persistentId)));
+                equipmentRuntime?.GetCombatBonuses(persistentId));
+            ConfigureCombatEquipment(combatant);
+            ConfigureBodyHealth(actor, combatant);
+            combatants.Add(combatant);
         }
 
         if (combatants.Count == 0)
@@ -124,7 +136,9 @@ public sealed class OffenseBattleRuntime :
             expedition.Target.id,
             expedition.Target.title,
             difficulty,
-            combatants);
+            combatants,
+            combatResolution,
+            combatEquipmentRuntime);
         completionRaised = false;
         IsBattleViewVisible = true;
         TriggerBattleStarted(Session);
@@ -218,12 +232,15 @@ public sealed class OffenseBattleRuntime :
             CharacterActor actor = member.Actor;
             string persistentId = characterSaveService.GetOrAssignPersistentId(actor);
             actorsById[persistentId] = actor;
-            combatants.Add(OffenseEncounterCatalog.CreateAlly(
+            OffenseBattleCombatant combatant = OffenseEncounterCatalog.CreateAlly(
                 actor,
                 persistentId,
                 member.Formation,
                 member.Stress,
-                equipmentRuntime?.GetCombatBonuses(persistentId)));
+                equipmentRuntime?.GetCombatBonuses(persistentId));
+            ConfigureCombatEquipment(combatant);
+            ConfigureBodyHealth(actor, combatant);
+            combatants.Add(combatant);
         }
 
         combatants.AddRange(OffenseEncounterCatalog.CreateEnemies(
@@ -243,7 +260,11 @@ public sealed class OffenseBattleRuntime :
             return false;
         }
 
-        Session = OffenseBattleSession.Restore(state, combatants);
+        Session = OffenseBattleSession.Restore(
+            state,
+            combatants,
+            combatResolution,
+            combatEquipmentRuntime);
         completionRaised = false;
         IsBattleViewVisible = true;
         StateChanged?.Invoke();
@@ -307,6 +328,7 @@ public sealed class OffenseBattleRuntime :
     {
         if (Session == null || !Session.IsComplete || completionRaised) return false;
         completionRaised = true;
+        SynchronizeAlliedBodyHealth();
         BattleCompleted?.Invoke(Session);
         return true;
     }
@@ -385,6 +407,51 @@ public sealed class OffenseBattleRuntime :
         }
 
         return true;
+    }
+
+    private void ConfigureCombatEquipment(OffenseBattleCombatant combatant)
+    {
+        if (combatant == null || combatEquipmentRuntime == null)
+        {
+            return;
+        }
+
+        combatEquipmentRuntime.TryGetActiveWeapon(
+            combatant.PersistentId,
+            out CombatWeaponSnapshot weapon);
+        combatant.SetCombatEquipment(
+            weapon,
+            combatEquipmentRuntime.GetArmor(combatant.PersistentId));
+    }
+
+    private void ConfigureBodyHealth(CharacterActor actor, OffenseBattleCombatant combatant)
+    {
+        if (actor == null || combatant == null || bodyHealthRuntime == null)
+        {
+            return;
+        }
+
+        combatant.ApplyBodyHealth(bodyHealthRuntime.GetSnapshot(actor));
+    }
+
+    private void SynchronizeAlliedBodyHealth()
+    {
+        if (Session == null || bodyHealthRuntime == null)
+        {
+            return;
+        }
+
+        foreach (OffenseBattleCombatant combatant in Session.Combatants
+            .Where(value => value.Team == OffenseBattleTeam.Allies))
+        {
+            if (TryGetActor(combatant.PersistentId, out CharacterActor actor))
+            {
+                bodyHealthRuntime.ApplySnapshot(
+                    actor,
+                    combatant.CaptureBodyHealth(),
+                    "원정 전투 부상");
+            }
+        }
     }
 
     private static bool IsOffenseUltimateCommand(CharacterActor actor, OffenseBattleCommand command)

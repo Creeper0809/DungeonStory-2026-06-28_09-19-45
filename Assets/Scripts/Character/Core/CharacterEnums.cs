@@ -7,6 +7,7 @@ public enum CharacterFacing
 public enum CharacterCondition
 {
     HUNGER,
+    THIRST,
     SLEEP,
     FUN,
     MOOD,
@@ -28,6 +29,10 @@ public enum CharacterLifecycleState
     EnteringDungeon,
     Active,
     ExitingDungeon,
+    PreparingExpedition,
+    DepartingExpedition,
+    ReturningExpedition,
     OnExpedition,
+    Downed,
     Despawned
 }

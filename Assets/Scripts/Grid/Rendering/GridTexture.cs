@@ -700,7 +700,7 @@ public class GridWallTileCalculator
                 continue;
             }
 
-            if (cell.HasOccupant()) continue;
+            if (HasAutomaticSideWallContent(cell)) continue;
 
             bool hasLeftNeighbor = HasAutomaticSideWallNeighbor(grid, cell.Position + Vector2Int.left);
             bool hasRightNeighbor = HasAutomaticSideWallNeighbor(grid, cell.Position + Vector2Int.right);
@@ -722,10 +722,15 @@ public class GridWallTileCalculator
             return false;
         }
 
-        GridCell cell = grid.GetGridCell(position);
+        return HasAutomaticSideWallContent(grid.GetGridCell(position));
+    }
+
+    private static bool HasAutomaticSideWallContent(GridCell cell)
+    {
         return cell != null
-            && cell.HasOccupant()
-            && !IsWallVisualCell(cell);
+            && !IsWallVisualCell(cell)
+            && (cell.HasOccupantInLayer(GridLayer.Building)
+                || cell.HasOccupantInLayer(GridLayer.Hallway));
     }
 
     internal static bool IsStructuralWallCell(GridCell cell)

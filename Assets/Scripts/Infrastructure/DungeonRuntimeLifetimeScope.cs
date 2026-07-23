@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using VContainer;
 using VContainer.Unity;
@@ -12,6 +14,8 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
 
     protected override void Configure(IContainerBuilder builder)
     {
+        EnsureEventSystem();
+
         Scene scopeScene = gameObject.scene;
         DungeonSceneComponentQuery sceneQuery = new DungeonSceneComponentQuery(scopeScene);
         builder.RegisterInstance(sceneQuery)
@@ -46,6 +50,22 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
             .As<ITmpKoreanFontService>();
         builder.RegisterEntryPoint<DungeonUserSettingsService>(Lifetime.Singleton)
             .As<IDungeonUserSettingsService>();
+        builder.RegisterEntryPoint<DungeonDebugModeService>(Lifetime.Singleton)
+            .As<IDungeonDebugModeService>();
+        builder.Register<DungeonDebugCheatCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugEconomyCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugItemCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugCharacterCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugWorkCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugSurvivalWildlifeCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugDefenseCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugOverlayCommandProvider>(Lifetime.Singleton);
+        builder.Register<DungeonDebugCommandRegistry>(Lifetime.Singleton)
+            .As<IDungeonDebugCommandRegistry>();
+        builder.Register<DungeonDebugTargetResolver>(Lifetime.Singleton);
+        builder.RegisterEntryPoint<DungeonDebugPaletteUiController>(Lifetime.Singleton)
+            .AsSelf();
+        builder.RegisterEntryPoint<DungeonDebugWorldOverlayController>(Lifetime.Singleton);
         builder.RegisterEntryPoint<DungeonAudioController>(Lifetime.Singleton)
             .As<IDungeonAudioService>();
         builder.RegisterEntryPoint<DungeonSettingsUiController>(Lifetime.Singleton)
@@ -54,15 +74,80 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
             .As<IShopStockCatalog>();
         builder.Register<GridSystemProvider>(Lifetime.Singleton)
             .As<IGridSystemProvider>();
+        builder.Register<UnityCombatRandomSource>(Lifetime.Singleton)
+            .As<ICombatRandomSource>();
+        builder.Register<CombatResolutionService>(Lifetime.Singleton)
+            .As<ICombatResolutionService>();
+        builder.Register<CombatAffiliationService>(Lifetime.Singleton)
+            .As<ICombatAffiliationService>();
+        builder.Register<GridCombatLineOfSightService>(Lifetime.Singleton)
+            .As<ICombatLineOfSightService>();
+        builder.Register<GridCombatCoverQuery>(Lifetime.Singleton)
+            .As<ICombatCoverQuery>();
+        builder.Register<CombatFiringSolutionService>(Lifetime.Singleton)
+            .As<ICombatFiringSolutionService>();
+        builder.Register<ResourceCombatEquipmentCatalog>(Lifetime.Singleton)
+            .As<ICombatEquipmentCatalog>();
+        builder.Register<CombatEquipmentRuntime>(Lifetime.Singleton)
+            .As<ICombatEquipmentRuntime>()
+            .As<ICombatLoadoutRuntime>();
+        builder.RegisterEntryPoint<EquipmentMaintenancePolicyRuntime>(Lifetime.Singleton)
+            .As<ICombatEquipmentMaintenanceRuntime>();
+        builder.RegisterEntryPoint<CharacterBodyHealthRuntime>(Lifetime.Singleton)
+            .As<ICharacterBodyHealthRuntime>();
+        builder.RegisterEntryPoint<CharacterPhysicalCapacityQuery>(Lifetime.Singleton)
+            .As<ICharacterPhysicalCapacityQuery>();
+        builder.RegisterEntryPoint<CharacterMedicalRuntime>(Lifetime.Singleton)
+            .As<ICharacterMedicalRuntime>();
+        builder.RegisterEntryPoint<DefenseTacticalCoordinator>(Lifetime.Singleton)
+            .As<IDefenseTacticalCoordinator>();
+        builder.RegisterEntryPoint<CharacterCombatCommandRuntime>(Lifetime.Singleton)
+            .As<ICharacterCombatCommandRuntime>();
+        builder.RegisterEntryPoint<CombatCommandBarUiController>(Lifetime.Singleton);
+        builder.RegisterEntryPoint<CombatTacticalOverlayPresenter>(Lifetime.Singleton)
+            .As<ICombatTacticalOverlayPresenter>();
+        builder.RegisterEntryPoint<CombatLoadoutPreparationRuntime>(Lifetime.Singleton)
+            .AsSelf()
+            .As<ICombatAmmoResupplyRuntime>()
+            .As<ICombatEquipmentPickupRuntime>();
         builder.Register<WorldDropZoneQuery>(Lifetime.Singleton)
             .As<IWorldDropZoneQuery>();
+        builder.RegisterEntryPoint<ExteriorActivityRuntime>(Lifetime.Singleton)
+            .As<IExteriorActivityRuntime>()
+            .As<IExteriorZoneQuery>()
+            .As<IExteriorPatrolRuntime>()
+            .As<IExteriorIncidentRuntime>()
+            .As<IExpeditionDepartureService>()
+            .As<IExpeditionReturnService>();
         builder.Register<ResourceDungeonItemCatalogProvider>(Lifetime.Singleton)
             .As<IDungeonItemCatalogProvider>();
         builder.Register<ResourceItemHaulingSettingsProvider>(Lifetime.Singleton)
             .As<IItemHaulingSettingsProvider>();
         builder.RegisterEntryPoint<WorldItemStackRuntime>(Lifetime.Singleton)
             .As<IWorldItemStackRuntime>();
+        builder.RegisterEntryPoint<WorldFilthRuntime>(Lifetime.Singleton)
+            .As<IWorldFilthQuery>();
+        builder.RegisterEntryPoint<WorldWaterRuntime>(Lifetime.Singleton)
+            .As<IWorldWaterQuery>();
+        if (SampleSceneRationRuntime.SupportsScene(scopeScene.name))
+        {
+            builder.RegisterEntryPoint<SampleSceneRationRuntime>(Lifetime.Singleton)
+                .AsSelf();
+        }
+        builder.RegisterEntryPoint<CharacterDeprivationRuntime>(Lifetime.Singleton)
+            .As<ICharacterDeprivationRuntime>();
+        builder.RegisterEntryPoint<WorkOrderRuntime>(Lifetime.Singleton)
+            .As<IWorkOrderRuntime>();
+        builder.Register<ResourceWildlifeSpeciesCatalogProvider>(Lifetime.Singleton)
+            .As<IWildlifeSpeciesCatalogProvider>();
+        builder.RegisterEntryPoint<WildlifeEcosystemRuntime>(Lifetime.Singleton)
+            .As<IWildlifeEcosystemRuntime>();
+        builder.RegisterEntryPoint<WildlifeRuntime>(Lifetime.Singleton)
+            .As<IWildlifeRuntime>();
+        builder.RegisterEntryPoint<SurvivalFoodRuntime>(Lifetime.Singleton)
+            .As<ISurvivalFoodRuntime>();
         builder.RegisterEntryPoint<ItemStackViewToggleRuntime>(Lifetime.Singleton);
+        builder.RegisterEntryPoint<WildlifeEcosystemViewToggleRuntime>(Lifetime.Singleton);
         builder.Register<DungeonBackdropSpriteTilingFactory>(Lifetime.Singleton)
             .As<IDungeonBackdropSpriteTilingFactory>();
         builder.Register<WorldInfoClickSelectionService>(Lifetime.Singleton)
@@ -170,6 +255,12 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
             .As<IDefenseStatusRuntimeFactory>();
         builder.Register<DefenseStatusRuntimeService>(Lifetime.Singleton)
             .As<IDefenseStatusRuntimeService>();
+        builder.Register<DefenseResponsePolicyRuntime>(Lifetime.Singleton)
+            .As<IDefenseResponsePolicyRuntime>();
+        builder.RegisterEntryPoint<InvasionOwnerEvacuationService>(Lifetime.Singleton)
+            .As<IInvasionOwnerEvacuationService>();
+        builder.RegisterEntryPoint<DefenseEngagementRuntime>(Lifetime.Singleton)
+            .As<IDefenseEngagementRuntime>();
         builder.Register<RunVariableRuntimeProvider>(Lifetime.Singleton)
             .As<IRunVariableRuntimeProvider>();
         builder.Register<RunVariableRuntimeReader>(Lifetime.Singleton)
@@ -209,6 +300,8 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
             .As<ICharacterSkillSystemSettingsProvider>();
         builder.Register<CharacterPopulationService>(Lifetime.Singleton)
             .As<ICharacterPopulationService>();
+        builder.Register<PreparedStartPartyGameplayApplier>(Lifetime.Singleton)
+            .As<IPreparedStartPartyGameplayApplier>();
         builder.Register<StartPartyPreparationService>(Lifetime.Singleton)
             .As<IStartPartyPreparationService>();
         builder.RegisterEntryPoint<CharacterSkillGenerationService>(Lifetime.Singleton)
@@ -450,6 +543,10 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
                 Lifetime.Singleton,
                 nameof(ItemPileInfoPanel))
             .UnderTransform(transform);
+        builder.RegisterComponentOnNewGameObject<WildlifeInfoPanel>(
+                Lifetime.Singleton,
+                nameof(WildlifeInfoPanel))
+            .UnderTransform(transform);
         builder.Register<GameManagerFloatingIconFeedbackService>(Lifetime.Singleton)
             .As<IFloatingIconFeedbackService>();
 
@@ -457,7 +554,11 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
         {
             InjectSceneHierarchy(resolver, scopeScene);
             resolver.Resolve<ItemPileInfoPanel>();
+            resolver.Resolve<WildlifeInfoPanel>();
             resolver.Resolve<RegularCustomerRuntime>();
+            resolver.Resolve<IExteriorActivityRuntime>();
+            resolver.Resolve<IWildlifeRuntime>();
+            resolver.Resolve<ISurvivalFoodRuntime>();
         });
     }
 
@@ -484,5 +585,32 @@ public sealed class DungeonRuntimeLifetimeScope : LifetimeScope
             sceneQuery.First<EventAlertRuntime>(includeInactive: true),
             sceneQuery.First<RunVariableRuntime>(includeInactive: true),
             sceneQuery.First<Canvas>(includeInactive: true));
+    }
+
+    private static void EnsureEventSystem()
+    {
+        EventSystem eventSystem =
+            FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include);
+        if (eventSystem == null)
+        {
+            GameObject eventSystemObject = new GameObject(
+                "EventSystem",
+                typeof(EventSystem),
+                typeof(InputSystemUIInputModule));
+            eventSystem = eventSystemObject.GetComponent<EventSystem>();
+        }
+        else if (eventSystem.GetComponent<InputSystemUIInputModule>() == null)
+        {
+            eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
+        }
+
+        StandaloneInputModule legacyModule =
+            eventSystem.GetComponent<StandaloneInputModule>();
+        if (legacyModule != null)
+        {
+            legacyModule.enabled = false;
+        }
+
+        eventSystem.gameObject.SetActive(true);
     }
 }

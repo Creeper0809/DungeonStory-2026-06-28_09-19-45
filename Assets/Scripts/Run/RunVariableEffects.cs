@@ -336,11 +336,15 @@ public static class RunVariableEffects
         }
 
         result.patternId = source.patternId;
+        result.rallyDurationSeconds = source.rallyDurationSeconds;
         result.secondsToFullFocus = source.secondsToFullFocus;
         result.repathIntervalSeconds = source.repathIntervalSeconds;
         result.facilityDamageIntervalSeconds = source.facilityDamageIntervalSeconds;
         result.finalCombatDamage = source.finalCombatDamage;
         result.finalCombatWindupSeconds = source.finalCombatWindupSeconds;
+        result.healthMultiplier = source.healthMultiplier;
+        result.meleeDamageMultiplier = source.meleeDamageMultiplier;
+        result.attackSpeedMultiplier = source.attackSpeedMultiplier;
         return result;
     }
 }

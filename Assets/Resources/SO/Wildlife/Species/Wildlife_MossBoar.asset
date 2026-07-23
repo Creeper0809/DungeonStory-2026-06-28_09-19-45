@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3cd719baf9d04ed9954c2d0940108e41, type: 3}
+  m_Name: Wildlife_MossBoar
+  m_EditorClassIdentifier: Assembly-CSharp::WildlifeSpeciesSO
+  speciesId: moss_boar
+  displayName: "\uC774\uB07C\uBA67\uB3FC\uC9C0"
+  description: "\uCD95\uCD95\uD55C \uD138\uACFC \uB2E8\uB2E8\uD55C \uAC00\uC8FD\uC744
+    \uAC00\uC9C4 \uC9D0\uC2B9. \uBAB0\uB9AC\uBA74 \uB4E4\uC774\uBC1B\uB294\uB2E4."
+  sprite: {fileID: 8830240408192137408, guid: e083c418e61f9784aac927d662cfe138, type: 3}
+  maxHealth: 34
+  moveSpeed: 0.85
+  fearSensitivity: 0.75
+  aggression: 0.55
+  retaliationDamage: 7
+  spawnWeight: 2.2
+  herdSize: 1
+  canEnterDungeon: 0
+  carcassWeight: 28
+  butcherYields:
+  - itemId: stock-item:0
+    amount: 8
+  - itemId: wild:hide
+    amount: 2

@@ -4,6 +4,16 @@ using System.Collections.Generic;
 using UnityEngine;
 using VContainer;
 using Random = UnityEngine.Random;
+
+public enum ShoppingVisitOutcome
+{
+    None = 0,
+    InProgress = 1,
+    Completed = 2,
+    Failed = 3,
+    Abandoned = 4
+}
+
 public class AbilityShopping : CharacterAbility
 {
     private const int DefaultMaxLookAroundCount = 1;
@@ -12,6 +22,7 @@ public class AbilityShopping : CharacterAbility
     private readonly List<BuildableObject> mutableVisitedBuildings = new List<BuildableObject>();
     private IReadOnlyList<BuildableObject> visitedBuildingsView;
     private bool attemptedLooseItemTheftBeforeExit;
+    private BuildableObject currentVisitTarget;
     [SerializeField, Min(0.05f)]
     private float purchaseFeedbackIconMaxWorldSize = FloatingIconFeedbackDefaults.DefaultMaxWorldSize;
     private IShopStockCatalog shopStockCatalog;
@@ -22,6 +33,7 @@ public class AbilityShopping : CharacterAbility
     public IReadOnlyList<BuildableObject> visitedBuilding =>
         visitedBuildingsView ??= ReadOnlyView.List(mutableVisitedBuildings);
     public int HoldingMoney => holdingMoney;
+    public ShoppingVisitOutcome LastVisitOutcome { get; private set; }
 
     [Inject]
     public void ConstructAbilityShopping(
@@ -41,6 +53,8 @@ public class AbilityShopping : CharacterAbility
         visitCount = data != null ? data.GetFrequencyVisit() : 1;
         lookAroundCount = 0;
         attemptedLooseItemTheftBeforeExit = false;
+        currentVisitTarget = null;
+        LastVisitOutcome = ShoppingVisitOutcome.None;
         holdingMoney = data != null
             ? Mathf.Max(0, Mathf.RoundToInt(
                 data.GetHoldingMoney() * (actor?.Stats?.GetSpendingMultiplier() ?? 1f)))
@@ -206,9 +220,17 @@ public class AbilityShopping : CharacterAbility
             && destinationCell.ContainsOccupant(action.destination)
             && action.destination is IInteractable shop)
         {
+            BeginVisitInteraction(action.destination);
             yield return shop.Interact(actor);
             action.ReleaseReservation(actor);
-            RegisterVisit(action.destination);
+            if (LastVisitOutcome == ShoppingVisitOutcome.Abandoned)
+            {
+                RegisterAvoidedVisit(action.destination);
+            }
+            else
+            {
+                RegisterVisit(action.destination);
+            }
         }
         else
         {
@@ -244,6 +266,29 @@ public class AbilityShopping : CharacterAbility
     public bool HasVisited(BuildableObject building)
     {
         return building != null && mutableVisitedBuildings.Contains(building);
+    }
+
+    public void RegisterAvoidedVisit(BuildableObject building)
+    {
+        if (building != null && !mutableVisitedBuildings.Contains(building))
+        {
+            mutableVisitedBuildings.Add(building);
+        }
+    }
+
+    public void BeginVisitInteraction(BuildableObject building)
+    {
+        currentVisitTarget = building;
+        LastVisitOutcome = ShoppingVisitOutcome.InProgress;
+    }
+
+    public void SetVisitOutcome(BuildableObject building, ShoppingVisitOutcome outcome)
+    {
+        if (building == null || currentVisitTarget == building)
+        {
+            currentVisitTarget = building;
+            LastVisitOutcome = outcome;
+        }
     }
 
     public void RegisterLookAround()

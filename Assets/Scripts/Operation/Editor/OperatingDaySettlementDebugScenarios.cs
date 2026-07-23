@@ -105,7 +105,7 @@ public static class OperatingDaySettlementDebugScenarios
             && report.warehouseStocks.Count >= 1
             && report.staffSummary.staffCount >= 1
             && report.staffComplaintEvents.Count >= 1
-            && report.refreshedDailyShopOffers.Count == 4;
+            && report.refreshedDailyShopOffers.Count >= 7;
 
         if (!valid)
         {

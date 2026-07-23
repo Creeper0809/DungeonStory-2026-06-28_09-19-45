@@ -21,6 +21,7 @@ public static class PhysicalItemLogisticsPlayModeVerifier
     public const string RequestPath = "Temp/physical-item-logistics-playmode.request";
     public const string ReportPath = "Artifacts/QA/physical-item-logistics-playmode-report.txt";
     public const string CarryCapturePath = "Artifacts/QA/physical-item-carry-ui.png";
+    private const string GameplayScenePath = "Assets/Scenes/GameplayScene.unity";
 
     private static bool runnerCreated;
 
@@ -51,10 +52,10 @@ public static class PhysicalItemLogisticsPlayModeVerifier
 
         if (!string.Equals(
                 SceneManager.GetActiveScene().path,
-                "Assets/Scenes/SampleScene.unity",
+                GameplayScenePath,
                 StringComparison.OrdinalIgnoreCase))
         {
-            EditorSceneManager.OpenScene("Assets/Scenes/SampleScene.unity", OpenSceneMode.Single);
+            EditorSceneManager.OpenScene(GameplayScenePath, OpenSceneMode.Single);
         }
 
         EditorApplication.EnterPlaymode();
@@ -185,6 +186,13 @@ public sealed class PhysicalItemLogisticsPlayModeVerificationRunner : MonoBehavi
 
             yield return VerifyLooseStackToWarehouse(itemRuntime, grid, hauler, warehouse, positions[2]);
             yield return VerifyFacilityInputDelivery(itemRuntime, hauler, warehouse, bench);
+            yield return VerifyConstructionMaterialDelivery(
+                itemRuntime,
+                scope,
+                grid,
+                hauler,
+                warehouse,
+                positions[2]);
             yield return VerifyCraftMaterialsOutputAndEquipmentDeposit(itemRuntime, equipment, hauler, warehouse, bench);
             VerifyExpeditionPacking(preparation, itemRuntime, warehouse);
             yield return VerifyCarryUi(itemRuntime, hauler);
@@ -256,6 +264,20 @@ public sealed class PhysicalItemLogisticsPlayModeVerificationRunner : MonoBehavi
         Check(requested && requestedAmount == 2,
             "FACILITY_DELIVERY_REQUESTED",
             $"requested={requestedAmount}; reason={reason}; general={generalBefore}->{warehouse.Inventory.GetStock(StockCategory.General)}");
+        Check(warehouse.Inventory.GetStock(StockCategory.General) == generalBefore,
+            "FACILITY_STOCK_HELD_UNTIL_PICKUP",
+            $"general={generalBefore}->{warehouse.Inventory.GetStock(StockCategory.General)}");
+        Check(!itemRuntime.GetAllStacks().Any(stack =>
+                stack.State == WorldItemStackState.Loose
+                && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)),
+            "FACILITY_REQUEST_NO_LOOSE_PILE",
+            DescribeStacks(itemRuntime));
+        Check(itemRuntime.GetAllStacks().Any(stack =>
+                stack.State == WorldItemStackState.Stored
+                && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(stack.SourceStorageDestinationId)),
+            "FACILITY_REQUEST_RESERVED_IN_STORAGE",
+            DescribeStacks(itemRuntime));
 
         AIHaul action = ScriptableObject.CreateInstance<AIHaul>();
         try
@@ -276,12 +298,164 @@ public sealed class PhysicalItemLogisticsPlayModeVerificationRunner : MonoBehavi
             && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)
             && stack.Position == bench.centerPos);
         Check(bufferReady, "AI_HAUL_DEPOSITED_TO_FACILITY_BUFFER", DescribeStacks(itemRuntime));
+        Check(warehouse.Inventory.GetStock(StockCategory.General) == generalBefore - 2,
+            "FACILITY_STOCK_WITHDRAWN_ON_PICKUP",
+            $"general={generalBefore}->{warehouse.Inventory.GetStock(StockCategory.General)}");
         Check(itemRuntime.TryConsumeFacilityBuffer(
                 destinationId,
                 new Dictionary<StockCategory, int> { [StockCategory.General] = 2 },
                 out string consumeReason),
             "FACILITY_BUFFER_CONSUMED",
             consumeReason);
+    }
+
+    private IEnumerator VerifyConstructionMaterialDelivery(
+        IWorldItemStackRuntime itemRuntime,
+        DungeonRuntimeLifetimeScope scope,
+        Grid grid,
+        CharacterActor hauler,
+        Facility warehouse,
+        Vector2Int sitePosition)
+    {
+        const int materialAmount = 2;
+        BuildingSO building = ScriptableObject.CreateInstance<BuildingSO>();
+        building.id = 99121;
+        building.objectName = "QA 건설 자재 운반 시설";
+        building.width = 1;
+        building.height = 1;
+        building.layer = GridLayer.Building;
+        building.category = BuildingCategory.Shop;
+        building.unlocked = true;
+        building.AbilityModules.Add(new BuildingWorkAmountAbility
+        {
+            constructionWorkRequired = 5f,
+            repairWorkRequired = 3f,
+            cleanWorkRequired = 2f,
+            researchWorkRequired = 6f,
+            constructionMaterialCategory = StockCategory.General,
+            constructionMaterialAmount = materialAmount,
+            materialUnitsPerConstructionCost = 0f
+        });
+
+        GameObject siteObject = new GameObject("QA_Physical_Logistics_ConstructionSite");
+        temporaryObjects.Add(siteObject);
+        ConstructionSite site = siteObject.AddComponent<ConstructionSite>();
+        InjectGameObject(scope, siteObject);
+        site.SetGrid(grid);
+        site.Initialization(building, sitePosition);
+        siteObject.transform.position = grid.GetWorldPos(sitePosition);
+        bool registered = grid.RegisterOccupant(
+            site,
+            GridLayer.Construction,
+            building.GetGridPosList(sitePosition),
+            false);
+        Check(registered, "CONSTRUCTION_SITE_REGISTERED", $"pos={sitePosition}");
+
+        string orderId = string.Empty;
+        try
+        {
+            int generalBefore = warehouse.Inventory.GetStock(StockCategory.General);
+            string failureReason = string.Empty;
+            bool created = registered
+                && WorkOrderRuntime.Active != null
+                && WorkOrderRuntime.Active.TryCreateConstructionOrder(
+                    site,
+                    building,
+                    sitePosition,
+                    out orderId,
+                    out failureReason);
+            Check(created,
+                "CONSTRUCTION_ORDER_CREATED",
+                created ? $"order={orderId}" : failureReason);
+            if (!created
+                || !WorkOrderRuntime.Active.TryGetOrderFor(
+                    site,
+                    FacilityWorkType.Construct,
+                    out WorkOrderProgressState order))
+            {
+                yield break;
+            }
+
+            string destinationId = order.MaterialDestinationId;
+            Check(order.Status == WorkOrderStatus.WaitingForMaterials,
+                "CONSTRUCTION_WAITS_FOR_MATERIALS",
+                $"status={order.Status}; destination={destinationId}");
+            Check(warehouse.Inventory.GetStock(StockCategory.General) == generalBefore,
+                "CONSTRUCTION_STOCK_HELD_UNTIL_PICKUP",
+                $"general={generalBefore}->{warehouse.Inventory.GetStock(StockCategory.General)}");
+            Check(!itemRuntime.GetAllStacks().Any(stack =>
+                    stack.State == WorldItemStackState.Loose
+                    && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)),
+                "CONSTRUCTION_REQUEST_NO_LOOSE_PILE",
+                DescribeStacks(itemRuntime));
+            Check(itemRuntime.GetAllStacks().Any(stack =>
+                    stack.State == WorldItemStackState.Stored
+                    && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(stack.SourceStorageDestinationId)
+                    && stack.Quantity >= materialAmount),
+                "CONSTRUCTION_MATERIAL_RESERVED_IN_STORAGE",
+                DescribeStacks(itemRuntime));
+
+            AIHaul action = ScriptableObject.CreateInstance<AIHaul>();
+            try
+            {
+                Check(action.CanStart(hauler),
+                    "AI_HAUL_CAN_START_CONSTRUCTION",
+                    DescribeHaulState(itemRuntime, hauler));
+                yield return RunHaul(action, hauler, () =>
+                    itemRuntime.GetAllStacks().Any(stack =>
+                        stack.State == WorldItemStackState.FacilityBuffer
+                        && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)
+                        && stack.Position == sitePosition
+                        && stack.Quantity >= materialAmount)
+                    || WorkOrderRuntime.Active.TryGetOrderFor(
+                        site,
+                        FacilityWorkType.Construct,
+                        out WorkOrderProgressState deliveredOrder)
+                    && deliveredOrder.DeliveredMaterials.TryGetValue(
+                        StockCategory.General,
+                        out int deliveredAmount)
+                    && deliveredAmount >= materialAmount);
+            }
+            finally
+            {
+                Destroy(action);
+            }
+
+            Check(warehouse.Inventory.GetStock(StockCategory.General) == generalBefore - materialAmount,
+                "CONSTRUCTION_STOCK_WITHDRAWN_ON_PICKUP",
+                $"general={generalBefore}->{warehouse.Inventory.GetStock(StockCategory.General)}");
+            Check(WorkOrderRuntime.Active.RefreshMaterialsReady(site)
+                    && WorkOrderRuntime.Active.TryGetOrderFor(
+                        site,
+                        FacilityWorkType.Construct,
+                        out order)
+                    && order.Status == WorkOrderStatus.Ready
+                    && order.DeliveredMaterials.TryGetValue(StockCategory.General, out int delivered)
+                    && delivered == materialAmount,
+                "CONSTRUCTION_READY_AFTER_PHYSICAL_DELIVERY",
+                order != null
+                    ? $"status={order.Status}; delivered={order.DeliveredMaterials.GetValueOrDefault(StockCategory.General)}"
+                    : "order missing");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(orderId))
+            {
+                WorkOrderRuntime.Active?.CancelOrder(orderId, refundDeliveredMaterials: false);
+            }
+
+            if (registered)
+            {
+                grid.RemoveOccupant(
+                    site,
+                    GridLayer.Construction,
+                    building.GetGridPosList(sitePosition),
+                    false);
+            }
+
+            Destroy(building);
+        }
     }
 
     private IEnumerator VerifyCraftMaterialsOutputAndEquipmentDeposit(

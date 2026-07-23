@@ -13,6 +13,9 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
     private IUiPopupService popupService;
     private IBuildingSummaryFormatter summaryFormatter;
     private ITmpKoreanFontService tmpKoreanFontService;
+    private Button contextActionButton;
+    private TMP_Text contextActionLabel;
+    private BuildableObject currentBuilding;
 
     [Inject]
     public void Construct(
@@ -41,6 +44,7 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         if (eventType.Target is not BuildingInfoTarget buildingInfo || buildingInfo.Building == null) return;
 
         BuildableObject building = buildingInfo.Building;
+        currentBuilding = building;
         GameObject uiRoot = RequireUiRoot();
 
         ResolvePopupService().CloseAll();
@@ -52,6 +56,7 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         BuildingSummaryPresentation presentation = ResolveSummaryFormatter().Format(building);
         RequireObjectNameText().text = presentation.ObjectName;
         RequireStockText().text = presentation.StockText;
+        ConfigureContextAction(building);
     }
 
     private void EnsureGeneratedView(GameObject uiRoot)
@@ -64,6 +69,10 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         {
             objectName = existing.Find("Header/BuildingName")?.GetComponent<TMP_Text>();
             stock = existing.Find("Details")?.GetComponent<TMP_Text>();
+            contextActionButton = existing.Find("CleanPriorityButton")?.GetComponent<Button>();
+            contextActionLabel = contextActionButton != null
+                ? contextActionButton.GetComponentInChildren<TMP_Text>(true)
+                : null;
             return;
         }
 
@@ -110,6 +119,51 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
         stock.lineSpacing = 8f;
         stock.margin = new Vector4(14f, 14f, 14f, 14f);
         SetStretch(stock.rectTransform, new Vector2(14f, 14f), new Vector2(-14f, -78f));
+
+        contextActionButton = CreateButton("CleanPriorityButton", view, "청소 우선");
+        RectTransform actionRect = contextActionButton.GetComponent<RectTransform>();
+        actionRect.anchorMin = new Vector2(1f, 0f);
+        actionRect.anchorMax = new Vector2(1f, 0f);
+        actionRect.pivot = new Vector2(1f, 0f);
+        actionRect.anchoredPosition = new Vector2(-16f, 16f);
+        actionRect.sizeDelta = new Vector2(146f, 42f);
+        contextActionLabel = contextActionButton.GetComponentInChildren<TMP_Text>(true);
+        contextActionButton.onClick.AddListener(OnContextAction);
+        contextActionButton.gameObject.SetActive(false);
+    }
+
+    private void ConfigureContextAction(BuildableObject building)
+    {
+        bool show = building is WorldFilthWorkTarget;
+        if (contextActionButton != null)
+        {
+            contextActionButton.gameObject.SetActive(show);
+        }
+
+        if (stock != null)
+        {
+            Vector2 offsetMin = stock.rectTransform.offsetMin;
+            offsetMin.y = show ? 66f : 14f;
+            stock.rectTransform.offsetMin = offsetMin;
+        }
+
+        if (show && building is WorldFilthWorkTarget filth && contextActionLabel != null)
+        {
+            contextActionLabel.text = filth.IsPriorityCleaning ? "우선 해제" : "청소 우선";
+        }
+    }
+
+    private void OnContextAction()
+    {
+        if (currentBuilding is not WorldFilthWorkTarget filth || filth == null)
+        {
+            return;
+        }
+
+        filth.SetPriorityCleaning(!filth.IsPriorityCleaning);
+        BuildingSummaryPresentation presentation = ResolveSummaryFormatter().Format(filth);
+        RequireStockText().text = presentation.StockText;
+        ConfigureContextAction(filth);
     }
 
     private TMP_Text CreateText(string name, Transform parent, float fontSize, FontStyles style)
@@ -189,6 +243,7 @@ public class BuildingSummaryInfo : UIPopUp, UtilEventListener<InfoFeedEvent>
 
     public override void OnClose()
     {
+        currentBuilding = null;
         RequireUiRoot().SetActive(false);
     }
 

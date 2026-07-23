@@ -54,6 +54,7 @@ public static class FacilityCandidateScorer
         }
 
         BuildableObject bestBuilding = null;
+        CharacterAiUtilityBreakdown bestBreakdown = null;
         float bestScore = float.MinValue;
         int bestId = int.MaxValue;
         foreach (BuildableObject building in candidates)
@@ -63,17 +64,25 @@ public static class FacilityCandidateScorer
                 continue;
             }
 
-            float score = ScoreCandidate(actor, building, role, searchResult, scoringContext);
+            float score = ScoreCandidateWithBreakdown(
+                actor,
+                building,
+                role,
+                searchResult,
+                scoringContext,
+                out CharacterAiUtilityBreakdown breakdown);
             if (bestBuilding == null
                 || score > bestScore
                 || (Mathf.Approximately(score, bestScore) && building.id < bestId))
             {
                 bestBuilding = building;
+                bestBreakdown = breakdown;
                 bestScore = score;
                 bestId = building.id;
             }
         }
 
+        RecordFacilityBreakdown(actor, bestBreakdown, bestScore);
         return bestBuilding;
     }
 
@@ -113,6 +122,7 @@ public static class FacilityCandidateScorer
         }
 
         float bestScore = float.MinValue;
+        CharacterAiUtilityBreakdown bestBreakdown = null;
         int bestId = int.MaxValue;
         foreach (BuildableObject building in GetCandidateSource(actor, searchResult, role))
         {
@@ -121,15 +131,27 @@ public static class FacilityCandidateScorer
                 continue;
             }
 
-            float score = ScoreCandidate(actor, building, role, searchResult, scoringContext);
+            float score = ScoreCandidateWithBreakdown(
+                actor,
+                building,
+                role,
+                searchResult,
+                scoringContext,
+                out CharacterAiUtilityBreakdown breakdown);
             if (bestBuilding == null
                 || score > bestScore
                 || (Mathf.Approximately(score, bestScore) && building.id < bestId))
             {
                 bestBuilding = building;
+                bestBreakdown = breakdown;
                 bestScore = score;
                 bestId = building.id;
             }
+        }
+
+        if (bestBuilding != null)
+        {
+            RecordFacilityBreakdown(actor, bestBreakdown, bestScore);
         }
 
         return bestBuilding != null;
@@ -205,6 +227,24 @@ public static class FacilityCandidateScorer
         GridPathSearchResult searchResult,
         FacilityScoringContext scoringContext)
     {
+        return ScoreCandidateWithBreakdown(
+            actor,
+            building,
+            role,
+            searchResult,
+            scoringContext,
+            out _);
+    }
+
+    public static float ScoreCandidateWithBreakdown(
+        CharacterActor actor,
+        BuildableObject building,
+        FacilityRole role,
+        GridPathSearchResult searchResult,
+        FacilityScoringContext scoringContext,
+        out CharacterAiUtilityBreakdown breakdown)
+    {
+        breakdown = null;
         if (!IsCandidate(actor, building, role, scoringContext, out _))
         {
             return 0f;
@@ -221,20 +261,99 @@ public static class FacilityCandidateScorer
         float reputationBias = GetReputationBias(actor, building, scoringContext);
         float roomScore = scoringContext.GetRoomUtilityScore(building, matchedRole);
         float facilityStateScore = GetFacilityStateScore(building);
+        float memoryScore = actor != null && actor.AiMemory != null
+            ? actor.AiMemory.GetFacilityMemoryScore(building)
+            : 0.5f;
+        CharacterAiWorldSignalSnapshot signals = CharacterAiWorldSignalUtility.Capture(
+            actor,
+            GetBranchForRole(matchedRole),
+            building,
+            searchResult);
+        float queueScore = Mathf.Clamp01(1f - signals.QueuePressure);
+        float socialScore = ResolveSocialFacilityScore(matchedRole, signals);
+        float weatherScore = Mathf.Clamp01(1f - signals.WeatherPressure);
+        float pathScore = signals.PathConfidence;
+        float fatigueScore = Mathf.Clamp01(1f - signals.RecentFailurePressure);
+        float scheduleScore = signals.ScheduleScore;
+        float speciesAffinityBias = GetSpeciesAffinityBias(actor, building);
 
         float score =
-            desireScore * 0.3f
-            + preferenceScore * 0.17f
-            + stockScore * 0.12f
-            + affordabilityScore * 0.08f
-            + crowdScore * 0.08f
-            + distanceScore * 0.06f
-            + noveltyScore * 0.03f
-            + roomScore * 0.11f
-            + facilityStateScore * 0.05f
+            desireScore * 0.26f
+            + preferenceScore * 0.14f
+            + stockScore * 0.1f
+            + affordabilityScore * 0.07f
+            + crowdScore * 0.06f
+            + distanceScore * 0.05f
+            + noveltyScore * 0.04f
+            + roomScore * 0.1f
+            + facilityStateScore * 0.04f
+            + memoryScore * 0.04f
+            + queueScore * 0.05f
+            + socialScore * 0.03f
+            + weatherScore * 0.02f
+            + pathScore * 0.03f
+            + fatigueScore * 0.02f
+            + scheduleScore * 0.02f
             + reputationBias;
 
-        return Mathf.Clamp01(score);
+        float finalScore = ApplySpeciesAffinityBias(score, speciesAffinityBias);
+        breakdown = new CharacterAiUtilityBreakdown(
+            CharacterAiUtilityText.GetIntention(GetBranchForRole(matchedRole)),
+            GetFacilityLabel(building));
+        breakdown.Add(CharacterAiUtilityFactorKind.Need, desireScore, 0.3f, FacilityRoleDisplayName(matchedRole));
+        breakdown.Add(CharacterAiUtilityFactorKind.Personality, preferenceScore, 0.17f, "개인 취향");
+        breakdown.Add(CharacterAiUtilityFactorKind.Stock, stockScore, 0.12f, "재고");
+        breakdown.Add(CharacterAiUtilityFactorKind.Crowd, crowdScore, 0.08f, "혼잡");
+        breakdown.Add(CharacterAiUtilityFactorKind.Distance, distanceScore, 0.06f, "거리");
+        breakdown.Add(CharacterAiUtilityFactorKind.Queue, queueScore, 0.05f, "대기열");
+        breakdown.Add(CharacterAiUtilityFactorKind.Room, roomScore, 0.11f, "방 환경");
+        breakdown.Add(CharacterAiUtilityFactorKind.Memory, memoryScore, 0.05f, "최근 기억");
+        breakdown.Add(CharacterAiUtilityFactorKind.Reservation, facilityStateScore, 0.04f, "시설 상태");
+        breakdown.Add(CharacterAiUtilityFactorKind.PathConfidence, pathScore, 0.03f, "경로 신뢰");
+        breakdown.Add(CharacterAiUtilityFactorKind.Social, socialScore, 0.03f, "주변 분위기");
+        breakdown.Add(CharacterAiUtilityFactorKind.Novelty, noveltyScore, 0.03f, "새로움");
+        breakdown.Add(CharacterAiUtilityFactorKind.Schedule, scheduleScore, 0.02f, "일정");
+        breakdown.SetFinalScore(finalScore);
+        return finalScore;
+    }
+
+    private static float GetSpeciesAffinityBias(CharacterActor actor, BuildableObject building)
+    {
+        CharacterIdentity identity = actor != null ? actor.Identity : null;
+        string speciesTag = identity != null ? identity.SpeciesTag : string.Empty;
+        BuildingSO data = building != null ? building.BuildingData : null;
+        if (string.IsNullOrWhiteSpace(speciesTag) || data == null)
+        {
+            return 0f;
+        }
+
+        if (data.IsPreferredSpecies(speciesTag))
+        {
+            return 0.35f;
+        }
+
+        if (data.IsDislikedSpecies(speciesTag))
+        {
+            return -0.35f;
+        }
+
+        return 0f;
+    }
+
+    private static float ApplySpeciesAffinityBias(float score, float bias)
+    {
+        score = Mathf.Clamp01(score);
+        if (bias > 0f)
+        {
+            return Mathf.Clamp01(score + (1f - score) * bias);
+        }
+
+        if (bias < 0f)
+        {
+            return Mathf.Clamp01(score + score * bias);
+        }
+
+        return score;
     }
 
     public static float GetNeedScore(CharacterActor actor, FacilityRole role)
@@ -476,7 +595,27 @@ public static class FacilityCandidateScorer
 
         CharacterStats stats = actor != null ? actor.Stats : null;
         float sensitivity = stats != null ? stats.GetCrowdSensitivityMultiplier() : 1f;
-        return Mathf.Clamp01(1f - (((float)building.CurrentUserCount / building.Facility.capacity) * sensitivity));
+        int capacity = Mathf.Max(1, building.EffectiveCapacity);
+        int pressureCount = building.CurrentUserCount + Mathf.Max(0, building.ActiveVisitReservationCount);
+        return Mathf.Clamp01(1f - (((float)pressureCount / capacity) * sensitivity));
+    }
+
+    private static float ResolveSocialFacilityScore(
+        FacilityRole role,
+        CharacterAiWorldSignalSnapshot signals)
+    {
+        float nearby = signals.SocialOpportunity;
+        if (role == FacilityRole.Purchase || role == FacilityRole.Meal)
+        {
+            return Mathf.Clamp01(0.45f + nearby * 0.45f - signals.QueuePressure * 0.2f);
+        }
+
+        if (role == FacilityRole.Rest || role == FacilityRole.Hygiene || role == FacilityRole.Toilet)
+        {
+            return Mathf.Clamp01(0.75f - nearby * 0.35f);
+        }
+
+        return Mathf.Clamp01(0.5f + nearby * 0.15f);
     }
 
     private static float GetDistanceScore(BuildableObject building, GridPathSearchResult searchResult)
@@ -533,5 +672,66 @@ public static class FacilityCandidateScorer
         FacilityScoringContext scoringContext)
     {
         return scoringContext.GetReputationBias(actor, building);
+    }
+
+    private static void RecordFacilityBreakdown(
+        CharacterActor actor,
+        CharacterAiUtilityBreakdown breakdown,
+        float expectedScore)
+    {
+        if (actor == null || actor.Blackboard == null || breakdown == null)
+        {
+            return;
+        }
+
+        breakdown.SetFinalScore(Mathf.Approximately(expectedScore, float.MinValue) ? breakdown.FinalScore01 : expectedScore);
+        actor.Blackboard.RecordUtilityBreakdown(breakdown);
+    }
+
+    private static CharacterAiBranch GetBranchForRole(FacilityRole role)
+    {
+        return role switch
+        {
+            FacilityRole.Meal => CharacterAiBranch.Eat,
+            FacilityRole.Rest => CharacterAiBranch.Rest,
+            FacilityRole.Toilet => CharacterAiBranch.Toilet,
+            FacilityRole.Hygiene => CharacterAiBranch.Hygiene,
+            FacilityRole.Purchase => CharacterAiBranch.Shopping,
+            FacilityRole.Training => CharacterAiBranch.Work,
+            FacilityRole.Research => CharacterAiBranch.Work,
+            FacilityRole.Mana => CharacterAiBranch.Work,
+            _ => CharacterAiBranch.Work
+        };
+    }
+
+    private static string FacilityRoleDisplayName(FacilityRole role)
+    {
+        return role switch
+        {
+            FacilityRole.Meal => "식사",
+            FacilityRole.Purchase => "구매",
+            FacilityRole.Rest => "휴식",
+            FacilityRole.Training => "훈련",
+            FacilityRole.Research => "연구",
+            FacilityRole.Mana => "마나",
+            FacilityRole.Logistics => "물류",
+            FacilityRole.Toilet => "화장실",
+            FacilityRole.Hygiene => "위생",
+            FacilityRole.Administration => "운영",
+            FacilityRole.Security => "경비",
+            _ => role.ToString()
+        };
+    }
+
+    private static string GetFacilityLabel(BuildableObject building)
+    {
+        if (building == null)
+        {
+            return "시설 없음";
+        }
+
+        return building.BuildingData != null && !string.IsNullOrWhiteSpace(building.BuildingData.objectName)
+            ? building.BuildingData.objectName
+            : building.name;
     }
 }

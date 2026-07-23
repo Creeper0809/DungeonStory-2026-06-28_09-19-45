@@ -1,0 +1,533 @@
+fileFormatVersion: 2
+guid: f40c779f89d1a494caa31b13788e7cb6
+TextureImporter:
+  internalIDToNameTable:
+  - first:
+      213: -9114757908185654749
+    second: Basic Sprites 2x_0
+  - first:
+      213: -6916651803116248406
+    second: Basic Sprites 2x_1
+  - first:
+      213: 8617771966370740574
+    second: Basic Sprites 2x_2
+  - first:
+      213: -5807702609995302750
+    second: Basic Sprites 2x_3
+  - first:
+      213: 3547841783386883019
+    second: Basic Sprites 2x_4
+  - first:
+      213: -3760188702985430768
+    second: Basic Sprites 2x_5
+  - first:
+      213: -7512581447667380181
+    second: Basic Sprites 2x_6
+  - first:
+      213: 1711793058186204525
+    second: Basic Sprites 2x_7
+  - first:
+      213: 6054331156809109813
+    second: Basic Sprites 2x_8
+  - first:
+      213: -6358720707355977102
+    second: Basic Sprites 2x_9
+  - first:
+      213: -4266629628305606445
+    second: Basic Sprites 2x_10
+  - first:
+      213: -5512983980062705072
+    second: Basic Sprites 2x_11
+  - first:
+      213: -6219890611538437175
+    second: Basic Sprites 2x_12
+  - first:
+      213: 7313837940571147541
+    second: Basic Sprites 2x_13
+  - first:
+      213: -4492226836657970639
+    second: Basic Sprites 2x_14
+  externalObjects: {}
+  serializedVersion: 13
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 0
+    sRGBTexture: 1
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+    flipGreenChannel: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  vTOnly: 0
+  ignoreMipmapLimit: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: 2048
+  textureSettings:
+    serializedVersion: 2
+    filterMode: 1
+    aniso: 1
+    mipBias: 0
+    wrapU: 1
+    wrapV: 1
+    wrapW: 1
+  nPOTScale: 0
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 2
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {x: 0.5, y: 0.5}
+  spritePixelsToUnits: 100
+  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 1
+  spriteTessellationDetail: -1
+  textureType: 8
+  textureShape: 1
+  singleChannelComponent: 0
+  flipbookRows: 1
+  flipbookColumns: 1
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  ignorePngGamma: 0
+  applyGammaDecoding: 0
+  swizzle: 50462976
+  cookieLightType: 0
+  platformSettings:
+  - serializedVersion: 4
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Standalone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Android
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: iOS
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  spriteSheet:
+    serializedVersion: 2
+    sprites:
+    - serializedVersion: 2
+      name: Basic Sprites 2x_0
+      rect:
+        serializedVersion: 2
+        x: 5
+        y: 73
+        width: 24
+        height: 24
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 32a59ec79ffd18180800000000000000
+      internalID: -9114757908185654749
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_1
+      rect:
+        serializedVersion: 2
+        x: 37
+        y: 73
+        width: 30
+        height: 32
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: aa2e030c4dd1300a0800000000000000
+      internalID: -6916651803116248406
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_2
+      rect:
+        serializedVersion: 2
+        x: 75
+        y: 73
+        width: 30
+        height: 34
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: e59f8dac1f9789770800000000000000
+      internalID: 8617771966370740574
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_3
+      rect:
+        serializedVersion: 2
+        x: 109
+        y: 73
+        width: 34
+        height: 26
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 2a8fe1a2f35e66fa0800000000000000
+      internalID: -5807702609995302750
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_4
+      rect:
+        serializedVersion: 2
+        x: 145
+        y: 73
+        width: 34
+        height: 30
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: bc340120e477c3130800000000000000
+      internalID: 3547841783386883019
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_5
+      rect:
+        serializedVersion: 2
+        x: 1
+        y: 37
+        width: 34
+        height: 30
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 019dd160c4021dbc0800000000000000
+      internalID: -3760188702985430768
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_6
+      rect:
+        serializedVersion: 2
+        x: 37
+        y: 37
+        width: 34
+        height: 28
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: b2098990af2fdb790800000000000000
+      internalID: -7512581447667380181
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_7
+      rect:
+        serializedVersion: 2
+        x: 73
+        y: 37
+        width: 34
+        height: 26
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: d651b2a87b281c710800000000000000
+      internalID: 1711793058186204525
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_8
+      rect:
+        serializedVersion: 2
+        x: 109
+        y: 37
+        width: 34
+        height: 28
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 531df222c1e450450800000000000000
+      internalID: 6054331156809109813
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_9
+      rect:
+        serializedVersion: 2
+        x: 145
+        y: 37
+        width: 34
+        height: 32
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 27a5024e43941c7a0800000000000000
+      internalID: -6358720707355977102
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_10
+      rect:
+        serializedVersion: 2
+        x: 1
+        y: 1
+        width: 34
+        height: 20
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 3d8ffa865f2e9c4c0800000000000000
+      internalID: -4266629628305606445
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_11
+      rect:
+        serializedVersion: 2
+        x: 39
+        y: 1
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 05a71f77742fd73b0800000000000000
+      internalID: -5512983980062705072
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_12
+      rect:
+        serializedVersion: 2
+        x: 75
+        y: 1
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 9cbd67571728ea9a0800000000000000
+      internalID: -6219890611538437175
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_13
+      rect:
+        serializedVersion: 2
+        x: 109
+        y: 1
+        width: 34
+        height: 26
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 51d84884bd8ff7560800000000000000
+      internalID: 7313837940571147541
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Basic Sprites 2x_14
+      rect:
+        serializedVersion: 2
+        x: 145
+        y: 1
+        width: 34
+        height: 26
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 132668e2e7768a1c0800000000000000
+      internalID: -4492226836657970639
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    outline: []
+    customData: 
+    physicsShape: []
+    bones: []
+    spriteID: 
+    internalID: 0
+    vertices: []
+    indices: 
+    edges: []
+    weights: []
+    secondaryTextures: []
+    spriteCustomMetadata:
+      entries: []
+    nameFileIdTable:
+      Basic Sprites 2x_0: -9114757908185654749
+      Basic Sprites 2x_1: -6916651803116248406
+      Basic Sprites 2x_10: -4266629628305606445
+      Basic Sprites 2x_11: -5512983980062705072
+      Basic Sprites 2x_12: -6219890611538437175
+      Basic Sprites 2x_13: 7313837940571147541
+      Basic Sprites 2x_14: -4492226836657970639
+      Basic Sprites 2x_2: 8617771966370740574
+      Basic Sprites 2x_3: -5807702609995302750
+      Basic Sprites 2x_4: 3547841783386883019
+      Basic Sprites 2x_5: -3760188702985430768
+      Basic Sprites 2x_6: -7512581447667380181
+      Basic Sprites 2x_7: 1711793058186204525
+      Basic Sprites 2x_8: 6054331156809109813
+      Basic Sprites 2x_9: -6358720707355977102
+  mipmapLimitGroupName: 
+  pSDRemoveMatte: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

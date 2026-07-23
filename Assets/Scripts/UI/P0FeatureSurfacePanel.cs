@@ -67,11 +67,20 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
     private IRunVariableRuntimeReader runVariableReader;
     private IFacilityShopCatalog facilityShopCatalog;
     private IDefenseStatusRuntimeService defenseStatusRuntimeService;
+    private IDefenseResponsePolicyRuntime defenseResponsePolicyRuntime;
+    private IDefenseEngagementRuntime defenseEngagementRuntime;
+    private IInvasionOwnerEvacuationService ownerEvacuationService;
+    private ICombatEquipmentMaintenanceRuntime equipmentMaintenanceRuntime;
+    private IStaffWorkforceQueryService staffWorkforceQuery;
     private IRoomLayoutCache roomLayoutCache;
     private IRoomEnvironmentEvaluator roomEnvironmentEvaluator;
     private IRoomInspectionService roomInspectionService;
+    private IExteriorZoneQuery exteriorZoneQuery;
+    private ISurvivalFoodRuntime survivalFoodRuntime;
+    private IWildlifeEcosystemRuntime wildlifeEcosystemRuntime;
     private ITmpKoreanFontService fontService;
     private IFeatureSurfaceTabPresenterRegistry presenterRegistry;
+    private IMainCameraProvider mainCameraProvider;
 
     [Inject]
     public void Construct(
@@ -85,11 +94,20 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         IRunVariableRuntimeReader runVariableReader,
         IFacilityShopCatalog facilityShopCatalog,
         IDefenseStatusRuntimeService defenseStatusRuntimeService,
+        IDefenseResponsePolicyRuntime defenseResponsePolicyRuntime,
+        IDefenseEngagementRuntime defenseEngagementRuntime,
+        IInvasionOwnerEvacuationService ownerEvacuationService,
+        ICombatEquipmentMaintenanceRuntime equipmentMaintenanceRuntime,
+        IStaffWorkforceQueryService staffWorkforceQuery,
         IRoomLayoutCache roomLayoutCache,
         IRoomEnvironmentEvaluator roomEnvironmentEvaluator,
         IRoomInspectionService roomInspectionService,
+        IExteriorZoneQuery exteriorZoneQuery,
+        ISurvivalFoodRuntime survivalFoodRuntime,
+        IWildlifeEcosystemRuntime wildlifeEcosystemRuntime,
         ITmpKoreanFontService fontService,
-        IFeatureSurfaceTabPresenterRegistry presenterRegistry)
+        IFeatureSurfaceTabPresenterRegistry presenterRegistry,
+        IMainCameraProvider mainCameraProvider)
     {
         this.dailyShopProvider = dailyShopProvider
             ?? throw new ArgumentNullException(nameof(dailyShopProvider));
@@ -111,16 +129,34 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
             ?? throw new ArgumentNullException(nameof(facilityShopCatalog));
         this.defenseStatusRuntimeService = defenseStatusRuntimeService
             ?? throw new ArgumentNullException(nameof(defenseStatusRuntimeService));
+        this.defenseResponsePolicyRuntime = defenseResponsePolicyRuntime
+            ?? throw new ArgumentNullException(nameof(defenseResponsePolicyRuntime));
+        this.defenseEngagementRuntime = defenseEngagementRuntime
+            ?? throw new ArgumentNullException(nameof(defenseEngagementRuntime));
+        this.ownerEvacuationService = ownerEvacuationService
+            ?? throw new ArgumentNullException(nameof(ownerEvacuationService));
+        this.equipmentMaintenanceRuntime = equipmentMaintenanceRuntime
+            ?? throw new ArgumentNullException(nameof(equipmentMaintenanceRuntime));
+        this.staffWorkforceQuery = staffWorkforceQuery
+            ?? throw new ArgumentNullException(nameof(staffWorkforceQuery));
         this.roomLayoutCache = roomLayoutCache
             ?? throw new ArgumentNullException(nameof(roomLayoutCache));
         this.roomEnvironmentEvaluator = roomEnvironmentEvaluator
             ?? throw new ArgumentNullException(nameof(roomEnvironmentEvaluator));
         this.roomInspectionService = roomInspectionService
             ?? throw new ArgumentNullException(nameof(roomInspectionService));
+        this.exteriorZoneQuery = exteriorZoneQuery
+            ?? throw new ArgumentNullException(nameof(exteriorZoneQuery));
+        this.survivalFoodRuntime = survivalFoodRuntime
+            ?? throw new ArgumentNullException(nameof(survivalFoodRuntime));
+        this.wildlifeEcosystemRuntime = wildlifeEcosystemRuntime
+            ?? throw new ArgumentNullException(nameof(wildlifeEcosystemRuntime));
         this.fontService = fontService
             ?? throw new ArgumentNullException(nameof(fontService));
         this.presenterRegistry = presenterRegistry
             ?? throw new ArgumentNullException(nameof(presenterRegistry));
+        this.mainCameraProvider = mainCameraProvider
+            ?? throw new ArgumentNullException(nameof(mainCameraProvider));
     }
 
     public void SetTabId(TabId id)
@@ -632,6 +668,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
         OperatingDayReport report = settlement != null ? settlement.LatestReport : null;
 
         BuildRecruitmentSection();
+        BuildEquipmentMaintenanceSection();
 
         AddSection(
             "운영 정산",
@@ -673,9 +710,539 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
                 52f);
         }
 
+        BuildSurvivalEcosystemSection();
+        BuildExteriorActivitySection();
         BuildMetaUpgradeSection();
         BuildRunVariableSection();
         BuildEconomyDetailSection();
+    }
+
+    private void BuildSurvivalSection()
+    {
+        SurvivalFoodOverview overview = survivalFoodRuntime != null
+            ? survivalFoodRuntime.GetOverview()
+            : new SurvivalFoodOverview(0, 0, 0, 0, 0, 0);
+        int wildlifeCount = WildlifeRuntime.Active != null
+            ? WildlifeRuntime.Active.Wildlife.Count(actor => actor != null && actor.IsAlive)
+            : 0;
+        int designatedCount = WildlifeRuntime.Active != null
+            ? WildlifeRuntime.Active.Wildlife.Count(actor => actor != null && actor.IsAlive && actor.HuntDesignated)
+            : 0;
+
+        AddSection(
+            "생존",
+            $"오늘 필요 식량 {overview.TodayRequired} / 창고 {overview.StoredFood} / 바닥 {overview.LooseFood}");
+        CreateStatusCard(
+            "P0Survival_Food",
+            overview.ShortageDays < 2 ? "식량 부족 위험" : "식량 상태",
+            $"사체 {overview.CarcassCount} / 도축 예상 {overview.ButcherPendingFood} / 예상 버팀 {FormatShortageDays(overview.ShortageDays)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Survival_Wildlife",
+            "야생",
+            $"외부 동물 {wildlifeCount} / 사냥 지정 {designatedCount} / 동물 클릭으로 사냥 지정",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Survival_WaterFuel",
+            overview.WaterShortageDays < 2 ? "물 부족 위험" : "물·연료",
+            $"물 창고/바닥 {overview.StoredWater}/{overview.LooseWater} · 연료 {overview.StoredFuel} · 약품 {overview.StoredMedicine} · 물 버팀 {FormatShortageDays(overview.WaterShortageDays)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Survival_Environment",
+            "날씨·위생",
+            $"{FormatSurvivalWeather(overview.Weather)} {overview.OutdoorTemperature:0.#}도 · 위생 위험 {overview.SanitationRisk:0} · 질병 위험 {overview.DiseaseRisk:0} · 야간 외부 위험 {overview.ExteriorNightDanger:0}",
+            CompactCardHeight);
+        BuildWildlifeListRows();
+    }
+
+    private void BuildWildlifeListRows()
+    {
+        List<WildlifeActor> animals = WildlifeRuntime.Active != null
+            ? WildlifeRuntime.Active.Wildlife
+                .Where(actor => actor != null && actor.IsAlive)
+                .OrderByDescending(actor => actor.HuntDesignated)
+                .ThenByDescending(actor => actor.IsDangerous)
+                .ThenBy(actor => actor.DisplayName, StringComparer.Ordinal)
+                .Take(MaxVisibleCardsPerSection)
+                .ToList()
+            : new List<WildlifeActor>();
+        List<WorldItemStackSnapshot> carcasses = WorldItemStackRuntime.Active != null
+            ? WorldItemStackRuntime.Active.GetAllStacks()
+                .Where(stack => stack != null
+                    && stack.Quantity > 0
+                    && (WildlifeItemDefinitions.TryGetSpeciesIdFromCarcass(stack.ItemId, out _)
+                        || string.Equals(stack.ItemId, WildlifeItemDefinitions.RotItemId, StringComparison.Ordinal)))
+                .OrderBy(stack => string.Equals(stack.ItemId, WildlifeItemDefinitions.RotItemId, StringComparison.Ordinal) ? 0 : 1)
+                .ThenBy(stack => stack.DisplayName, StringComparer.Ordinal)
+                .Take(MaxVisibleCardsPerSection)
+                .ToList()
+            : new List<WorldItemStackSnapshot>();
+
+        AddSection(
+            "야생 목록",
+            $"동물 {animals.Count} / 사체·부패물 {carcasses.Count} / 행을 열면 위치와 정보가 함께 잡힙니다.");
+        if (animals.Count == 0 && carcasses.Count == 0)
+        {
+            CreateStatusCard(
+                "P0Wildlife_Empty",
+                "외부가 조용함",
+                "현재 보이는 야생동물이나 처리 대기 중인 사체가 없습니다.",
+                CompactCardHeight);
+            return;
+        }
+
+        foreach (WildlifeActor animal in animals)
+        {
+            WildlifeActor captured = animal;
+            string status = captured.HuntDesignated
+                ? captured.PriorityHunt ? "우선 사냥" : "사냥 지정"
+                : FormatWildlifeState(captured.State);
+            CreateDataCard(
+                "P0Wildlife_Animal_" + SanitizeActionName(captured.WildlifeId),
+                $"{captured.DisplayName} · {status}",
+                $"체력 {captured.CurrentHealth}/{captured.MaxHealth} / 위험 {(captured.IsDangerous ? "높음" : "낮음")} / 위치 ({captured.GridPosition.x},{captured.GridPosition.y})",
+                "보기",
+                () =>
+                {
+                    FocusCameraAtGrid(captured.GridPosition);
+                    InfoFeedEvent.Trigger(captured);
+                    SetFeedback($"{captured.DisplayName} 위치를 확인했습니다.");
+                },
+                CompactCardHeight);
+        }
+
+        foreach (WorldItemStackSnapshot stack in carcasses)
+        {
+            WorldItemStackSnapshot captured = stack;
+            bool rot = string.Equals(captured.ItemId, WildlifeItemDefinitions.RotItemId, StringComparison.Ordinal);
+            CreateDataCard(
+                "P0Wildlife_Carcass_" + SanitizeActionName(captured.StackId),
+                rot ? "부패물" : captured.DisplayName,
+                $"{captured.Quantity}개 / {captured.TotalWeight:0.#}kg / {FormatItemState(captured.State)} / 위치 ({captured.Position.x},{captured.Position.y})",
+                "더미",
+                () =>
+                {
+                    FocusCameraAtGrid(captured.Position);
+                    InfoFeedEvent.Trigger(new ItemPileInfoTarget(captured.Position));
+                    SetFeedback($"{captured.DisplayName} 더미를 열었습니다.");
+                },
+                CompactCardHeight);
+        }
+    }
+
+    private void BuildSurvivalEcosystemSection()
+    {
+        SurvivalFoodOverview overview = survivalFoodRuntime != null
+            ? survivalFoodRuntime.GetOverview()
+            : new SurvivalFoodOverview(0, 0, 0, 0, 0, 0);
+        IReadOnlyList<WildlifeActor> wildlife = WildlifeRuntime.Active != null
+            ? WildlifeRuntime.Active.Wildlife
+            : Array.Empty<WildlifeActor>();
+        int wildlifeCount = wildlife.Count(actor => actor != null && actor.IsAlive);
+        int designatedCount = wildlife.Count(actor => actor != null && actor.IsAlive && actor.HuntDesignated);
+        WildlifeEcosystemOverview ecosystem = wildlifeEcosystemRuntime != null
+            ? wildlifeEcosystemRuntime.GetOverview(wildlife)
+            : new WildlifeEcosystemOverview(0, 0, 0, 0f, 0f, 0f, 0f, 0, wildlifeCount, 0f);
+
+        AddSection(
+            "생존",
+            $"오늘 필요 식량 {overview.TodayRequired} / 창고 {overview.StoredFood} / 바닥 {overview.LooseFood}");
+        CreateStatusCard(
+            "P0Survival_Food_V10",
+            overview.ShortageDays < 2 ? "식량 부족 위험" : "식량 상태",
+            $"사체 {overview.CarcassCount} / 도축 예상 {overview.ButcherPendingFood} / 예상 버팀 {FormatShortageDaysReadable(overview.ShortageDays)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Survival_Wildlife_V10",
+            "야생 생태",
+            $"동물 {wildlifeCount}/{ecosystem.DesiredWildlifeCount} / 사냥 지정 {designatedCount} / 먹이 {FormatUnitPercent(ecosystem.FoodAbundance01)} / 물 {FormatUnitPercent(ecosystem.WaterAbundance01)} / 포식자 위험 {FormatUnitPercent(ecosystem.PredatorDanger01)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Survival_Habitat_V10",
+            "서식지",
+            $"패치 {ecosystem.PatchCount} / 풀·덤불 {ecosystem.GrassPatchCount} / 물 {ecosystem.WaterPatchCount} / 보충 대기 {FormatSecondsReadable(ecosystem.RespawnRemainingSeconds)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Survival_WaterFuel_V10",
+            overview.WaterShortageDays < 2 ? "물 부족 위험" : "물·연료",
+            $"물 창고/바닥 {overview.StoredWater}/{overview.LooseWater} · 연료 {overview.StoredFuel} · 약품 {overview.StoredMedicine} · 물 버팀 {FormatShortageDaysReadable(overview.WaterShortageDays)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Survival_Environment_V10",
+            "날씨·위생",
+            $"{FormatSurvivalWeatherReadable(overview.Weather)} {overview.OutdoorTemperature:0.#}도 · 위생 위험 {overview.SanitationRisk:0} · 질병 위험 {overview.DiseaseRisk:0} · 야간 외부 위험 {overview.ExteriorNightDanger:0}",
+            CompactCardHeight);
+
+        BuildWildlifeEcosystemListRows(wildlife);
+    }
+
+    private void BuildWildlifeEcosystemListRows(IReadOnlyList<WildlifeActor> wildlife)
+    {
+        List<WildlifeActor> animals = (wildlife ?? Array.Empty<WildlifeActor>())
+            .Where(actor => actor != null && actor.IsAlive)
+            .OrderByDescending(actor => actor.HuntDesignated)
+            .ThenByDescending(actor => actor.IsDangerous)
+            .ThenByDescending(actor => Mathf.Max(actor.Hunger, actor.Thirst))
+            .ThenBy(actor => actor.DisplayName, StringComparer.Ordinal)
+            .Take(MaxVisibleCardsPerSection)
+            .ToList();
+        List<WorldItemStackSnapshot> carcasses = WorldItemStackRuntime.Active != null
+            ? WorldItemStackRuntime.Active.GetAllStacks()
+                .Where(stack => stack != null
+                    && stack.Quantity > 0
+                    && (WildlifeItemDefinitions.TryGetSpeciesIdFromCarcass(stack.ItemId, out _)
+                        || string.Equals(stack.ItemId, WildlifeItemDefinitions.RotItemId, StringComparison.Ordinal)))
+                .OrderBy(stack => string.Equals(stack.ItemId, WildlifeItemDefinitions.RotItemId, StringComparison.Ordinal) ? 0 : 1)
+                .ThenBy(stack => stack.DisplayName, StringComparer.Ordinal)
+                .Take(MaxVisibleCardsPerSection)
+                .ToList()
+            : new List<WorldItemStackSnapshot>();
+
+        AddSection(
+            "야생 목록",
+            $"동물 {animals.Count} / 사체·부패물 {carcasses.Count} / 행을 누르면 위치와 정보를 엽니다.");
+        if (animals.Count == 0 && carcasses.Count == 0)
+        {
+            CreateStatusCard(
+                "P0Wildlife_Empty_V10",
+                "외부가 조용함",
+                "현재 보이는 야생동물이나 처리 대기 중인 사체가 없습니다.",
+                CompactCardHeight);
+            return;
+        }
+
+        foreach (WildlifeActor animal in animals)
+        {
+            WildlifeActor captured = animal;
+            string status = captured.HuntDesignated
+                ? captured.PriorityHunt ? "우선 사냥" : "사냥 지정"
+                : FormatWildlifeStateReadable(captured.State);
+            string intent = FormatWildlifeIntentReadable(captured);
+            CreateDataCard(
+                "P0Wildlife_Animal_V10_" + SanitizeActionName(captured.WildlifeId),
+                $"{captured.DisplayName} · {status}",
+                $"체력 {captured.CurrentHealth}/{captured.MaxHealth} / 위험 {(captured.IsDangerous ? "높음" : "낮음")} / 허기 {FormatUnitPercent(captured.Hunger)} / 갈증 {FormatUnitPercent(captured.Thirst)} / 위치 ({captured.GridPosition.x},{captured.GridPosition.y})\n{intent}",
+                "보기",
+                () =>
+                {
+                    FocusCameraAtGrid(captured.GridPosition);
+                    InfoFeedEvent.Trigger(captured);
+                    SetFeedback($"{captured.DisplayName} 위치를 확인했습니다.");
+                },
+                CompactCardHeight);
+        }
+
+        foreach (WorldItemStackSnapshot stack in carcasses)
+        {
+            WorldItemStackSnapshot captured = stack;
+            bool rot = string.Equals(captured.ItemId, WildlifeItemDefinitions.RotItemId, StringComparison.Ordinal);
+            CreateDataCard(
+                "P0Wildlife_Carcass_V10_" + SanitizeActionName(captured.StackId),
+                rot ? "부패물" : captured.DisplayName,
+                $"{captured.Quantity}개 / {captured.TotalWeight:0.#}kg / {FormatItemStateReadable(captured.State)} / 위치 ({captured.Position.x},{captured.Position.y})",
+                "더미",
+                () =>
+                {
+                    FocusCameraAtGrid(captured.Position);
+                    InfoFeedEvent.Trigger(new ItemPileInfoTarget(captured.Position));
+                    SetFeedback($"{captured.DisplayName} 더미를 열었습니다.");
+                },
+                CompactCardHeight);
+        }
+    }
+
+    private void BuildExteriorActivitySection()
+    {
+        if (exteriorZoneQuery == null)
+        {
+            AddSection("입구/외부", "외부 활동 상태를 불러오지 못했습니다.");
+            return;
+        }
+
+        ExteriorActivityOverviewSnapshot overview = exteriorZoneQuery.GetOverview();
+        IReadOnlyList<ExteriorZoneMarker> zones = exteriorZoneQuery.Zones ?? Array.Empty<ExteriorZoneMarker>();
+        int waitingVisitors = zones.Sum((zone) => zone != null ? zone.WaitingVisitorCount : 0);
+        int activeIncidents = zones.Count((zone) => zone != null && zone.HasActiveIncident);
+        int dropLooseStacks = CountWorldStacksAtZones(zones, ExteriorZoneType.DropZone, WorldItemStackState.Loose);
+        int packedStacks = CountWorldStacksAtZones(zones, ExteriorZoneType.DropZone, WorldItemStackState.ExpeditionPacked);
+
+        AddSection(
+            "입구/외부",
+            $"구역 {overview.ZoneCount} / 하차장 {overview.DropZoneCount} / 사건 {activeIncidents} / 대기 {waitingVisitors}");
+        AddLabel(
+            $"청결 {overview.AverageCleanliness:0} / 손상 {overview.AverageDamage:0} / 응대 {overview.AverageReceptionReadiness:0} / 순찰 {overview.AveragePatrolReadiness:0}",
+            18f,
+            40f);
+
+        CreateStatusCard(
+            "P0Exterior_Logistics",
+            "하차장 물류",
+            $"바닥 스택 {dropLooseStacks} / 원정 포장 {packedStacks} / {DescribeExteriorZone(ExteriorZoneType.DropZone)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Exterior_Reception",
+            "입구 응대",
+            $"{DescribeExteriorZone(ExteriorZoneType.ReceptionPoint)} / 대기 방문객 {waitingVisitors}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Exterior_Patrol",
+            "외부 순찰",
+            $"{DescribeExteriorZone(ExteriorZoneType.GuardPost)} / {DescribeExteriorZone(ExteriorZoneType.PatrolPoint)}",
+            CompactCardHeight);
+        CreateStatusCard(
+            "P0Exterior_Incident",
+            activeIncidents > 0 ? "진행 중 사건" : "외부 사건",
+            activeIncidents > 0 ? DescribeActiveExteriorIncidents(zones) : "진행 중인 외부 사건 없음",
+            CompactCardHeight);
+    }
+
+    private int CountWorldStacksAtZones(
+        IReadOnlyList<ExteriorZoneMarker> zones,
+        ExteriorZoneType zoneType,
+        WorldItemStackState state)
+    {
+        if (WorldItemStackRuntime.Active == null || zones == null)
+        {
+            return 0;
+        }
+
+        HashSet<Vector2Int> positions = zones
+            .Where((zone) => zone != null && zone.ZoneType == zoneType)
+            .Select((zone) => zone.GridPosition)
+            .ToHashSet();
+        if (positions.Count == 0)
+        {
+            return 0;
+        }
+
+        return WorldItemStackRuntime.Active.GetAllStacks()
+            .Count((stack) => stack != null
+                && stack.State == state
+                && positions.Contains(stack.Position));
+    }
+
+    private static string FormatShortageDaysReadable(int shortageDays)
+    {
+        if (shortageDays == int.MaxValue)
+        {
+            return "-";
+        }
+
+        return shortageDays <= 0 ? "오늘 부족" : $"{shortageDays}일";
+    }
+
+    private static string FormatSecondsReadable(float seconds)
+    {
+        if (seconds <= 0.1f)
+        {
+            return "가능";
+        }
+
+        if (seconds < 60f)
+        {
+            return $"{seconds:0}초";
+        }
+
+        return $"{seconds / 60f:0.#}분";
+    }
+
+    private static string FormatUnitPercent(float value01)
+    {
+        return $"{Mathf.Clamp01(value01) * 100f:0}%";
+    }
+
+    private static string FormatSurvivalWeatherReadable(SurvivalWeatherType weather)
+    {
+        return weather switch
+        {
+            SurvivalWeatherType.Rain => "비",
+            SurvivalWeatherType.Fog => "안개",
+            SurvivalWeatherType.HeatWave => "폭염",
+            SurvivalWeatherType.ColdSnap => "한파",
+            SurvivalWeatherType.Storm => "폭우",
+            _ => "맑음"
+        };
+    }
+
+    private static string FormatWildlifeStateReadable(WildlifeState state)
+    {
+        return state switch
+        {
+            WildlifeState.Grazing => "먹이 활동",
+            WildlifeState.Fleeing => "도망 중",
+            WildlifeState.Hunted => "쫓기는 중",
+            WildlifeState.Retaliating => "반격 중",
+            WildlifeState.PredatorStalking => "추적 중",
+            WildlifeState.Dead => "죽음",
+            WildlifeState.Leaving => "떠나는 중",
+            _ => "배회 중"
+        };
+    }
+
+    private static string FormatWildlifeIntentReadable(WildlifeActor actor)
+    {
+        if (actor == null)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(actor.IntentReason))
+        {
+            return actor.IntentReason;
+        }
+
+        return actor.Intent switch
+        {
+            WildlifeIntent.Forage => "먹이를 찾는 중",
+            WildlifeIntent.Drink => "물가로 이동",
+            WildlifeIntent.Rest => "은신처에서 쉬는 중",
+            WildlifeIntent.ReturnToTerritory => "영역으로 돌아가는 중",
+            WildlifeIntent.HuntPrey => "먹잇감을 추적",
+            WildlifeIntent.Flee => "위협을 피해 도망",
+            WildlifeIntent.LeaveMap => "지역을 떠나는 중",
+            _ => "영역 안을 배회"
+        };
+    }
+
+    private static string FormatItemStateReadable(WorldItemStackState state)
+    {
+        return state switch
+        {
+            WorldItemStackState.Stored => "창고",
+            WorldItemStackState.FacilityBuffer => "시설 버퍼",
+            WorldItemStackState.Carried => "운반 중",
+            WorldItemStackState.ExpeditionPacked => "원정 포장",
+            _ => "바닥"
+        };
+    }
+
+    private static string FormatShortageDays(int shortageDays)
+    {
+        if (shortageDays == int.MaxValue)
+        {
+            return "-";
+        }
+
+        return shortageDays <= 0 ? "오늘 부족" : $"{shortageDays}일";
+    }
+
+    private static string FormatSurvivalWeather(SurvivalWeatherType weather)
+    {
+        return weather switch
+        {
+            SurvivalWeatherType.Rain => "비",
+            SurvivalWeatherType.Fog => "안개",
+            SurvivalWeatherType.HeatWave => "폭염",
+            SurvivalWeatherType.ColdSnap => "한파",
+            SurvivalWeatherType.Storm => "폭우",
+            _ => "맑음"
+        };
+    }
+
+    private static string FormatWildlifeState(WildlifeState state)
+    {
+        return state switch
+        {
+            WildlifeState.Grazing => "먹이 찾는 중",
+            WildlifeState.Fleeing => "도망 중",
+            WildlifeState.Hunted => "쫓기는 중",
+            WildlifeState.Retaliating => "반격 중",
+            WildlifeState.PredatorStalking => "기회를 보는 중",
+            WildlifeState.Dead => "사망",
+            WildlifeState.Leaving => "떠나는 중",
+            _ => "배회 중"
+        };
+    }
+
+    private static string FormatItemState(WorldItemStackState state)
+    {
+        return state switch
+        {
+            WorldItemStackState.Stored => "창고",
+            WorldItemStackState.FacilityBuffer => "시설 버퍼",
+            WorldItemStackState.Carried => "운반 중",
+            WorldItemStackState.ExpeditionPacked => "원정 포장",
+            _ => "바닥"
+        };
+    }
+
+    private static string SanitizeActionName(string raw)
+    {
+        string value = raw ?? string.Empty;
+        return new string(value.Select(character =>
+                char.IsLetterOrDigit(character) ? character : '_')
+            .ToArray());
+    }
+
+    private void FocusCameraAtGrid(Vector2Int position)
+    {
+        Camera camera = mainCameraProvider != null ? mainCameraProvider.Camera : null;
+        GridSystemManager gridManager = sceneQuery?.First<GridSystemManager>(includeInactive: true);
+        if (camera == null || gridManager == null || gridManager.grid == null)
+        {
+            return;
+        }
+
+        Vector3 world = gridManager.grid.GetWorldPos(position);
+        camera.transform.position = new Vector3(world.x, world.y, -10f);
+        camera.GetComponent<CameraManager>()?.ClampToCurrentBounds();
+    }
+
+    private string DescribeExteriorZone(ExteriorZoneType zoneType)
+    {
+        ExteriorZoneMarker zone = exteriorZoneQuery != null
+            ? exteriorZoneQuery.GetZones(zoneType).FirstOrDefault()
+            : null;
+        if (zone == null)
+        {
+            return $"{FormatExteriorZoneType(zoneType)} 없음";
+        }
+
+        return $"{FormatExteriorZoneType(zoneType)} ({zone.GridPosition.x},{zone.GridPosition.y}) 청결 {zone.Cleanliness:0} 손상 {zone.Damage:0}";
+    }
+
+    private static string DescribeActiveExteriorIncidents(IReadOnlyList<ExteriorZoneMarker> zones)
+    {
+        string[] incidents = zones
+            .Where((zone) => zone != null && zone.HasActiveIncident)
+            .Select((zone) =>
+            {
+                string text = !string.IsNullOrWhiteSpace(zone.ActiveIncidentText)
+                    ? zone.ActiveIncidentText
+                    : FormatExteriorIncidentKind(zone.ActiveIncidentKind);
+                return $"{FormatExteriorZoneType(zone.ZoneType)}: {text}";
+            })
+            .Take(3)
+            .ToArray();
+        return incidents.Length > 0 ? string.Join(" / ", incidents) : "진행 중인 외부 사건 없음";
+    }
+
+    private static string FormatExteriorZoneType(ExteriorZoneType zoneType)
+    {
+        return zoneType switch
+        {
+            ExteriorZoneType.Entrance => "입구",
+            ExteriorZoneType.DropZone => "하차장",
+            ExteriorZoneType.ReceptionPoint => "응대 지점",
+            ExteriorZoneType.GuardPost => "경비 초소",
+            ExteriorZoneType.PatrolPoint => "순찰 지점",
+            ExteriorZoneType.OutdoorRestSpot => "외부 휴식",
+            ExteriorZoneType.ExpeditionStaging => "출정 집결",
+            ExteriorZoneType.IncidentPoint => "사건 지점",
+            _ => zoneType.ToString()
+        };
+    }
+
+    private static string FormatExteriorIncidentKind(ExteriorIncidentKind kind)
+    {
+        return kind switch
+        {
+            ExteriorIncidentKind.MerchantCart => "상인 마차",
+            ExteriorIncidentKind.Informant => "정보상",
+            ExteriorIncidentKind.Thief => "도둑",
+            ExteriorIncidentKind.InjuredReturnee => "부상 귀환자",
+            _ => "사건"
+        };
     }
 
     private void BuildRecruitmentSection()
@@ -1011,7 +1578,7 @@ public sealed partial class P0FeatureSurfacePanel : MonoBehaviour
     {
         GameObject textObject = CreateUiObject("Text", parent);
         TMP_Text label = textObject.AddComponent<TextMeshProUGUI>();
-        fontService.Apply(label);
+        fontService?.Apply(label);
         label.text = text ?? string.Empty;
         label.fontSize = fontSize;
         label.fontStyle = style;

@@ -44,9 +44,11 @@ public static class FinalDefenseRallyPlanner
             return false;
         }
 
-        GridPathSearchResult entrySearch = grid.SearchPath(entryPosition);
-        GridPathSearchResult ownerSearch = grid.SearchPath(ownerPosition);
-        HashSet<Vector2Int> ownerReachable = ownerSearch.GetReachablePositions().ToHashSet();
+        if (!GridPathSearchBroker.TryGetSearch(grid, entryPosition, () => true, out GridPathSearchResult entrySearch)
+            || !GridPathSearchBroker.TryGetSearch(grid, ownerPosition, () => true, out GridPathSearchResult ownerSearch))
+        {
+            return false;
+        }
 
         Vector2Int bestTarget = default;
         GridMoveStep[] bestOwnerPath = null;
@@ -58,7 +60,7 @@ public static class FinalDefenseRallyPlanner
         {
             if (candidate == entryPosition
                 || candidate.y != entryPosition.y
-                || !ownerReachable.Contains(candidate)
+                || !ownerSearch.ContainsPosition(candidate)
                 || !grid.IsWalkable(candidate))
             {
                 continue;

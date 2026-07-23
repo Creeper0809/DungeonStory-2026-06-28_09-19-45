@@ -62,8 +62,8 @@ public static class StockCategoryCatalog
         {
             EnsureInitialized();
             return ById.Values
-                .OrderBy((definition) => definition.SortOrder)
-                .ThenBy((definition) => definition.Id, StringComparer.Ordinal)
+                .OrderBy(definition => definition.SortOrder)
+                .ThenBy(definition => definition.Id, StringComparer.Ordinal)
                 .ToArray();
         }
     }
@@ -149,10 +149,14 @@ public static class StockCategoryCatalog
 
     private static void RegisterBuiltIns()
     {
-        RegisterBuiltIn("stock:food", StockCategory.Food, "식재료", "식", 10, 0.40f, 20, 4, 1);
-        RegisterBuiltIn("stock:general", StockCategory.General, "잡화", "잡", 20, 0.25f, 14, 6, 1);
-        RegisterBuiltIn("stock:weapon", StockCategory.Weapon, "무기", "무", 30, 0.25f, 8, 10, 2);
-        RegisterBuiltIn("stock:mana", StockCategory.Mana, "마력", "마", 40, 0.10f, 10, 9, 2);
+        RegisterBuiltIn("stock:food", StockCategory.Food, "식량", "식량", 10, 0.40f, 20, 4, 1);
+        RegisterBuiltIn("stock:water", StockCategory.Water, "물", "물", 15, 0.24f, 18, 3, 1);
+        RegisterBuiltIn("stock:general", StockCategory.General, "잡화", "잡화", 20, 0.25f, 14, 6, 1);
+        RegisterBuiltIn("stock:medicine", StockCategory.Medicine, "약품", "약", 25, 0.08f, 6, 12, 2);
+        RegisterBuiltIn("stock:weapon", StockCategory.Weapon, "무기", "무기", 30, 0.25f, 8, 10, 2);
+        RegisterBuiltIn("stock:ammunition", StockCategory.Ammunition, "탄약", "탄약", 32, 0.18f, 12, 4, 2);
+        RegisterBuiltIn("stock:fuel", StockCategory.Fuel, "연료", "연료", 35, 0.16f, 12, 5, 1);
+        RegisterBuiltIn("stock:mana", StockCategory.Mana, "마나", "마나", 40, 0.10f, 10, 9, 2);
     }
 
     private static void RegisterBuiltIn(
@@ -166,7 +170,7 @@ public static class StockCategoryCatalog
         int dailyUnitCost,
         int dailyGrowthDivisor)
     {
-        StockCategoryDefinition definition = new StockCategoryDefinition(
+        Register(new StockCategoryDefinition(
             id,
             category,
             displayName,
@@ -175,8 +179,6 @@ public static class StockCategoryCatalog
             seedWeight,
             dailyBaseAmount,
             dailyUnitCost,
-            dailyGrowthDivisor);
-        ById.Add(definition.Id, definition);
-        ByCategory.Add(definition.Category, definition);
+            dailyGrowthDivisor));
     }
 }

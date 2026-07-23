@@ -90,6 +90,7 @@ public sealed class ResourceExpeditionEquipmentCatalogProvider : IExpeditionEqui
             {
                 catalog = Resources.Load<ExpeditionEquipmentCatalogSO>(ResourcePath)
                     ?? ExpeditionEquipmentCatalogSO.CreateRuntimeDefaults();
+                catalog.EnsureCombatCompatibilityDefinitions();
             }
 
             return catalog;

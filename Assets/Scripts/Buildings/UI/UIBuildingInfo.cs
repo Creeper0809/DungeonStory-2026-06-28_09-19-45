@@ -18,6 +18,7 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
     private IBuildingDefinitionLookup buildingDefinitionLookup;
     private IBuildingSummaryFormatter summaryFormatter;
     private IUiPopupService popupService;
+    private ICombatEquipmentMaintenanceRuntime equipmentMaintenanceRuntime;
     private bool initialized;
     private readonly List<GameObject> craftActionObjects = new List<GameObject>();
     private string craftStatusMessage = string.Empty;
@@ -36,7 +37,8 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
     public void ConstructUIBuildingInfo(
         IBuildingDefinitionLookup buildingDefinitionLookup,
         IBuildingSummaryFormatter summaryFormatter,
-        IUiPopupService popupService)
+        IUiPopupService popupService,
+        ICombatEquipmentMaintenanceRuntime equipmentMaintenanceRuntime)
     {
         this.buildingDefinitionLookup = buildingDefinitionLookup
             ?? throw new ArgumentNullException(nameof(buildingDefinitionLookup));
@@ -44,6 +46,8 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
             ?? throw new ArgumentNullException(nameof(summaryFormatter));
         this.popupService = popupService
             ?? throw new ArgumentNullException(nameof(popupService));
+        this.equipmentMaintenanceRuntime = equipmentMaintenanceRuntime
+            ?? throw new ArgumentNullException(nameof(equipmentMaintenanceRuntime));
     }
 
     private void Awake()
@@ -134,7 +138,7 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
             }
         }
 
-        RenderCraftActions(buildingData, building);
+        RenderContextActions(buildingData, building);
     }
 
     private void ApplyBuildingPreview(Sprite sprite)
@@ -217,9 +221,47 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
         gameObject.SetActive(false);
     }
 
-    private void RenderCraftActions(BuildingSO buildingData, BuildableObject building)
+    private void RenderContextActions(BuildingSO buildingData, BuildableObject building)
     {
         ClearCraftActions();
+        if (building is ConstructionSite constructionSite)
+        {
+            RenderConstructionActions(constructionSite);
+            return;
+        }
+
+        RenderCraftActions(buildingData, building);
+        RenderMaintenanceActions(buildingData, building);
+    }
+
+    private void RenderConstructionActions(ConstructionSite site)
+    {
+        craftStatusMessage = string.Empty;
+        if (site == null || simpleInfoPanel == null)
+        {
+            return;
+        }
+
+        if (WorkOrderRuntime.Active != null
+            && WorkOrderRuntime.Active.TryGetOrderFor(site, FacilityWorkType.Construct, out WorkOrderProgressState order))
+        {
+            craftActionObjects.Add(CreateConstructionProgressBar(simpleInfoPanel.transform, order));
+        }
+
+        GameObject cancelButton = CreateCraftButton(
+            simpleInfoPanel.transform,
+            "공사 취소",
+            () =>
+            {
+                site.CancelConstruction();
+                CloseDispaly();
+            });
+        cancelButton.name = "BuildingConstructionCancel";
+        craftActionObjects.Add(cancelButton);
+    }
+
+    private void RenderCraftActions(BuildingSO buildingData, BuildableObject building)
+    {
         BuildingEquipmentCraftingAbility crafting = buildingData
             ?.GetAbility<BuildingEquipmentCraftingAbility>();
         if (crafting == null
@@ -260,6 +302,58 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
         }
     }
 
+    private void RenderMaintenanceActions(
+        BuildingSO buildingData,
+        BuildableObject building)
+    {
+        if (buildingData?.GetAbility<BuildingEquipmentMaintenanceAbility>() == null
+            || building == null
+            || simpleInfoPanel == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<CombatEquipmentRepairOrder> orders =
+            equipmentMaintenanceRuntime.Orders
+                .Where(order =>
+                    order != null
+                    && order.FacilityPosition == building.centerPos)
+                .OrderBy(order => order.orderId, StringComparer.Ordinal)
+                .ToArray();
+        GameObject header = CreateCraftStatus(
+            simpleInfoPanel.transform,
+            orders.Count == 0
+                ? "장비 수리 대기열이 비어 있습니다."
+                : $"장비 수리 대기열 {orders.Count}건");
+        header.name = "BuildingMaintenanceHeader";
+        craftActionObjects.Add(header);
+
+        ResourceCombatEquipmentCatalog catalog = new ResourceCombatEquipmentCatalog();
+        ICombatEquipmentRuntime equipment = CombatEquipmentRuntime.Active;
+        for (int i = 0; i < orders.Count; i++)
+        {
+            CombatEquipmentRepairOrder order = orders[i];
+            string equipmentName = order.equipmentInstanceId;
+            if (equipment != null
+                && equipment.TryGetInstance(
+                    order.equipmentInstanceId,
+                    out CombatEquipmentInstance instance)
+                && catalog.TryGet(
+                    instance.definitionId,
+                    out CombatEquipmentDefinitionSO definition))
+            {
+                equipmentName = definition.DisplayName;
+            }
+
+            GameObject progress = CreateMaintenanceProgressBar(
+                simpleInfoPanel.transform,
+                equipmentName,
+                order);
+            progress.name = $"BuildingMaintenance_{i}";
+            craftActionObjects.Add(progress);
+        }
+    }
+
     private GameObject CreateCraftButton(Transform parent, string label, Action callback)
     {
         GameObject buttonObject = new GameObject("BuildingCraftButton", typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
@@ -297,6 +391,111 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
         }
 
         return buttonObject;
+    }
+
+    private GameObject CreateConstructionProgressBar(Transform parent, WorkOrderProgressState order)
+    {
+        GameObject barObject = new GameObject("BuildingConstructionProgress", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+        barObject.transform.SetParent(parent, false);
+        LayoutElement layout = barObject.GetComponent<LayoutElement>();
+        layout.preferredWidth = 360f;
+        layout.preferredHeight = 38f;
+
+        Image background = barObject.GetComponent<Image>();
+        background.color = DungeonUiTheme.Panel;
+
+        GameObject fillObject = new GameObject("Fill", typeof(RectTransform), typeof(Image));
+        fillObject.transform.SetParent(barObject.transform, false);
+        RectTransform fillRect = fillObject.GetComponent<RectTransform>();
+        fillRect.anchorMin = Vector2.zero;
+        fillRect.anchorMax = new Vector2(Mathf.Clamp01(order?.ProgressRatio ?? 0f), 1f);
+        fillRect.offsetMin = Vector2.zero;
+        fillRect.offsetMax = Vector2.zero;
+        Image fill = fillObject.GetComponent<Image>();
+        fill.color = DungeonUiTheme.Accent;
+        fill.raycastTarget = false;
+
+        GameObject textObject = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(barObject.transform, false);
+        RectTransform textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(8f, 2f);
+        textRect.offsetMax = new Vector2(-8f, -2f);
+
+        TMP_Text text = textObject.GetComponent<TMP_Text>();
+        int percent = Mathf.RoundToInt((order?.ProgressRatio ?? 0f) * 100f);
+        text.text = $"공사 진행 {percent}%";
+        text.color = DungeonUiTheme.TextPrimary;
+        text.alignment = TextAlignmentOptions.Center;
+        text.enableAutoSizing = true;
+        text.fontSizeMin = 12f;
+        text.fontSizeMax = 18f;
+        text.raycastTarget = false;
+        if (nameText != null && nameText.font != null)
+        {
+            text.font = nameText.font;
+        }
+
+        return barObject;
+    }
+
+    private GameObject CreateMaintenanceProgressBar(
+        Transform parent,
+        string equipmentName,
+        CombatEquipmentRepairOrder order)
+    {
+        GameObject barObject = new GameObject(
+            "BuildingMaintenanceProgress",
+            typeof(RectTransform),
+            typeof(Image),
+            typeof(LayoutElement));
+        barObject.transform.SetParent(parent, false);
+        LayoutElement layout = barObject.GetComponent<LayoutElement>();
+        layout.preferredWidth = 360f;
+        layout.preferredHeight = 48f;
+        barObject.GetComponent<Image>().color = DungeonUiTheme.Panel;
+
+        GameObject fillObject = new GameObject(
+            "Fill",
+            typeof(RectTransform),
+            typeof(Image));
+        fillObject.transform.SetParent(barObject.transform, false);
+        RectTransform fillRect = fillObject.GetComponent<RectTransform>();
+        fillRect.anchorMin = Vector2.zero;
+        fillRect.anchorMax = new Vector2(order.ProgressRatio, 1f);
+        fillRect.offsetMin = Vector2.zero;
+        fillRect.offsetMax = Vector2.zero;
+        Image fill = fillObject.GetComponent<Image>();
+        fill.color = DungeonUiTheme.Accent;
+        fill.raycastTarget = false;
+
+        GameObject textObject = new GameObject(
+            "Label",
+            typeof(RectTransform),
+            typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(barObject.transform, false);
+        RectTransform textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(8f, 2f);
+        textRect.offsetMax = new Vector2(-8f, -2f);
+        TMP_Text text = textObject.GetComponent<TMP_Text>();
+        text.text = $"{equipmentName} · {FormatRepairState(order.state)}"
+            + $" · {order.ProgressRatio:P0}"
+            + $" · 재료 {order.requiredGeneralMaterials}";
+        text.color = DungeonUiTheme.TextPrimary;
+        text.alignment = TextAlignmentOptions.Center;
+        text.enableAutoSizing = true;
+        text.fontSizeMin = 11f;
+        text.fontSizeMax = 17f;
+        text.raycastTarget = false;
+        if (nameText != null && nameText.font != null)
+        {
+            text.font = nameText.font;
+        }
+
+        return barObject;
     }
 
     private GameObject CreateCraftStatus(Transform parent, string message)
@@ -353,6 +552,18 @@ public class UIBuildingInfo : SerializedMonoBehaviour, UtilEventListener<InfoFee
             "craft-cost-withdraw-failed" => "재료 출고 실패",
             "equipment-not-found" => "장비 정의 없음",
             _ => string.IsNullOrWhiteSpace(message) ? "제작 실패" : message
+        };
+    }
+
+    private static string FormatRepairState(CombatEquipmentRepairOrderState state)
+    {
+        return state switch
+        {
+            CombatEquipmentRepairOrderState.PendingCombatEnd => "교전 종료 대기",
+            CombatEquipmentRepairOrderState.WaitingForDelivery => "운반 대기",
+            CombatEquipmentRepairOrderState.Ready => "수리 준비",
+            CombatEquipmentRepairOrderState.InProgress => "수리 중",
+            _ => "대기"
         };
     }
 

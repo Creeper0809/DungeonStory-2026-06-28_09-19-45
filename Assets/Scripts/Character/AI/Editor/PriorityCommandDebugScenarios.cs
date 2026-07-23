@@ -128,7 +128,11 @@ public static class PriorityCommandDebugScenarios
         work.SetWorkPriority(FacilityWorkType.Restock, WorkPriorityLevel.Off);
 
         GridPathSearchResult search = world.Grid.SearchPath(Vector2Int.zero);
-        bool valid = work.TrySetPriorityWorkTarget(shop, FacilityWorkType.Restock, search, out _)
+        bool valid = work.TrySetPriorityWorkTarget(
+                shop,
+                FacilityWorkType.Restock,
+                search,
+                out _)
             && work.PriorityWorkTarget == shop
             && work.PriorityWorkType == FacilityWorkType.Restock;
 

@@ -85,6 +85,7 @@ public static class ImplementedScenarioDebugRunner
         Run("P1 Character model", CharacterModelDebugScenarios.RunAll, results);
         Run("P1 Owner character", OwnerDebugScenarios.RunAll, results);
         Run("P1 Work priority", WorkPriorityDebugScenarios.RunAll, results);
+        Run("P1 Work amount", WorkAmountDebugScenarios.RunAll, results);
         Run("P1 Priority command", PriorityCommandDebugScenarios.RunAll, results);
         Run("P1 Staff duty", StaffDutyDebugScenarios.RunAll, results);
         Run("P1 Operating day", OperatingDaySettlementDebugScenarios.RunAll, results);

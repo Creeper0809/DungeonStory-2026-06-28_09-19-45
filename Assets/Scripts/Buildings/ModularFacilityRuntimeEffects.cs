@@ -16,6 +16,11 @@ public static class ModularFacilityRuntimeEffects
             return;
         }
 
+        if (building is ConstructionSite)
+        {
+            return;
+        }
+
         foreach (IBuildingVisualRuntimeAbility ability in building.BuildingData.Abilities
                      .OfType<IBuildingVisualRuntimeAbility>())
         {
@@ -175,6 +180,15 @@ public static class ModularFacilityRuntimeEffects
             totalProduced += Mathf.Max(0, ability.ApplyWorkCompleted(actor, building, workType));
         }
 
+        if (workType == FacilityWorkType.Butcher
+            && totalProduced <= 0
+            && WildlifeButcherFacilityUtility.IsButcherFacility(building)
+            && WildlifeRuntime.Active != null
+            && WildlifeRuntime.Active.TryButcherNextCarcass(actor, building, out int butchered, out _))
+        {
+            totalProduced += Mathf.Max(0, butchered);
+        }
+
         return totalProduced;
     }
 
@@ -284,15 +298,67 @@ public static class ModularFacilityRuntimeEffects
             addCompletedToInventory: false);
         if (completed > 0)
         {
-            bool spawnedOutput = WorldItemStackRuntime.Active != null
-                && WorldItemStackRuntime.Active.SpawnItemAt(
+            ResourceCombatEquipmentCatalog combatCatalog = new ResourceCombatEquipmentCatalog();
+            bool isCombatEquipment = combatCatalog.TryGet(completedEquipmentId, out _);
+            bool spawnedOutput;
+            if (completedEquipmentId == CombatItemDefinitions.ArrowBundleRecipeId
+                || completedEquipmentId == CombatItemDefinitions.BoltBundleRecipeId)
+            {
+                string ammunitionItemId =
+                    completedEquipmentId == CombatItemDefinitions.ArrowBundleRecipeId
+                        ? CombatItemDefinitions.ArrowItemId
+                        : CombatItemDefinitions.BoltItemId;
+                int outputAmount =
+                    completedEquipmentId == CombatItemDefinitions.ArrowBundleRecipeId
+                        ? 20
+                        : 12;
+                spawnedOutput = WorldItemStackRuntime.Active != null
+                    && WorldItemStackRuntime.Active.SpawnItemAt(
+                        ammunitionItemId,
+                        outputAmount,
+                        building.centerPos,
+                        WorldItemStackState.FacilityBuffer,
+                        $"craft:{building.GetInstanceID()}",
+                        out int spawned)
+                    && spawned == outputAmount;
+            }
+            else if (isCombatEquipment
+                && completed == 1
+                && WorldItemStackRuntime.Active != null
+                && WorldItemStackRuntime.Active.SpawnUniqueItemAt(
                     DungeonItemCatalogSO.EquipmentItemId(completedEquipmentId),
-                    completed,
                     building.centerPos,
                     WorldItemStackState.FacilityBuffer,
                     $"craft:{building.GetInstanceID()}",
-                    out int spawned)
-                && spawned == completed;
+                    out string outputStackId))
+            {
+                spawnedOutput = true;
+                ICombatEquipmentRuntime combatRuntime = CombatEquipmentRuntime.Active;
+                if (combatRuntime != null)
+                {
+                    CombatEquipmentInstance instance = combatRuntime.CreateInstance(
+                        completedEquipmentId,
+                        ResolveCraftedCombatQuality(actor, building),
+                        CombatEquipmentWorldState.Loose);
+                    combatRuntime.TryLinkToWorldStack(
+                        instance.instanceId,
+                        outputStackId,
+                        CombatEquipmentWorldState.Loose);
+                }
+            }
+            else
+            {
+                spawnedOutput = WorldItemStackRuntime.Active != null
+                    && WorldItemStackRuntime.Active.SpawnItemAt(
+                        DungeonItemCatalogSO.EquipmentItemId(completedEquipmentId),
+                        completed,
+                        building.centerPos,
+                        WorldItemStackState.FacilityBuffer,
+                        $"craft:{building.GetInstanceID()}",
+                        out int spawned)
+                    && spawned == completed;
+            }
+
             if (!spawnedOutput)
             {
                 runtime.AddInventory(completedEquipmentId, completed);
@@ -312,6 +378,22 @@ public static class ModularFacilityRuntimeEffects
             reasonCode: completed > 0 ? "equipment-crafted" : "equipment-crafting-progress",
             quantity: completed));
         return completed;
+    }
+
+    private static CombatEquipmentQuality ResolveCraftedCombatQuality(
+        CharacterActor actor,
+        BuildableObject building)
+    {
+        int dexterity = actor?.Stats?.GetCharacterStat(CharacterStatType.Dexterity) ?? 5;
+        int research = actor?.Stats?.GetCharacterStat(CharacterStatType.Research) ?? 5;
+        int score = dexterity + research + Mathf.Max(1, building?.FacilityLevel ?? 1) * 2;
+        if (score <= 8) return CombatEquipmentQuality.Awful;
+        if (score <= 12) return CombatEquipmentQuality.Poor;
+        if (score <= 18) return CombatEquipmentQuality.Normal;
+        if (score <= 23) return CombatEquipmentQuality.Good;
+        if (score <= 28) return CombatEquipmentQuality.Excellent;
+        if (score <= 34) return CombatEquipmentQuality.Masterwork;
+        return CombatEquipmentQuality.Legendary;
     }
 
     public static int Produce(BuildableObject source, StockCategory category, int requested)

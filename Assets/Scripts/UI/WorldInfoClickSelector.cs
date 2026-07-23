@@ -58,6 +58,12 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
             return true;
         }
 
+        if (!forceItem && hasPhysicsHits && TryGetPreferredWildlife(hits, out WildlifeActor wildlife))
+        {
+            TriggerWildlife(wildlife);
+            return true;
+        }
+
         if (TryGetItemPileUnderPointer(out ItemPileInfoTarget itemTarget, out UnityEngine.Object markerObject))
         {
             MarkWorldClickHandled(markerObject);
@@ -71,8 +77,14 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
             return true;
         }
 
+        if (hasPhysicsHits && TryGetPreferredWildlife(hits, out wildlife))
+        {
+            TriggerWildlife(wildlife);
+            return true;
+        }
+
         if ((hasPhysicsHits && TryGetPreferredBuilding(hits, out BuildableObject building))
-            || TryGetGridBuildingUnderPointer(out building))
+            || TryGetExactGridStructureUnderPointer(out building))
         {
             MarkWorldClickHandled(building);
             building.TriggerWorldInfoClick();
@@ -104,7 +116,7 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
             && itemStackRuntime.TryGetPileTargetAt(cell, out target, out markerObject);
     }
 
-    private bool TryGetGridBuildingUnderPointer(out BuildableObject building)
+    private bool TryGetExactGridStructureUnderPointer(out BuildableObject building)
     {
         building = null;
         GridSystemManager manager = gridSystemProvider.Manager;
@@ -124,8 +136,17 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
             return false;
         }
 
-        building = grid.GetGridCell(cell)?.GetBuilding();
-        return building != null && !building.isDestroy;
+        building = grid.GetGridCell(cell)?.GetOccupant(GridLayer.Building) as BuildableObject;
+        return building != null
+            && !building.isDestroy
+            && IsExactGridStructureDefinition(building.BuildingData);
+    }
+
+    public static bool IsExactGridStructureDefinition(BuildingSO buildingData)
+    {
+        return buildingData != null
+            && buildingData.Placement.Layer == GridLayer.Building
+            && (buildingData.IsStructuralWall || buildingData.IsInteriorDoor);
     }
 
     public bool TryTriggerCharacterUnderPointer()
@@ -237,7 +258,10 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
         foreach (Collider2D hit in hits)
         {
             BuildableObject candidate = hit != null ? hit.GetComponentInParent<BuildableObject>() : null;
-            if (candidate == null)
+            if (candidate == null
+                || candidate.isDestroy
+                || (candidate is not ConstructionSite
+                    && candidate.BuildingData?.Placement.Layer == GridLayer.Hallway))
             {
                 continue;
             }
@@ -253,6 +277,12 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
                     candidateLayer = rendererLayer;
                     candidateOrder = renderer.sortingOrder;
                 }
+            }
+
+            if (candidate is ConstructionSite)
+            {
+                candidateLayer = int.MaxValue / 2;
+                candidateOrder = int.MaxValue / 2;
             }
 
             float candidateZ = candidate.transform.position.z;
@@ -272,6 +302,44 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
         }
 
         return building != null;
+    }
+
+    private static bool TryGetPreferredWildlife(Collider2D[] hits, out WildlifeActor wildlife)
+    {
+        wildlife = null;
+        int bestScore = int.MinValue;
+        float bestZ = float.NegativeInfinity;
+        if (hits == null)
+        {
+            return false;
+        }
+
+        foreach (Collider2D hit in hits)
+        {
+            WildlifeActor candidate = hit != null ? hit.GetComponentInParent<WildlifeActor>() : null;
+            if (candidate == null || !candidate.IsAlive)
+            {
+                continue;
+            }
+
+            int score = candidate.IsDangerous ? 50 : 10;
+            if (candidate.HuntDesignated)
+            {
+                score += 25;
+            }
+
+            float z = candidate.transform.position.z;
+            if (wildlife != null && (score < bestScore || (score == bestScore && z <= bestZ)))
+            {
+                continue;
+            }
+
+            wildlife = candidate;
+            bestScore = score;
+            bestZ = z;
+        }
+
+        return wildlife != null;
     }
 
     private static int GetCharacterClickPriority(CharacterActor actor)
@@ -310,6 +378,17 @@ public sealed class WorldInfoClickSelectionService : IWorldInfoClickSelector
 
         MarkWorldClickHandled(actor);
         InfoFeedEvent.Trigger(actor);
+    }
+
+    private void TriggerWildlife(WildlifeActor wildlife)
+    {
+        if (lastHandledFrame == Time.frameCount && lastHandledTarget == wildlife)
+        {
+            return;
+        }
+
+        MarkWorldClickHandled(wildlife);
+        InfoFeedEvent.Trigger(wildlife);
     }
 
     private void MarkWorldClickHandled(UnityEngine.Object target)

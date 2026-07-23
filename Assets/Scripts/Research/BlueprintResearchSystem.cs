@@ -392,7 +392,10 @@ public class BlueprintResearchRuntime : MonoBehaviour, UtilEventListener<Facilit
             return new BlueprintResearchWorkResult(false, null, 0f, 0f, 1f, false, "연구할 설계도가 없습니다");
         }
 
-        float added = task.AddProgress(BlueprintResearchService.CalculateResearchWork(researcher, researchFacility, seconds));
+        float work = DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.InstantWork)
+            ? task.RequiredWork
+            : BlueprintResearchService.CalculateResearchWork(researcher, researchFacility, seconds);
+        float added = task.AddProgress(work);
         bool completed = task.IsCompleted;
         BlueprintResearchWorkResult result = new BlueprintResearchWorkResult(
             true,

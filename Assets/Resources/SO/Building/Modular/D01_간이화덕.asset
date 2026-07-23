@@ -44,11 +44,14 @@ MonoBehaviour:
     items:
     - rid: 7302562995605602327
     - rid: 7302562995605602328
-    - rid: 7302562995605602329
     - rid: 7302562995605602330
     - rid: 7302562995605602331
     - rid: 7302562995605602332
     - rid: 7302562995605602333
+    - rid: 7302563106683093112
+    - rid: 7302563106683093113
+    - rid: 7302563106683093114
+    - rid: 7302563106683093115
   width: 1
   height: 1
   layer: 1
@@ -76,17 +79,6 @@ MonoBehaviour:
         maintenance: 3
         unlockPhase: 1
         demolitionRefundRate: 0.5
-    - rid: 7302562995605602329
-      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
-      data:
-        abilityId: BuildingFacilityAbility
-        settings:
-          roles: 1
-          capacity: 1
-          useDuration: 1.5
-          requiredWorkers: 1
-          supportedWorkTypes: 13
-          disabledWhenDamaged: 1
     - rid: 7302562995605602330
       type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
       data:
@@ -120,3 +112,37 @@ MonoBehaviour:
         abilityId: BuildingProductionAbility
         outputCategory: 0
         amount: 4
+    - rid: 7302563106683093112
+      type: {class: BuildingCookingAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingCookingAbility
+        inputFood: 1
+        cookedMeals: 2
+        workSeconds: 1.1
+        requiresFuel: 1
+    - rid: 7302563106683093113
+      type: {class: BuildingFuelConsumerAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFuelConsumerAbility
+        fuelPerRefuel: 1
+        workSeconds: 0.8
+        warmth: 8
+        lightSafety: 6
+    - rid: 7302563106683093114
+      type: {class: BuildingTemperatureAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingTemperatureAbility
+        roomTemperatureOffset: 4
+        coldProtection: 6
+        heatProtection: 1
+    - rid: 7302563106683093115
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 1
+          capacity: 1
+          useDuration: 1.5
+          requiredWorkers: 1
+          supportedWorkTypes: 81933
+          disabledWhenDamaged: 1

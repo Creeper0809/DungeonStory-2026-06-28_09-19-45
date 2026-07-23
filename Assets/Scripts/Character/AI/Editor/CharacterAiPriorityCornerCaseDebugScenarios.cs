@@ -377,6 +377,10 @@ public static class CharacterAiPriorityCornerCaseDebugScenarios
             CharacterActor character = obj.AddComponent<CharacterActor>();
             data.aiPersonality.patience = 0.5f;
             character.data = data;
+            character.stats = new Dictionary<CharacterCondition, float>
+            {
+                [CharacterCondition.MOOD] = 50f
+            };
 
             float score = new AIAction { actionset = waitAction }.CalculateScore(CharacterActor.From(character));
             return NearlyEqual(score, 0.5f);

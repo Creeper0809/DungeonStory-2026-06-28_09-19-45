@@ -51,6 +51,8 @@ public sealed class CharacterProgression : MonoBehaviour
     public CharacterPotentialGrade PotentialGrade => GrowthState.potentialGrade;
     public IReadOnlyList<CharacterSkillInstance> ActiveSkills => GrowthState.activeSkills;
     public IReadOnlyList<CharacterSkillInstance> PassiveSkills => GrowthState.passiveSkills;
+    public IReadOnlyList<CharacterSkillInstance> OwnerFixedSkills =>
+        CharacterOwnerFixedSkillUtility.GetSkills(actor?.Identity?.Data);
     public CharacterSkillInstance Ultimate => GrowthState.ultimate;
     public IReadOnlyList<CharacterSkillDraft> Drafts => GrowthState.drafts;
     public IReadOnlyList<string> LearnedSkillIds
@@ -211,8 +213,18 @@ public sealed class CharacterProgression : MonoBehaviour
 
         if (draft.permanentlyChosen)
         {
-            message = "이미 영구 확정된 기술입니다.";
-            return false;
+            CharacterSkillInstance chosen = draft.ChosenSkill;
+            if (chosen != null
+                && !GrowthState.activeSkills.Any(skill => skill != null
+                    && string.Equals(skill.id, chosen.id, StringComparison.Ordinal)))
+            {
+                GrowthState.activeSkills.Add(chosen.Clone());
+                RebuildLegacySkillViews();
+                Changed?.Invoke();
+            }
+
+            message = "이미 확정된 기술입니다.";
+            return candidateIndex == draft.chosenIndex;
         }
 
         if (candidateIndex < 0 || candidateIndex >= draft.candidates.Count)
@@ -227,7 +239,7 @@ public sealed class CharacterProgression : MonoBehaviour
             return false;
         }
 
-        if (GrowthState.activeSkills.Count >= NormalActiveSlots)
+        if (GrowthState.activeSkills.Count >= GetSlotProfile().NormalActiveSlots)
         {
             message = "일반 액티브 슬롯이 모두 찼습니다.";
             return false;
@@ -391,6 +403,11 @@ public sealed class CharacterProgression : MonoBehaviour
         }
 
         return effectiveRuntimeProfile;
+    }
+
+    public CharacterSkillSlotProfile GetSlotProfile()
+    {
+        return CharacterSkillSlotProfile.For(actor?.Identity?.Data, actor != null && actor.IsOwner);
     }
 
     public void RecordNarrative(
@@ -640,7 +657,7 @@ public sealed class CharacterProgression : MonoBehaviour
         }
 
         if (Level >= settings.secondPassiveMinimumLevel
-            && GrowthState.passiveSkills.Count < PassiveSlots
+            && GrowthState.passiveSkills.Count < GetSlotProfile().PassiveSlots
             && NarrativeLedger.MeaningfulRecordCount >= settings.secondPassiveMinimumRecords
             && NarrativeLedger.MeaningfulDomainCount >= settings.secondPassiveMinimumDomains)
         {
@@ -764,7 +781,7 @@ public sealed class CharacterProgression : MonoBehaviour
         if (draft.permanentlyChosen
             || draft.candidates == null
             || draft.candidates.Count == 0
-            || GrowthState.passiveSkills.Count >= PassiveSlots)
+            || GrowthState.passiveSkills.Count >= GetSlotProfile().PassiveSlots)
         {
             return;
         }

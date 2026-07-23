@@ -8,7 +8,13 @@ public enum CharacterAiBranch
 {
     None,
     Critical,
+    DeprivationBreakdown,
+    LockedAction,
+    SoftLock,
+    InterruptCheck,
     MacroGoal,
+    Emergency,
+    RoutineUtility,
     ContinueCurrent,
     StopCurrent,
     SurvivalNeeds,
@@ -151,6 +157,7 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
     [SerializeField, ReadOnly] private AIActionSet committedAction;
     [SerializeField, ReadOnly] private BuildableObject committedDestination;
     [SerializeField, ReadOnly] private float minCommitUntil;
+    [SerializeField, ReadOnly] private CharacterAiIntentState softLockIntent = new CharacterAiIntentState();
     [SerializeField, ReadOnly] private CharacterMacroGoal activeMacroGoal = new CharacterMacroGoal();
     [SerializeField, ReadOnly] private CharacterMoodImpulse activeMoodImpulse = new CharacterMoodImpulse();
     [SerializeField, ReadOnly] private Dictionary<BuildableObject, float> failedBuildingCooldowns =
@@ -164,12 +171,17 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
     [SerializeField, ReadOnly] private string lastJobGiverUtilitySummary;
     [SerializeField, ReadOnly] private string selectedJobGiverUtilitySummary;
     [SerializeField, ReadOnly] private string lastRoutineGroupPrioritySummary;
+    [SerializeField, ReadOnly] private string lastUtilityBreakdownSummary;
+    [SerializeField, ReadOnly] private string lastDecisionContextSummary;
+    [SerializeField, ReadOnly] private List<string> topUtilityBreakdowns =
+        new List<string>();
     [SerializeField, ReadOnly] private List<string> recentDecisionTrace =
         new List<string>();
     [NonSerialized] private Dictionary<CharacterAiBranch, CharacterAiJobCandidate> cachedJobGiverCandidates;
     [NonSerialized] private IReadOnlyDictionary<string, int> recentFailureCountsView;
     [NonSerialized] private IReadOnlyDictionary<CharacterAiBranch, float> jobGiverUtilityScoresView;
     [NonSerialized] private IReadOnlyDictionary<CharacterAiBranch, float> routineGroupPriorityScoresView;
+    [NonSerialized] private IReadOnlyList<string> topUtilityBreakdownsView;
     [NonSerialized] private IReadOnlyList<string> recentDecisionTraceView;
     [SerializeField, ReadOnly] private string lastCommitBreakReason;
     [SerializeField, ReadOnly] private string lastFailureReason;
@@ -184,6 +196,7 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
     public AIActionSet CommittedAction => committedAction;
     public BuildableObject CommittedDestination => committedDestination;
     public float MinCommitUntil => minCommitUntil;
+    public CharacterAiIntentState SoftLockIntent => softLockIntent;
     public CharacterMacroGoal ActiveMacroGoal => activeMacroGoal;
     public CharacterMoodImpulse ActiveMoodImpulse => activeMoodImpulse;
     public string LastCommitBreakReason => lastCommitBreakReason;
@@ -194,6 +207,9 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
     public string LastJobGiverUtilitySummary => lastJobGiverUtilitySummary;
     public string SelectedJobGiverUtilitySummary => selectedJobGiverUtilitySummary;
     public string LastRoutineGroupPrioritySummary => lastRoutineGroupPrioritySummary;
+    public string LastUtilityBreakdownSummary => lastUtilityBreakdownSummary;
+    public string LastDecisionContextSummary => lastDecisionContextSummary;
+    public IReadOnlyList<string> TopUtilityBreakdowns => topUtilityBreakdownsView;
     public IReadOnlyList<string> RecentDecisionTrace => recentDecisionTraceView;
     public string LastDecisionTrace => recentDecisionTrace != null && recentDecisionTrace.Count > 0
         ? string.Join(" | ", recentDecisionTrace)
@@ -211,15 +227,18 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         actor = owner;
         activeMacroGoal ??= new CharacterMacroGoal();
         activeMoodImpulse ??= new CharacterMoodImpulse();
+        softLockIntent ??= new CharacterAiIntentState();
         failedBuildingCooldowns ??= new Dictionary<BuildableObject, float>();
         recentFailureCounts ??= new Dictionary<string, int>();
         jobGiverUtilityScores ??= new Dictionary<CharacterAiBranch, float>();
         routineGroupPriorityScores ??= new Dictionary<CharacterAiBranch, float>();
+        topUtilityBreakdowns ??= new List<string>();
         recentDecisionTrace ??= new List<string>();
         cachedJobGiverCandidates ??= new Dictionary<CharacterAiBranch, CharacterAiJobCandidate>();
         recentFailureCountsView ??= ReadOnlyView.Dictionary(recentFailureCounts);
         jobGiverUtilityScoresView ??= ReadOnlyView.Dictionary(jobGiverUtilityScores);
         routineGroupPriorityScoresView ??= ReadOnlyView.Dictionary(routineGroupPriorityScores);
+        topUtilityBreakdownsView ??= ReadOnlyView.List(topUtilityBreakdowns);
         recentDecisionTraceView ??= ReadOnlyView.List(recentDecisionTrace);
         PruneFacilityCooldowns();
     }
@@ -228,6 +247,8 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
     {
         recentDecisionTrace ??= new List<string>();
         recentDecisionTrace.Clear();
+        topUtilityBreakdowns ??= new List<string>();
+        topUtilityBreakdowns.Clear();
         AppendDecisionTrace($"Tick {tick}");
     }
 
@@ -290,6 +311,43 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         AppendDecisionTrace($"Priority {branch}={priority:0.###} {TrimTrace(detail)}");
     }
 
+    public void RecordUtilityBreakdown(CharacterAiUtilityBreakdown breakdown)
+    {
+        if (breakdown == null)
+        {
+            return;
+        }
+
+        string summary = breakdown.ToCompactString();
+        lastUtilityBreakdownSummary = summary;
+        topUtilityBreakdowns ??= new List<string>();
+        topUtilityBreakdowns.Add(summary);
+        topUtilityBreakdowns.Sort((left, right) => ExtractScore(right).CompareTo(ExtractScore(left)));
+        while (topUtilityBreakdowns.Count > 5)
+        {
+            topUtilityBreakdowns.RemoveAt(topUtilityBreakdowns.Count - 1);
+        }
+
+        AppendDecisionTrace($"Breakdown {TrimTrace(summary)}");
+    }
+
+        public void RecordDecisionContext(CharacterAiDecisionContext context)
+    {
+        lastDecisionContextSummary =
+            $"가장 급한 욕구 {context.GetNeedLabel()} {context.StrongestNeedUrgency * 100f:0}%"
+            + $" · 긴급 {context.EmergencyScore * 100f:0}%"
+            + $" · 작업 {context.WorkPriority * 100f:0}%"
+            + $" · 물류 {context.HaulPriority * 100f:0}%"
+            + $" · 사냥 {context.HuntPriority * 100f:0}%"
+            + $" · {context.WorldSignals.ToCompactString()}";
+        AppendDecisionTrace($"Context {TrimTrace(lastDecisionContextSummary)}");
+    }
+
+    public void RecordBtDecisionTrace(string step, string status)
+    {
+        AppendDecisionTrace($"BT-Step {TrimTrace(step)}: {TrimTrace(status)}");
+    }
+
     public void ClearJobGiverCandidateCache()
     {
         cachedJobGiverCandidates ??= new Dictionary<CharacterAiBranch, CharacterAiJobCandidate>();
@@ -338,6 +396,15 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         committedDestination = action.destination;
         minCommitUntil = Time.time + Mathf.Max(0f, defaultCommitSeconds);
         currentIntent = intent ?? GetActionLabel(action.actionset);
+        CharacterAiNaturalnessSettingsSO settings = CharacterAiNaturalnessSettingsSO.Defaults;
+        softLockIntent.Begin(
+            action.actionset.Branch,
+            CharacterAiUtilityText.GetIntention(action.actionset.Branch),
+            currentIntent,
+            action.destination,
+            settings.SoftLockMinimumSeconds,
+            settings.SoftLockMaximumSeconds,
+            canInterrupt: true);
     }
 
     public void RefreshCommitment(AIAction action)
@@ -350,6 +417,8 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         if (committedAction == action.actionset && committedDestination == action.destination)
         {
             minCommitUntil = Mathf.Max(minCommitUntil, Time.time + Mathf.Max(0f, defaultCommitSeconds));
+            CharacterAiNaturalnessSettingsSO settings = CharacterAiNaturalnessSettingsSO.Defaults;
+            softLockIntent.Refresh(settings.SoftLockMinimumSeconds, settings.SoftLockMaximumSeconds);
         }
     }
 
@@ -378,12 +447,19 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         }
 
         bonus = commitmentScoreBonus;
+        if (softLockIntent != null && softLockIntent.Matches(action))
+        {
+            bonus += softLockIntent.GetScoreBonus(
+                Time.time,
+                CharacterAiNaturalnessSettingsSO.Defaults.SoftLockScoreBonus);
+        }
+
         return bonus > 0f;
     }
 
     public bool CanBreakCommitment(CharacterAiInterruptReason reason)
     {
-        return reason == CharacterAiInterruptReason.Critical
+        bool hardAllowed = reason == CharacterAiInterruptReason.Critical
             || reason == CharacterAiInterruptReason.DestinationInvalid
             || reason == CharacterAiInterruptReason.NoPath
             || reason == CharacterAiInterruptReason.FacilityUnavailable
@@ -392,6 +468,8 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
             || reason == CharacterAiInterruptReason.MoodImpulseChanged
             || reason == CharacterAiInterruptReason.ManualReplan
             || reason == CharacterAiInterruptReason.CurrentActionStopped;
+        return hardAllowed
+            && (softLockIntent == null || softLockIntent.CanBreak(reason, Time.time));
     }
 
     public void ClearCommitment(CharacterAiInterruptReason reason, string detail)
@@ -401,12 +479,23 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
             return;
         }
 
+        ApplyCommitmentBreak(reason, detail);
+    }
+
+    public void ForceClearCommitment(CharacterAiInterruptReason reason, string detail)
+    {
+        ApplyCommitmentBreak(reason, detail);
+    }
+
+    private void ApplyCommitmentBreak(CharacterAiInterruptReason reason, string detail)
+    {
         committedAction = null;
         committedDestination = null;
         minCommitUntil = 0f;
         lastCommitBreakReason = string.IsNullOrWhiteSpace(detail)
             ? reason.ToString()
             : $"{reason}: {detail}";
+        softLockIntent?.Break(reason, detail);
         AppendDecisionTrace($"CommitBreak {TrimTrace(lastCommitBreakReason)}");
     }
 
@@ -454,6 +543,10 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
             : failure.ToString();
         recentFailureCounts[key] = recentFailureCounts.TryGetValue(key, out int count) ? count + 1 : 1;
         lastFailureReason = $"{GetActionLabel(actionSet)}: {failure}";
+        actor?.AiMemory?.RecordFailure(
+            failure.Kind,
+            lastFailureReason,
+            actor != null ? actor.GetNowXY() : Vector2Int.zero);
 
         BuildableObject target = failure.Target;
         if (target == null && actionSet != null && actor != null && actor.Brain != null)
@@ -605,6 +698,12 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         return recentFailureCounts.TryGetValue(kind.ToString(), out int count) ? count : 0;
     }
 
+    public string GetSoftLockDebugSummary()
+    {
+        softLockIntent ??= new CharacterAiIntentState();
+        return softLockIntent.ToDebugString(Time.time);
+    }
+
     public string GetDebugSummary()
     {
         string cooldowns = string.Join(
@@ -621,6 +720,8 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
             + $"Commit: {GetActionLabel(committedAction)} -> {GetBuildingLabel(committedDestination)} until {minCommitUntil:0.0}\n"
             + $"Macro: {macro}\n"
             + $"MoodImpulse: {moodImpulse}\n"
+            + $"Context: {lastDecisionContextSummary}\n"
+            + $"Utility: {lastUtilityBreakdownSummary}\n"
             + $"Cooldowns: {(string.IsNullOrWhiteSpace(cooldowns) ? "None" : cooldowns)}\n"
             + $"Route: {LastDecisionRouteSummary}\n"
             + $"Last failure: {lastFailureReason}\n"
@@ -643,6 +744,11 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         if (!string.IsNullOrWhiteSpace(lastRoutineGroupPrioritySummary))
         {
             route += $" Routine={TrimTrace(lastRoutineGroupPrioritySummary)}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(lastUtilityBreakdownSummary))
+        {
+            route += $" Breakdown={TrimTrace(lastUtilityBreakdownSummary)}";
         }
 
         if (HasActiveMoodImpulse())
@@ -684,6 +790,36 @@ public sealed class CharacterBlackboard : SerializedMonoBehaviour
         return flattened.Length <= 140
             ? flattened
             : flattened.Substring(0, 137) + "...";
+    }
+
+    private static float ExtractScore(string summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary))
+        {
+            return 0f;
+        }
+
+        int scoreIndex = summary.IndexOf("점", StringComparison.Ordinal);
+        if (scoreIndex <= 0)
+        {
+            return 0f;
+        }
+
+        int start = scoreIndex - 1;
+        while (start > 0)
+        {
+            char c = summary[start - 1];
+            if (!char.IsDigit(c) && c != '.')
+            {
+                break;
+            }
+
+            start--;
+        }
+
+        return float.TryParse(summary.Substring(start, scoreIndex - start), out float score)
+            ? score
+            : 0f;
     }
 
     private void PruneFacilityCooldowns()

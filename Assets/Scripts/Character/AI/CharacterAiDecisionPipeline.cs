@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 public readonly struct CharacterAiDecisionTickResult
@@ -26,6 +27,11 @@ public interface ICharacterAiDecisionPipeline
 {
     bool HasCriticalState(CharacterActor actor);
     CharacterAiDecisionTickResult RunCritical(CharacterActor actor, CharacterBlackboard blackboard);
+    bool HasDeprivationBreakdown(CharacterActor actor);
+    CharacterAiDecisionTickResult RunDeprivationBreakdown(CharacterActor actor);
+    bool HasLockedAction(CharacterActor actor);
+    bool CanInterruptCurrentAction(CharacterActor actor);
+    CharacterAiDecisionTickResult RunLockedAction(CharacterActor actor);
     bool HasMacroGoal(CharacterActor actor);
     bool HasContinuableCurrentAction(CharacterActor actor);
     bool ShouldStopCurrentActionForReplan(CharacterActor actor);
@@ -37,7 +43,10 @@ public interface ICharacterAiDecisionPipeline
         string taskName,
         CharacterAiBranch branchOverride = CharacterAiBranch.None);
     CharacterAiDecisionTickResult RunMacroGoalDecision(CharacterActor actor);
+    CharacterAiDecisionTickResult RunEmergencyDecision(CharacterActor actor);
+    CharacterAiDecisionTickResult RunRoutineUtilityDecision(CharacterActor actor);
     CharacterAiDecisionTickResult RunIdleBehavior(CharacterActor actor, CharacterBlackboard blackboard);
+    CharacterAiDecisionTickResult RecordBtDecisionTrace(CharacterActor actor, CharacterAiBranch branch, string taskName, string status);
     bool HasMacroGoalType(CharacterActor actor, CharacterMacroGoalType goalType);
     CharacterAiDecisionTickResult ClearContinueMacro(CharacterActor actor);
     CharacterAiDecisionTickResult RunComplainMacro(CharacterActor actor, CharacterBlackboard blackboard, CharacterMacroGoal goal);
@@ -78,11 +87,17 @@ public sealed class CharacterAiFacilityLookup : ICharacterAiFacilityLookup
 
 public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
 {
+    private const float SecondaryEmergencyNeedThreshold = 0.2f;
+
     public bool HasCriticalState(CharacterActor actor)
     {
         return actor == null
             || actor.IsDead
+            || (actor.Brain != null && actor.Brain.IsManualCommandActive)
             || actor.CurrentLifecycleState == CharacterLifecycleState.ExitingDungeon
+            || actor.CurrentLifecycleState == CharacterLifecycleState.PreparingExpedition
+            || actor.CurrentLifecycleState == CharacterLifecycleState.DepartingExpedition
+            || actor.CurrentLifecycleState == CharacterLifecycleState.ReturningExpedition
             || actor.CurrentLifecycleState == CharacterLifecycleState.Despawned
             || actor.CurrentLifecycleState == CharacterLifecycleState.OnExpedition;
     }
@@ -92,6 +107,16 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
         if (actor == null)
         {
             return Result(false, CharacterAiBranch.Critical, "HasCriticalState", "Actor is missing.", blackboard);
+        }
+
+        if (actor.Brain != null && actor.Brain.IsManualCommandActive)
+        {
+            return Result(
+                true,
+                CharacterAiBranch.Critical,
+                "PlayerMoveCommand",
+                actor.Brain.CurrentActionPhaseDetail,
+                blackboard);
         }
 
         blackboard.ClearCommitment(CharacterAiInterruptReason.Critical, actor.CurrentLifecycleState.ToString());
@@ -108,6 +133,44 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
         return actor != null && actor.Blackboard != null && actor.Blackboard.HasActiveMacroGoal();
     }
 
+    public bool HasDeprivationBreakdown(CharacterActor actor)
+    {
+        return CharacterDeprivationRuntime.Active != null
+            && CharacterDeprivationRuntime.Active.HasActiveBreakdown(actor);
+    }
+
+    public CharacterAiDecisionTickResult RunDeprivationBreakdown(CharacterActor actor)
+    {
+        CharacterBlackboard blackboard = actor != null ? actor.Blackboard : null;
+        if (CharacterDeprivationRuntime.Active == null
+            || !CharacterDeprivationRuntime.Active.TryRunActiveBreakdown(actor, out string status))
+        {
+            return Result(false, CharacterAiBranch.DeprivationBreakdown, "Run Deprivation Breakdown", "활성 붕괴 없음", blackboard);
+        }
+
+        blackboard?.SetIntent(
+            CharacterAiBranch.DeprivationBreakdown,
+            status,
+            "Run Deprivation Breakdown",
+            status);
+        return Result(true, CharacterAiBranch.DeprivationBreakdown, "Run Deprivation Breakdown", status, blackboard);
+    }
+
+    public bool HasLockedAction(CharacterActor actor)
+    {
+        return actor != null
+            && actor.Brain != null
+            && actor.Brain.CanContinueCurrentAction(out _)
+            && !actor.Brain.ShouldStopCurrentActionForReplan(out _);
+    }
+
+    public bool CanInterruptCurrentAction(CharacterActor actor)
+    {
+        return actor != null
+            && actor.Brain != null
+            && actor.Brain.ShouldStopCurrentActionForReplan(out _);
+    }
+
     public bool HasContinuableCurrentAction(CharacterActor actor)
     {
         return actor != null
@@ -120,6 +183,45 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
         return actor != null
             && actor.Brain != null
             && actor.Brain.ShouldStopCurrentActionForReplan(out _);
+    }
+
+    public CharacterAiDecisionTickResult RunLockedAction(CharacterActor actor)
+    {
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.LockedAction, "Locked Action", error, blackboard);
+        }
+
+        if (actor.Brain == null)
+        {
+            return Result(false, CharacterAiBranch.LockedAction, "Locked Action", "AIBrain is missing.", blackboard);
+        }
+
+        if (actor.Brain.ShouldStopCurrentActionForReplan(out string stopReason))
+        {
+            return Result(false, CharacterAiBranch.LockedAction, "Locked Action", stopReason, blackboard);
+        }
+
+        if (!actor.Brain.CanContinueCurrentAction(out string status))
+        {
+            return Result(false, CharacterAiBranch.LockedAction, "Locked Action", status, blackboard);
+        }
+
+        AIAction runningAction = actor.Brain.bestAction;
+        actor.Brain.isBestActionEnd = false;
+        runningAction?.actionset?.RefreshDestinationReservation(actor, runningAction.destination);
+        blackboard.RefreshCommitment(runningAction);
+        blackboard.SetIntent(
+            CharacterAiBranch.LockedAction,
+            GetActionLabel(runningAction?.actionset),
+            "Locked Action",
+            status);
+        actor.AiMemory?.RecordDecision(
+            CharacterAiBranch.LockedAction,
+            CharacterAiUtilityText.GetIntention(runningAction?.actionset?.Branch ?? CharacterAiBranch.None),
+            status,
+            0.05f);
+        return Result(true, CharacterAiBranch.LockedAction, "Locked Action", status, blackboard);
     }
 
     public CharacterAiDecisionTickResult ContinueCurrentAction(CharacterActor actor)
@@ -155,29 +257,29 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
     {
         if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
         {
-            return Result(false, CharacterAiBranch.StopCurrent, "Stop Current Action", error, blackboard);
+            return Result(false, CharacterAiBranch.InterruptCheck, "Interrupt Check", error, blackboard);
         }
 
         if (actor.Brain == null)
         {
-            return Result(false, CharacterAiBranch.StopCurrent, "Stop Current Action", "AIBrain is missing.", blackboard);
+            return Result(false, CharacterAiBranch.InterruptCheck, "Interrupt Check", "AIBrain is missing.", blackboard);
         }
 
         if (!actor.Brain.ShouldStopCurrentActionForReplan(out string stopReason))
         {
-            return Result(false, CharacterAiBranch.StopCurrent, "Stop Current Action", "Current action does not need replan.", blackboard);
+            return Result(false, CharacterAiBranch.InterruptCheck, "Interrupt Check", "Current action does not need replan.", blackboard);
         }
 
         AIAction runningAction = actor.Brain.bestAction;
         string actionLabel = GetActionLabel(runningAction?.actionset);
         actor.Brain.StopCurrentActionForReplan(stopReason);
-        blackboard.ClearCommitment(CharacterAiInterruptReason.CurrentActionStopped, stopReason);
+        blackboard.ForceClearCommitment(CharacterAiInterruptReason.CurrentActionStopped, stopReason);
         blackboard.SetIntent(
-            CharacterAiBranch.StopCurrent,
+            CharacterAiBranch.InterruptCheck,
             actionLabel,
-            "Stop Current Action",
+            "Interrupt Check",
             stopReason);
-        return Result(true, CharacterAiBranch.StopCurrent, "Stop Current Action", stopReason, blackboard);
+        return Result(true, CharacterAiBranch.InterruptCheck, "Interrupt Check", stopReason, blackboard);
     }
 
     public CharacterAiDecisionTickResult SelectJobGiverAction(
@@ -360,6 +462,101 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
         return Result(false, CharacterAiBranch.Idle, "RunIdleBehavior", failureReason, blackboard);
     }
 
+    public CharacterAiDecisionTickResult RunEmergencyDecision(CharacterActor actor)
+    {
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.Emergency, "Run Emergency Decision", error, blackboard);
+        }
+
+        if (HasDeprivationBreakdown(actor))
+        {
+            return RunDeprivationBreakdown(actor);
+        }
+
+        if (CharacterDeprivationRuntime.Active != null
+            && CharacterDeprivationRuntime.Active.TryRunSafeEmergencyRelief(actor, out string reliefStatus))
+        {
+            blackboard.SetIntent(
+                CharacterAiBranch.Emergency,
+                reliefStatus,
+                "Run Safe Emergency Relief",
+                reliefStatus);
+            return Result(true, CharacterAiBranch.Emergency, "Run Safe Emergency Relief", reliefStatus, blackboard);
+        }
+
+        CharacterAiDecisionContext context = CharacterAiDecisionContext.Capture(actor, CharacterAiBranch.Emergency);
+        blackboard.RecordDecisionContext(context);
+        if (context.EmergencyScore < 0.58f)
+        {
+            return Result(
+                false,
+                CharacterAiBranch.Emergency,
+                "Run Emergency Decision",
+                $"긴급도 낮음 {context.EmergencyScore * 100f:0}%",
+                blackboard);
+        }
+
+        List<CharacterAiJobGiver> emergencyGivers = BuildEmergencyJobGivers(actor, context);
+        return TrySelectAndRunBestJobGiver(
+            actor,
+            blackboard,
+            CharacterAiBranch.Emergency,
+            "Run Emergency Decision",
+            emergencyGivers,
+            branch => 1f,
+            out _);
+    }
+
+    public CharacterAiDecisionTickResult RunRoutineUtilityDecision(CharacterActor actor)
+    {
+        if (!TryPrepare(actor, out CharacterBlackboard blackboard, out string error))
+        {
+            return Result(false, CharacterAiBranch.RoutineUtility, "Run Routine Utility", error, blackboard);
+        }
+
+        CharacterAiDecisionContext context = CharacterAiDecisionContext.Capture(actor, CharacterAiBranch.RoutineUtility);
+        blackboard.RecordDecisionContext(context);
+
+        Dictionary<CharacterAiBranch, float> groupPriorities = new Dictionary<CharacterAiBranch, float>
+        {
+            [CharacterAiBranch.SurvivalNeeds] = CharacterAiRoutinePriority.GetPriority(actor, CharacterAiBranch.SurvivalNeeds, out string survivalReason),
+            [CharacterAiBranch.DutyWork] = CharacterAiRoutinePriority.GetPriority(actor, CharacterAiBranch.DutyWork, out string dutyReason),
+            [CharacterAiBranch.LeisureVisit] = CharacterAiRoutinePriority.GetPriority(actor, CharacterAiBranch.LeisureVisit, out string leisureReason),
+            [CharacterAiBranch.Idle] = CharacterAiRoutinePriority.GetPriority(actor, CharacterAiBranch.Idle, out string idleReason)
+        };
+        blackboard.RecordRoutineGroupPriority(CharacterAiBranch.SurvivalNeeds, groupPriorities[CharacterAiBranch.SurvivalNeeds], survivalReason);
+        blackboard.RecordRoutineGroupPriority(CharacterAiBranch.DutyWork, groupPriorities[CharacterAiBranch.DutyWork], dutyReason);
+        blackboard.RecordRoutineGroupPriority(CharacterAiBranch.LeisureVisit, groupPriorities[CharacterAiBranch.LeisureVisit], leisureReason);
+        blackboard.RecordRoutineGroupPriority(CharacterAiBranch.Idle, groupPriorities[CharacterAiBranch.Idle], idleReason);
+
+        CharacterAiDecisionTickResult result = TrySelectAndRunBestJobGiver(
+            actor,
+            blackboard,
+            CharacterAiBranch.RoutineUtility,
+            "Run Routine Utility",
+            BuildRoutineJobGivers(actor),
+            branch => GetGroupPriorityMultiplier(branch, groupPriorities),
+            out string failure);
+        if (result.Handled)
+        {
+            return result;
+        }
+
+        return Result(false, CharacterAiBranch.RoutineUtility, "Run Routine Utility", failure, blackboard);
+    }
+
+    public CharacterAiDecisionTickResult RecordBtDecisionTrace(
+        CharacterActor actor,
+        CharacterAiBranch branch,
+        string taskName,
+        string status)
+    {
+        CharacterBlackboard blackboard = actor != null ? actor.Blackboard : null;
+        blackboard?.RecordBtDecisionTrace(taskName, status);
+        return Result(actor != null, branch, taskName, status, blackboard);
+    }
+
     public bool HasMacroGoalType(CharacterActor actor, CharacterMacroGoalType goalType)
     {
         CharacterBlackboard blackboard = actor != null ? actor.Blackboard : null;
@@ -367,6 +564,184 @@ public sealed class CharacterAiDecisionPipeline : ICharacterAiDecisionPipeline
             && blackboard.HasActiveMacroGoal()
             && blackboard.ActiveMacroGoal != null
             && blackboard.ActiveMacroGoal.type == goalType;
+    }
+
+    private CharacterAiDecisionTickResult TrySelectAndRunBestJobGiver(
+        CharacterActor actor,
+        CharacterBlackboard blackboard,
+        CharacterAiBranch branchOverride,
+        string taskName,
+        IEnumerable<CharacterAiJobGiver> jobGivers,
+        Func<CharacterAiBranch, float> branchMultiplier,
+        out string failureSummary)
+    {
+        failureSummary = "No utility candidates.";
+        if (actor == null || actor.Brain == null)
+        {
+            failureSummary = "AIBrain is missing.";
+            return Result(false, branchOverride, taskName, failureSummary, blackboard);
+        }
+
+        CharacterAiJobCandidate bestCandidate = default;
+        float bestAdjustedUtility = float.MinValue;
+        bool hasCandidate = false;
+        List<string> rejected = new List<string>();
+        foreach (CharacterAiJobGiver jobGiver in jobGivers ?? Array.Empty<CharacterAiJobGiver>())
+        {
+            if (jobGiver == null)
+            {
+                continue;
+            }
+
+            if (!jobGiver.TryEvaluate(actor, out CharacterAiJobCandidate candidate))
+            {
+                rejected.Add(candidate.DebugSummary);
+                blackboard.RecordJobGiverUtility(jobGiver.Branch, 0f, candidate.DebugSummary);
+                continue;
+            }
+
+            float multiplier = branchMultiplier != null
+                ? Mathf.Max(0f, branchMultiplier(jobGiver.Branch))
+                : 1f;
+            float adjusted = Mathf.Clamp01(candidate.Utility * multiplier);
+            adjusted = CharacterMoodImpulseUtility.ApplyFinalAutonomyBias(
+                actor,
+                candidate.Branch,
+                adjusted);
+            blackboard.RecordJobGiverUtility(
+                jobGiver.Branch,
+                adjusted,
+                $"{candidate.DebugSummary} group={multiplier:0.##}");
+            if (!hasCandidate || adjusted > bestAdjustedUtility)
+            {
+                bestCandidate = candidate;
+                bestAdjustedUtility = adjusted;
+                hasCandidate = true;
+            }
+        }
+
+        if (!hasCandidate)
+        {
+            failureSummary = rejected.Count > 0
+                ? string.Join(" / ", rejected.Take(3))
+                : "No valid utility candidates.";
+            return Result(false, branchOverride, taskName, failureSummary, blackboard);
+        }
+
+        blackboard.RecordSelectedJobGiverUtility(bestCandidate);
+        if (!actor.Brain.TryCommitActionCandidate(bestCandidate.ActionCandidate, out AIActionFailure failure))
+        {
+            blackboard.ReportActionFailure(null, failure);
+            failureSummary = failure.ToString();
+            return Result(false, branchOverride, taskName, failureSummary, blackboard);
+        }
+
+        CharacterAiDecisionTickResult runResult = RunSelectedAction(actor, taskName, branchOverride);
+        AIAction selectedAction = actor.Brain.bestAction;
+        string actionLabel = GetActionLabel(selectedAction?.actionset);
+        string status = $"{actionLabel} · {bestCandidate.DebugSummary}";
+        actor.AiMemory?.RecordDecision(
+            branchOverride,
+            CharacterAiUtilityText.GetIntention(bestCandidate.Branch),
+            status,
+            0.1f);
+        return Result(runResult.Handled, branchOverride, taskName, status, blackboard);
+    }
+
+    private static List<CharacterAiJobGiver> BuildEmergencyJobGivers(
+        CharacterActor actor,
+        CharacterAiDecisionContext context)
+    {
+        ICharacterAiJobGiverCatalog catalog = RequireJobGiverCatalog(actor);
+        List<CharacterAiJobGiver> result = new List<CharacterAiJobGiver>();
+        if (CharacterNeedCatalog.GetWeightedUrgency(actor, CharacterCondition.HUNGER)
+            >= SecondaryEmergencyNeedThreshold)
+        {
+            result.Add(catalog.GetFood);
+        }
+
+        if (CharacterNeedCatalog.GetWeightedUrgency(actor, CharacterCondition.EXCRETION)
+            >= SecondaryEmergencyNeedThreshold)
+        {
+            result.Add(catalog.Toilet);
+        }
+
+        if (CharacterNeedCatalog.GetWeightedUrgency(actor, CharacterCondition.HYGIENE)
+            >= SecondaryEmergencyNeedThreshold)
+        {
+            result.Add(catalog.Hygiene);
+        }
+
+        if (CharacterNeedCatalog.GetWeightedUrgency(actor, CharacterCondition.SLEEP)
+                >= SecondaryEmergencyNeedThreshold
+            || context.InjuryUrgency > 0.35f
+            || context.HealthUrgency > 0.45f)
+        {
+            result.Add(catalog.Rest);
+        }
+
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out _)
+            && (context.FoodStockPressure > 0.65f || context.WaterStockPressure > 0.65f))
+        {
+            result.Add(catalog.Work);
+        }
+
+        if (!CharacterWorkRoleUtility.TryGetWork(actor, out _))
+        {
+            result.Add(catalog.ExitDungeon);
+        }
+
+        result.Add(catalog.Wait);
+        return result.Distinct().Where(giver => giver != null).ToList();
+    }
+
+    private static List<CharacterAiJobGiver> BuildRoutineJobGivers(CharacterActor actor)
+    {
+        ICharacterAiJobGiverCatalog catalog = RequireJobGiverCatalog(actor);
+        List<CharacterAiJobGiver> result = new List<CharacterAiJobGiver>
+        {
+            catalog.GetFood,
+            catalog.Toilet,
+            catalog.Hygiene,
+            catalog.Rest
+        };
+
+        if (CharacterWorkRoleUtility.TryGetWork(actor, out _))
+        {
+            result.Add(catalog.Work);
+            result.Add(catalog.Wait);
+        }
+        else
+        {
+            result.Add(catalog.Shopping);
+            result.Add(catalog.LookAround);
+            result.Add(catalog.ExitDungeon);
+        }
+
+        return result.Where(giver => giver != null).ToList();
+    }
+
+    private static float GetGroupPriorityMultiplier(
+        CharacterAiBranch jobBranch,
+        IReadOnlyDictionary<CharacterAiBranch, float> groupPriorities)
+    {
+        CharacterAiBranch group = jobBranch switch
+        {
+            CharacterAiBranch.Eat => CharacterAiBranch.SurvivalNeeds,
+            CharacterAiBranch.Rest => CharacterAiBranch.SurvivalNeeds,
+            CharacterAiBranch.Toilet => CharacterAiBranch.SurvivalNeeds,
+            CharacterAiBranch.Hygiene => CharacterAiBranch.SurvivalNeeds,
+            CharacterAiBranch.ExitDungeon => CharacterAiBranch.SurvivalNeeds,
+            CharacterAiBranch.Work => CharacterAiBranch.DutyWork,
+            CharacterAiBranch.Shopping => CharacterAiBranch.LeisureVisit,
+            CharacterAiBranch.LookAround => CharacterAiBranch.LeisureVisit,
+            CharacterAiBranch.Wait => CharacterAiBranch.Idle,
+            _ => CharacterAiBranch.Idle
+        };
+        float priority = groupPriorities != null && groupPriorities.TryGetValue(group, out float value)
+            ? value
+            : 1f;
+        return Mathf.Lerp(0.45f, 1.2f, Mathf.Clamp01(priority / 100f));
     }
 
     private CharacterAiDecisionTickResult RunMacroJobGiverDecision(

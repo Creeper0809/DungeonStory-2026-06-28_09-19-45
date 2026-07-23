@@ -22,71 +22,56 @@ MonoBehaviour:
       startIndex: 
       variableStartIndex: 
       JSONSerialization: '{"EntryTask":{"Type":"BehaviorDesigner.Runtime.Tasks.EntryTask","NodeData":{"Offset":"(0,-260)"},"ID":1,"Name":"Entry","Instant":true},"RootTask":{"Type":"BehaviorDesigner.Runtime.Tasks.Selector","NodeData":{"Offset":"(0,-140)"},"ID":2,"Name":"Character
-        AI Root","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-620,20)"},"ID":3,"Name":"Critical","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasCriticalState","NodeData":{"Offset":"(-720,120)"},"ID":4,"Name":"Has
-        Critical?","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunCriticalState","NodeData":{"Offset":"(-520,120)"},"ID":5,"Name":"Run
-        Critical","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Selector","NodeData":{"Offset":"(-160,20)"},"ID":6,"Name":"Macro
-        Goals","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,120)"},"ID":7,"Name":"Continue
-        Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,200)"},"ID":8,"Name":"Has
-        Continue?","Instant":true,"CharacterMacroGoalTypegoalType":"Continue"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.ClearMacroGoal","NodeData":{"Offset":"(-280,200)"},"ID":9,"Name":"Clear
-        Continue Macro","Instant":true,"Stringreason":"Macro goal requested Continue.","BooleanfailAfterClear":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,220)"},"ID":10,"Name":"Avoid
-        Facility Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,300)"},"ID":11,"Name":"Has
-        AvoidFacility?","Instant":true,"CharacterMacroGoalTypegoalType":"AvoidFacility"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunAvoidFacilityMacroGoal","NodeData":{"Offset":"(-280,300)"},"ID":12,"Name":"Run
-        Avoid Facility","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,320)"},"ID":13,"Name":"Complain
-        Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,400)"},"ID":14,"Name":"Has
-        Complain?","Instant":true,"CharacterMacroGoalTypegoalType":"Complain"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunComplainMacroGoal","NodeData":{"Offset":"(-280,400)"},"ID":15,"Name":"Run
-        Complain","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,420)"},"ID":16,"Name":"Vandalize
-        Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,500)"},"ID":17,"Name":"Has
-        Vandalize?","Instant":true,"CharacterMacroGoalTypegoalType":"Vandalize"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunVandalizeMacroGoal","NodeData":{"Offset":"(-280,500)"},"ID":18,"Name":"Run
-        Vandalize","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,520)"},"ID":19,"Name":"Exit
-        Dungeon Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,600)"},"ID":20,"Name":"Has
-        ExitDungeon?","Instant":true,"CharacterMacroGoalTypegoalType":"ExitDungeon"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunExitDungeonMacroGoal","NodeData":{"Offset":"(-280,600)"},"ID":21,"Name":"Run
-        Exit Dungeon Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,620)"},"ID":22,"Name":"Seek
-        Food Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,700)"},"ID":23,"Name":"Has
-        SeekFood?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekFood"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(-280,700)"},"ID":24,"Name":"Run
-        Seek Food Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,720)"},"ID":25,"Name":"Seek
-        Fun Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,800)"},"ID":26,"Name":"Has
-        SeekFun?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekFun"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(-280,800)"},"ID":27,"Name":"Run
-        Seek Fun Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,820)"},"ID":28,"Name":"Seek
-        Toilet Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,900)"},"ID":29,"Name":"Has
-        SeekToilet?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekToilet"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(-280,900)"},"ID":30,"Name":"Run
-        Seek Toilet Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-380,920)"},"ID":31,"Name":"Seek
-        Hygiene Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(-480,1000)"},"ID":32,"Name":"Has
-        SeekHygiene?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekHygiene"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(-280,1000)"},"ID":33,"Name":"Run
-        Seek Hygiene Macro","Instant":true}]}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(300,20)"},"ID":34,"Name":"Continue
-        Current","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasContinuableCurrentAction","NodeData":{"Offset":"(200,100)"},"ID":35,"Name":"Can
-        Continue?","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.ContinueCurrentAction","NodeData":{"Offset":"(400,100)"},"ID":36,"Name":"Keep
-        Running Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(580,20)"},"ID":37,"Name":"Stop
-        Current","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.ShouldStopCurrentAction","NodeData":{"Offset":"(480,100)"},"ID":38,"Name":"Should
-        Stop?","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.StopCurrentActionForReplan","NodeData":{"Offset":"(680,100)"},"ID":39,"Name":"Stop
-        Running Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.PrioritySelector","NodeData":{"Offset":"(980,20)"},"ID":40,"Name":"Normal
-        Routine","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SurvivalNeedsRoutineBranch","NodeData":{"Offset":"(700,150)"},"ID":41,"Name":"Survival
-        Needs","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.ExitDungeonJobGiverBranch","NodeData":{"Offset":"(160,270)"},"ID":42,"Name":"Exit
-        Dungeon","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectExitDungeonAction","NodeData":{"Offset":"(60,350)"},"ID":43,"Name":"Select
-        Exit Dungeon Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(260,350)"},"ID":44,"Name":"Run
-        Exit Dungeon Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.GetFoodJobGiverBranch","NodeData":{"Offset":"(440,270)"},"ID":45,"Name":"Get
-        Food","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectEatAction","NodeData":{"Offset":"(340,350)"},"ID":46,"Name":"Select
-        Eat Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(540,350)"},"ID":47,"Name":"Run
-        Eat Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.ToiletJobGiverBranch","NodeData":{"Offset":"(720,270)"},"ID":48,"Name":"Toilet","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectToiletAction","NodeData":{"Offset":"(620,350)"},"ID":49,"Name":"Select
-        Toilet Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(820,350)"},"ID":50,"Name":"Run
-        Toilet Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RestJobGiverBranch","NodeData":{"Offset":"(1000,270)"},"ID":51,"Name":"Rest","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectRestAction","NodeData":{"Offset":"(900,350)"},"ID":52,"Name":"Select
-        Rest Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(1100,350)"},"ID":53,"Name":"Run
-        Rest Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HygieneJobGiverBranch","NodeData":{"Offset":"(1280,270)"},"ID":54,"Name":"Hygiene","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectHygieneAction","NodeData":{"Offset":"(1180,350)"},"ID":55,"Name":"Select
-        Hygiene Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(1380,350)"},"ID":56,"Name":"Run
-        Hygiene Action","Instant":true}]}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.DutyWorkRoutineBranch","NodeData":{"Offset":"(1480,150)"},"ID":57,"Name":"Duty
-        Work","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.WorkJobGiverBranch","NodeData":{"Offset":"(1480,430)"},"ID":58,"Name":"Work","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectWorkAction","NodeData":{"Offset":"(1380,510)"},"ID":59,"Name":"Select
-        Work Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(1580,510)"},"ID":60,"Name":"Run
-        Work Action","Instant":true}]}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.LeisureVisitRoutineBranch","NodeData":{"Offset":"(700,530)"},"ID":61,"Name":"Leisure
-        Visit","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.ShoppingJobGiverBranch","NodeData":{"Offset":"(540,650)"},"ID":62,"Name":"Shopping","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectShoppingAction","NodeData":{"Offset":"(440,730)"},"ID":63,"Name":"Select
-        Shopping Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(640,730)"},"ID":64,"Name":"Run
-        Shopping Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.LookAroundJobGiverBranch","NodeData":{"Offset":"(860,650)"},"ID":65,"Name":"Look
-        Around","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectLookAroundAction","NodeData":{"Offset":"(760,730)"},"ID":66,"Name":"Select
-        Look Around Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(960,730)"},"ID":67,"Name":"Run
-        Look Around Action","Instant":true}]}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.IdleRoutineBranch","NodeData":{"Offset":"(1220,530)"},"ID":68,"Name":"Idle
-        Routine","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.WaitJobGiverBranch","NodeData":{"Offset":"(1140,650)"},"ID":69,"Name":"Wait","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.SelectWaitAction","NodeData":{"Offset":"(1040,730)"},"ID":70,"Name":"Select
-        Wait Action","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunSelectedCharacterAction","NodeData":{"Offset":"(1240,730)"},"ID":71,"Name":"Run
-        Wait Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.AmbientIdleJobGiverBranch","NodeData":{"Offset":"(1460,650)"},"ID":72,"Name":"Ambient
-        Idle","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunIdleBehavior","NodeData":{"Offset":"(1460,730)"},"ID":73,"Name":"Run
-        Ambient Idle","Instant":true}]}]}]}]}}'
+        AI Root","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-900,20)"},"ID":3,"Name":"Critical","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasCriticalState","NodeData":{"Offset":"(-1000,120)"},"ID":4,"Name":"Has
+        Critical?","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunCriticalState","NodeData":{"Offset":"(-800,120)"},"ID":5,"Name":"Run
+        Critical","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-730,20)"},"ID":6,"Name":"Deprivation
+        Breakdown","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasDeprivationBreakdown","NodeData":{"Offset":"(-830,120)"},"ID":7,"Name":"Has
+        Deprivation Breakdown?","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunDeprivationBreakdown","NodeData":{"Offset":"(-630,120)"},"ID":8,"Name":"Run
+        Deprivation Breakdown","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-560,20)"},"ID":9,"Name":"Locked
+        Action","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasLockedAction","NodeData":{"Offset":"(-660,100)"},"ID":10,"Name":"Has
+        Locked Action?","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunLockedAction","NodeData":{"Offset":"(-460,100)"},"ID":11,"Name":"Run
+        Locked Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(-220,20)"},"ID":12,"Name":"Interrupt
+        Check","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.CanInterruptCurrentAction","NodeData":{"Offset":"(-320,100)"},"ID":13,"Name":"Can
+        Interrupt?","Instant":true},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.StopCurrentActionForReplan","NodeData":{"Offset":"(-120,100)"},"ID":14,"Name":"Stop
+        Running Action","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Selector","NodeData":{"Offset":"(220,20)"},"ID":15,"Name":"Macro
+        Goals","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,120)"},"ID":16,"Name":"Continue
+        Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,200)"},"ID":17,"Name":"Has
+        Continue?","Instant":true,"CharacterMacroGoalTypegoalType":"Continue"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.ClearMacroGoal","NodeData":{"Offset":"(220,200)"},"ID":18,"Name":"Clear
+        Continue Macro","Instant":true,"Stringreason":"Macro goal requested Continue.","BooleanfailAfterClear":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,220)"},"ID":19,"Name":"Avoid
+        Facility Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,300)"},"ID":20,"Name":"Has
+        AvoidFacility?","Instant":true,"CharacterMacroGoalTypegoalType":"AvoidFacility"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunAvoidFacilityMacroGoal","NodeData":{"Offset":"(220,300)"},"ID":21,"Name":"Run
+        Avoid Facility","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,320)"},"ID":22,"Name":"Complain
+        Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,400)"},"ID":23,"Name":"Has
+        Complain?","Instant":true,"CharacterMacroGoalTypegoalType":"Complain"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunComplainMacroGoal","NodeData":{"Offset":"(220,400)"},"ID":24,"Name":"Run
+        Complain","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,420)"},"ID":25,"Name":"Vandalize
+        Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,500)"},"ID":26,"Name":"Has
+        Vandalize?","Instant":true,"CharacterMacroGoalTypegoalType":"Vandalize"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunVandalizeMacroGoal","NodeData":{"Offset":"(220,500)"},"ID":27,"Name":"Run
+        Vandalize","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,520)"},"ID":28,"Name":"Exit
+        Dungeon Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,600)"},"ID":29,"Name":"Has
+        ExitDungeon?","Instant":true,"CharacterMacroGoalTypegoalType":"ExitDungeon"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunExitDungeonMacroGoal","NodeData":{"Offset":"(220,600)"},"ID":30,"Name":"Run
+        Exit Dungeon Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,620)"},"ID":31,"Name":"Seek
+        Food Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,700)"},"ID":32,"Name":"Has
+        SeekFood?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekFood"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(220,700)"},"ID":33,"Name":"Run
+        Seek Food Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,720)"},"ID":34,"Name":"Seek
+        Fun Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,800)"},"ID":35,"Name":"Has
+        SeekFun?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekFun"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(220,800)"},"ID":36,"Name":"Run
+        Seek Fun Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,820)"},"ID":37,"Name":"Seek
+        Toilet Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,900)"},"ID":38,"Name":"Has
+        SeekToilet?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekToilet"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(220,900)"},"ID":39,"Name":"Run
+        Seek Toilet Macro","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(120,920)"},"ID":40,"Name":"Seek
+        Hygiene Macro","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.HasMacroGoalType","NodeData":{"Offset":"(20,1000)"},"ID":41,"Name":"Has
+        SeekHygiene?","Instant":true,"CharacterMacroGoalTypegoalType":"SeekHygiene"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunMacroGoalDecision","NodeData":{"Offset":"(220,1000)"},"ID":42,"Name":"Run
+        Seek Hygiene Macro","Instant":true}]}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(500,20)"},"ID":43,"Name":"Emergency","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RecordBtDecisionTrace","NodeData":{"Offset":"(400,100)"},"ID":44,"Name":"Trace
+        Emergency","Instant":true,"CharacterAiBranchbranch":"Emergency","Stringstatus":"\uae34\uae09
+        \ud6c4\ubcf4 \ud3c9\uac00"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunEmergencyDecision","NodeData":{"Offset":"(600,100)"},"ID":45,"Name":"Run
+        Emergency Decision","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(820,20)"},"ID":46,"Name":"Routine
+        Utility","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RecordBtDecisionTrace","NodeData":{"Offset":"(720,100)"},"ID":47,"Name":"Trace
+        Routine Utility","Instant":true,"CharacterAiBranchbranch":"RoutineUtility","Stringstatus":"\uc77c\uc0c1
+        \ud6c4\ubcf4 \ud3c9\uac00"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunRoutineUtilityDecision","NodeData":{"Offset":"(920,100)"},"ID":48,"Name":"Run
+        Routine Utility","Instant":true}]},{"Type":"BehaviorDesigner.Runtime.Tasks.Sequence","NodeData":{"Offset":"(1140,20)"},"ID":49,"Name":"Idle","Instant":true,"AbortTypeabortType":"None","Children":[{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RecordBtDecisionTrace","NodeData":{"Offset":"(1040,100)"},"ID":50,"Name":"Trace
+        Idle","Instant":true,"CharacterAiBranchbranch":"Idle","Stringstatus":"\ub300\uae30
+        \ud589\ub3d9"},{"Type":"BehaviorDesigner.Runtime.Tasks.DungeonStory.RunIdleBehavior","NodeData":{"Offset":"(1240,100)"},"ID":51,"Name":"Run
+        Ambient Idle","Instant":true}]}]}}'
       fieldSerializationData:
         typeName: []
         fieldNameHash: 

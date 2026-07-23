@@ -17,6 +17,11 @@ public static class PlayModeVerificationInputCleanup
 
     public static void CleanupStaleVerificationMice()
     {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            return;
+        }
+
         Mouse[] staleMice = InputSystem.devices
             .OfType<Mouse>()
             .Where(mouse => mouse != null

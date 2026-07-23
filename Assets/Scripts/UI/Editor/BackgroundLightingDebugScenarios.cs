@@ -16,6 +16,7 @@ public static class BackgroundLightingDebugScenarios
         CheckPaletteAnchors(errors);
         CheckContinuousCycle(errors);
         CheckUiPalette(errors);
+        CheckCameraCoverage(errors);
 
         if (errors.Count > 0)
         {
@@ -102,6 +103,47 @@ public static class BackgroundLightingDebugScenarios
         finally
         {
             DungeonUserSettingsRuntime.Publish(previousSettings);
+        }
+    }
+
+    private static void CheckCameraCoverage(List<string> errors)
+    {
+        GameObject cameraObject = new GameObject("Backdrop Coverage Camera", typeof(Camera));
+        try
+        {
+            Camera camera = cameraObject.GetComponent<Camera>();
+            camera.orthographic = true;
+            camera.aspect = 16f / 9f;
+            camera.transform.position = new Vector3(-29f, 4.5f, -10f);
+            camera.orthographicSize = 3.25f;
+            Rect closeCoverage = DungeonSceneBackdropFitter.CalculateCoverageRect(
+                -68f,
+                8f,
+                0f,
+                9f,
+                camera,
+                2f);
+
+            camera.orthographicSize = 10.5f;
+            Rect wideCoverage = DungeonSceneBackdropFitter.CalculateCoverageRect(
+                -68f,
+                8f,
+                0f,
+                9f,
+                camera,
+                2f);
+            float viewTop = camera.transform.position.y + camera.orthographicSize;
+            float viewBottom = camera.transform.position.y - camera.orthographicSize;
+
+            Require(wideCoverage.height > closeCoverage.height,
+                "Sky coverage does not expand when the camera zooms out.", errors);
+            Require(wideCoverage.yMin <= viewBottom - 1.99f
+                    && wideCoverage.yMax >= viewTop + 1.99f,
+                "Sky coverage does not contain the zoomed camera viewport and padding.", errors);
+        }
+        finally
+        {
+            Object.DestroyImmediate(cameraObject);
         }
     }
 

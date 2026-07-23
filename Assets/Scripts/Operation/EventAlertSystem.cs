@@ -32,6 +32,10 @@ public class EventAlertRuntime : MonoBehaviour, UtilEventListener<EventAlertRequ
         if (TryResolveViewPresenter(out IEventAlertViewPresenter presenter))
         {
             presenter.EnsureRuntimeUI();
+            foreach (EventAlertRecord record in eventLog)
+            {
+                presenter.CreateButton(record);
+            }
         }
     }
 

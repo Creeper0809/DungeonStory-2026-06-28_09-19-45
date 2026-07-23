@@ -108,9 +108,11 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
             FindBuildingDataById,
             buildingFactory,
             new BuildingPlacementValidator(new GridPlacementValidator(), CreateBuildingConditionContext));
-        if (!HasAnyGridOccupants(gridSystem.grid))
+        if (!HasAnyPlacedStructures(gridSystem.grid))
         {
-            placementService.PlaceInitialBuildings(initialPlacement);
+            placementService.PlaceInitialBuildings(NormalizeInitialPlacementForCurrentGrid(
+                initialPlacement,
+                centerAuthoredLayout: true));
         }
         gridSystem.OnGridExpand -= OnGridExpand;
         gridSystem.OnGridObjectChanged -= DrawGridTextureWalls;
@@ -252,6 +254,33 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         return SelectedBuilding != null && placementService.CanPlaceBuilding(SelectedBuilding, pos);
     }
 
+    public bool HasAnyPlacedGridOccupants()
+    {
+        EnsureInitialized();
+        return HasAnyPlacedStructures(gridSystem != null ? gridSystem.grid : null);
+    }
+
+    public bool TryPlaceInitialBuildings(
+        IEnumerable<InitialBuildInfo> placements,
+        out string message)
+    {
+        EnsureInitialized();
+        if (gridSystem == null || gridSystem.grid == null || placementService == null)
+        {
+            message = "그리드 배치 시스템이 준비되지 않았습니다.";
+            return false;
+        }
+
+        int before = CountGridOccupants(gridSystem.grid);
+        placementService.PlaceInitialBuildings(NormalizeInitialPlacementForCurrentGrid(
+            placements,
+            centerAuthoredLayout: false));
+        int after = CountGridOccupants(gridSystem.grid);
+        gridSystem.NotifyGridObjectChanged();
+        message = $"초기 배치 {Mathf.Max(0, after - before)}개를 적용했습니다.";
+        return after > before;
+    }
+
     public Vector3 GetMouseWorldPosSnapped()
     {
         EnsureInitialized();
@@ -319,7 +348,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
         foreach (var pos in poses)
         {
-            if (!placementService.TryPlaceBuilding(building, pos, out string errorMessage))
+            if (!placementService.TryPlaceConstructionSite(building, pos, out string errorMessage))
             {
                 NoticeFeedEvent.Trigger(errorMessage, NoticeFeedEvent.Grade.DANGER);
                 continue;
@@ -333,7 +362,7 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
 
         if (placedCount > 0)
         {
-            NoticeFeedEvent.Trigger($"{building.objectName} x{placedCount} 설치 완료", NoticeFeedEvent.Grade.NONE);
+            NoticeFeedEvent.Trigger($"{building.objectName} x{placedCount} 공사 예약", NoticeFeedEvent.Grade.NONE);
         }
 
         ClearBuildingSO();
@@ -343,6 +372,158 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
     private void DrawGridTextureWalls()
     {
         ResolveGridTexture().DrawWall(gridSystem.grid);
+    }
+
+    private IEnumerable<InitialBuildInfo> NormalizeInitialPlacementForCurrentGrid(
+        IEnumerable<InitialBuildInfo> placements,
+        bool centerAuthoredLayout)
+    {
+        if (placements == null)
+        {
+            yield break;
+        }
+
+        Grid grid = gridSystem != null ? gridSystem.grid : null;
+        int horizontalShift = centerAuthoredLayout && gridSystem != null
+            ? gridSystem.AuthoredLayoutHorizontalShift
+            : 0;
+        foreach (InitialBuildInfo placement in placements)
+        {
+            if (placement == null || placement.Building == null || grid == null)
+            {
+                yield return placement;
+                continue;
+            }
+
+            InitialBuildInfo translated = horizontalShift == 0
+                ? placement
+                : new InitialBuildInfo
+                {
+                    Position = placement.Position + new Vector2Int(horizontalShift, 0),
+                    Building = placement.Building
+                };
+            if (ShouldKeepInitialPlacementPosition(translated.Building)
+                || IsInitialPlacementValidForCurrentAreas(grid, translated, translated.Position))
+            {
+                yield return translated;
+                continue;
+            }
+
+            Vector2Int shifted = FindNearestInteriorInitialPlacement(grid, translated, translated.Position);
+            yield return new InitialBuildInfo
+            {
+                Position = shifted,
+                Building = translated.Building
+            };
+        }
+    }
+
+    private static bool ShouldKeepInitialPlacementPosition(BuildingSO building)
+    {
+        return building == null
+            || building.Placement.Layer == GridLayer.Hallway
+            || (building.IsDoor && !building.IsInteriorDoor);
+    }
+
+    private Vector2Int FindNearestInteriorInitialPlacement(Grid grid, InitialBuildInfo placement, Vector2Int original)
+    {
+        if (grid == null || placement?.Building == null)
+        {
+            return original;
+        }
+
+        if (IsInitialPlacementValidForCurrentAreas(grid, placement, original))
+        {
+            return original;
+        }
+
+        for (int offset = 1; offset < grid.width; offset++)
+        {
+            Vector2Int candidate = original + new Vector2Int(offset, 0);
+            if (IsInitialPlacementValidForCurrentAreas(grid, placement, candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return original;
+    }
+
+    private bool IsInitialPlacementValidForCurrentAreas(Grid grid, InitialBuildInfo placement, Vector2Int position)
+    {
+        if (grid == null || placement?.Building == null)
+        {
+            return false;
+        }
+
+        foreach (InitialBuildInfo effectivePlacement in GetEffectiveInitialPlacementAreaEntries(placement, position))
+        {
+            if (effectivePlacement?.Building == null)
+            {
+                return false;
+            }
+
+            foreach (Vector2Int gridPos in effectivePlacement.Building.GetGridPosList(effectivePlacement.Position))
+            {
+                GridCell cell = grid.GetGridCell(gridPos);
+                if (cell == null || !cell.CanBuildInArea(effectivePlacement.Building))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private IEnumerable<InitialBuildInfo> GetEffectiveInitialPlacementAreaEntries(
+        InitialBuildInfo placement,
+        Vector2Int position)
+    {
+        if (placement?.Building == null)
+        {
+            yield break;
+        }
+
+        InitialBuildInfo relocated = new InitialBuildInfo
+        {
+            Position = position,
+            Building = placement.Building
+        };
+
+        if (!ModularFacilityInitialPlacementMigrator.TryExpand(
+                relocated,
+                FindBuildingDataById,
+                out IReadOnlyList<InitialBuildInfo> expanded))
+        {
+            yield return relocated;
+            yield break;
+        }
+
+        BuildingSO roomBoundary = FindBuildingDataById(7);
+        if (roomBoundary != null)
+        {
+            int startX = position.x - (placement.Building.width / 2);
+            int endX = startX + Mathf.Max(1, placement.Building.width) - 1;
+            yield return new InitialBuildInfo
+            {
+                Position = new Vector2Int(startX - 1, position.y),
+                Building = roomBoundary
+            };
+            yield return new InitialBuildInfo
+            {
+                Position = new Vector2Int(endX + 1, position.y),
+                Building = roomBoundary
+            };
+        }
+
+        foreach (InitialBuildInfo item in expanded)
+        {
+            if (item != null)
+            {
+                yield return item;
+            }
+        }
     }
 
     private static bool HasAnyGridOccupants(Grid grid)
@@ -358,6 +539,43 @@ public class DungeonStoryGridBuildingController : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static bool HasAnyPlacedStructures(Grid grid)
+    {
+        if (grid == null) return false;
+
+        foreach (GridCell cell in grid.GetCells())
+        {
+            if (cell == null)
+            {
+                continue;
+            }
+
+            if (cell.HasOccupantInLayer(GridLayer.Hallway)
+                || cell.HasOccupantInLayer(GridLayer.Building))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int CountGridOccupants(Grid grid)
+    {
+        if (grid == null) return 0;
+
+        int count = 0;
+        foreach (GridCell cell in grid.GetCells())
+        {
+            if (cell != null && cell.HasOccupant())
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private void OnGridExpand()

@@ -62,6 +62,7 @@ public sealed class DungeonSettingsUiController :
     private Toggle edgeScrollToggle;
     private Toggle highContrastToggle;
     private Toggle reducedMotionToggle;
+    private Toggle developerModeToggle;
     private DungeonSettingsHotkeyBehaviour hotkeyBehaviour;
     private GameManager gameManager;
     private bool pauseCaptured;
@@ -217,13 +218,15 @@ public sealed class DungeonSettingsUiController :
         SetOffsets(tabBarRect, new Vector2(30f, -132f), new Vector2(-30f, -82f));
 
         tabButtons.Add(CreateButton(tabBar.transform, "DisplaySettingsTab", "화면", () => ShowPage(0),
-            new Vector2(0f, 0f), new Vector2(0.333f, 1f), Vector2.zero, new Vector2(-4f, 0f)));
+            new Vector2(0f, 0f), new Vector2(0.25f, 1f), Vector2.zero, new Vector2(-4f, 0f)));
         tabButtons.Add(CreateButton(tabBar.transform, "AudioSettingsTab", "오디오", () => ShowPage(1),
-            new Vector2(0.333f, 0f), new Vector2(0.666f, 1f), new Vector2(4f, 0f), new Vector2(-4f, 0f)));
+            new Vector2(0.25f, 0f), new Vector2(0.5f, 1f), new Vector2(4f, 0f), new Vector2(-4f, 0f)));
         tabButtons.Add(CreateButton(tabBar.transform, "AccessibilitySettingsTab", "접근성", () => ShowPage(2),
-            new Vector2(0.666f, 0f), new Vector2(1f, 1f), new Vector2(4f, 0f), Vector2.zero));
+            new Vector2(0.5f, 0f), new Vector2(0.75f, 1f), new Vector2(4f, 0f), new Vector2(-4f, 0f)));
+        tabButtons.Add(CreateButton(tabBar.transform, "DeveloperSettingsTab", "개발", () => ShowPage(3),
+            new Vector2(0.75f, 0f), new Vector2(1f, 1f), new Vector2(4f, 0f), Vector2.zero));
 
-        pages = new GameObject[3];
+        pages = new GameObject[4];
         for (int index = 0; index < pages.Length; index++)
         {
             pages[index] = new GameObject($"SettingsPage_{index}", typeof(RectTransform));
@@ -237,6 +240,7 @@ public sealed class DungeonSettingsUiController :
         CreateDisplayPage(pages[0].transform);
         CreateAudioPage(pages[1].transform);
         CreateAccessibilityPage(pages[2].transform);
+        CreateDevelopmentPage(pages[3].transform);
 
         statusText = CreateText(
             panel.transform,
@@ -297,6 +301,46 @@ public sealed class DungeonSettingsUiController :
             value => UpdateSetting(data => data.highContrast = value));
         reducedMotionToggle = CreateToggleRow(page, "ReducedMotion", "모션 감소", 250f,
             value => UpdateSetting(data => data.reducedMotion = value));
+    }
+
+    private void CreateDevelopmentPage(Transform page)
+    {
+        developerModeToggle = CreateToggleRow(
+            page,
+            "DeveloperMode",
+            "개발자 모드",
+            16f,
+            value => UpdateSetting(data => data.developerMode = value));
+
+        TMP_Text description = CreateText(
+            page,
+            "DeveloperModeDescription",
+            "활성화하면 게임 화면 중상단에 디버그 팔레트 버튼이 나타납니다.",
+            18f,
+            TextAlignmentOptions.TopLeft,
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f));
+        SetOffsets(
+            description.rectTransform,
+            new Vector2(18f, -184f),
+            new Vector2(-18f, -100f));
+        description.textWrappingMode = TextWrappingModes.Normal;
+        description.color = DungeonUiTheme.TextSecondary;
+
+        TMP_Text warning = CreateText(
+            page,
+            "DeveloperModeWarning",
+            "상태를 바꾸는 디버그 명령이나 치트를 사용한 런은 저장 슬롯에 '디버그 사용'으로 표시됩니다.",
+            18f,
+            TextAlignmentOptions.TopLeft,
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f));
+        SetOffsets(
+            warning.rectTransform,
+            new Vector2(18f, -286f),
+            new Vector2(-18f, -202f));
+        warning.textWrappingMode = TextWrappingModes.Normal;
+        warning.color = DungeonUiTheme.Warning;
     }
 
     private void ShowPage(int index)
@@ -384,6 +428,7 @@ public sealed class DungeonSettingsUiController :
         edgeScrollToggle.SetIsOnWithoutNotify(data.edgeScroll);
         highContrastToggle.SetIsOnWithoutNotify(data.highContrast);
         reducedMotionToggle.SetIsOnWithoutNotify(data.reducedMotion);
+        developerModeToggle?.SetIsOnWithoutNotify(data.developerMode);
         statusText.text = settingsService.LastError;
         statusText.color = string.IsNullOrWhiteSpace(settingsService.LastError)
             ? DungeonUiTheme.TextSecondary

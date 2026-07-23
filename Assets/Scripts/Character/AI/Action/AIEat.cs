@@ -113,7 +113,8 @@ public class AIEat : AIActionSet
 
         if (CharacterWorkRoleUtility.TryGetWork(actor, out AbilityWork work))
         {
-            return work.IsOffDuty;
+            return work.IsOffDuty
+                || CharacterNeedCatalog.GetWeightedUrgency(actor, CharacterCondition.HUNGER) >= 0.35f;
         }
 
         return true;

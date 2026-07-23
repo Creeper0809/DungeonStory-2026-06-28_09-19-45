@@ -62,7 +62,11 @@ public sealed class DungeonItemDefinition
         float unitWeight = category switch
         {
             StockCategory.Food => 0.55f,
+            StockCategory.Water => 1.0f,
+            StockCategory.Medicine => 0.25f,
             StockCategory.Weapon => 2.25f,
+            StockCategory.Ammunition => 0.08f,
+            StockCategory.Fuel => 0.8f,
             StockCategory.Mana => 0.35f,
             _ => 1f
         };
@@ -70,7 +74,7 @@ public sealed class DungeonItemDefinition
         return new DungeonItemDefinition(
             itemId,
             name,
-            $"{name} stock",
+            $"{name} 재고",
             category,
             price,
             null,
@@ -81,6 +85,28 @@ public sealed class DungeonItemDefinition
     public static DungeonItemDefinition FromEquipmentId(string equipmentId)
     {
         string normalized = equipmentId?.Trim() ?? string.Empty;
+        CombatEquipmentDefinitionSO combatDefinition = Resources
+            .LoadAll<CombatEquipmentDefinitionSO>(ResourceCombatEquipmentCatalog.ResourcePath)
+            .FirstOrDefault(candidate => candidate != null
+                && string.Equals(candidate.EquipmentId, normalized, StringComparison.Ordinal));
+        if (combatDefinition != null)
+        {
+            StockCategory category = combatDefinition.Kind is CombatEquipmentKind.RangedWeapon
+                or CombatEquipmentKind.RecoverableThrowingWeapon
+                ? StockCategory.Weapon
+                : StockCategory.Weapon;
+            return new DungeonItemDefinition(
+                DungeonItemCatalogSO.EquipmentItemId(normalized),
+                combatDefinition.DisplayName,
+                combatDefinition.Description,
+                category,
+                Mathf.Max(1, Mathf.RoundToInt(combatDefinition.Weight * 18f)),
+                null,
+                Mathf.Max(0.1f, combatDefinition.Weight),
+                1,
+                normalized);
+        }
+
         string displayName = string.IsNullOrWhiteSpace(normalized)
             ? "Equipment"
             : normalized.Replace("weapon:", string.Empty)
@@ -116,6 +142,26 @@ public sealed class DungeonItemCatalogSO : ScriptableObject
         definition = items.FirstOrDefault(item => item != null
             && string.Equals(item.ItemId, normalized, StringComparison.Ordinal));
         if (definition != null)
+        {
+            return true;
+        }
+
+        if (SurvivalItemDefinitions.TryGetDefinition(normalized, out definition))
+        {
+            return true;
+        }
+
+        if (WildlifeItemDefinitions.TryGetDefinition(normalized, out definition))
+        {
+            return true;
+        }
+
+        if (DarkSurvivalItemDefinitions.TryGetDefinition(normalized, out definition))
+        {
+            return true;
+        }
+
+        if (CombatItemDefinitions.TryGetDefinition(normalized, out definition))
         {
             return true;
         }
@@ -184,7 +230,8 @@ public sealed class DungeonItemCatalogSO : ScriptableObject
             return Enum.IsDefined(typeof(StockCategory), category);
         }
 
-        return StockCategoryPersistenceId.TryParse(normalized, out category);
+        return StockCategoryPersistenceId.TryParse(normalized, out category)
+            || SurvivalItemDefinitions.TryGetStockCategory(normalized, out category);
     }
 
     public static bool TryGetEquipmentIdFromItemId(string itemId, out string equipmentId)
@@ -231,6 +278,21 @@ public sealed class ResourceDungeonItemCatalogProvider : IDungeonItemCatalogProv
         if (Catalog != null)
         {
             return Catalog.GetDefinitionOrDefault(itemId);
+        }
+
+        if (SurvivalItemDefinitions.TryGetDefinition(itemId, out DungeonItemDefinition survivalDefinition))
+        {
+            return survivalDefinition;
+        }
+
+        if (WildlifeItemDefinitions.TryGetDefinition(itemId, out DungeonItemDefinition wildlifeDefinition))
+        {
+            return wildlifeDefinition;
+        }
+
+        if (DarkSurvivalItemDefinitions.TryGetDefinition(itemId, out DungeonItemDefinition darkSurvivalDefinition))
+        {
+            return darkSurvivalDefinition;
         }
 
         return DungeonItemCatalogSO.TryGetStockCategoryFromItemId(itemId, out StockCategory category)

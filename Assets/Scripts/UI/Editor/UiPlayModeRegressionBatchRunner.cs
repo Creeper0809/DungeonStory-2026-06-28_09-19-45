@@ -24,7 +24,7 @@ public static class UiPlayModeRegressionBatchRunner
     private const string StartPartyRequestPath = "Temp/start-party-playmode.request";
     private const string SkillRuntimeRequestPath = "Temp/character-skill-runtime-playmode.request";
     private const string SkillRuntimeReportPath = "Temp/character-skill-runtime-playmode-report.txt";
-    private const string GameplayVerificationScenePath = "Assets/Scenes/SampleScene.unity";
+    private const string GameplayVerificationScenePath = "Assets/Scenes/GameplayScene.unity";
     private const string TitleVerificationScenePath = "Assets/Scenes/TitleScene.unity";
     private const double TargetTimeoutSeconds = 420d;
     private const double MissingReportGraceSeconds = 12d;

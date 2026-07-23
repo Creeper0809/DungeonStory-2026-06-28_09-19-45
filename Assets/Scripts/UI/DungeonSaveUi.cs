@@ -374,7 +374,8 @@ public sealed class DungeonSaveUiController : IStartable, IDisposable
     {
         DateTime savedAt = ParseTimestamp(info.SavedAtUtc).ToLocalTime();
         string time = savedAt == DateTime.MinValue ? "시간 정보 없음" : savedAt.ToString("M월 d일 HH:mm", CultureInfo.CurrentCulture);
-        return $"{time}\n{info.Day}일차 · {info.Money:N0} 골드";
+        string debugBadge = info.DebugModified ? " · 디버그 사용" : string.Empty;
+        return $"{time}\n{info.Day}일차 · {info.Money:N0} 골드{debugBadge}";
     }
 
     private static DateTime ParseTimestamp(string value)

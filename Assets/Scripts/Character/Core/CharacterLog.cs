@@ -119,6 +119,7 @@ public class CharacterLog : SerializedMonoBehaviour
         int entryId;
         if (lastLogTag == semanticKey && log.Count > 0)
         {
+            line = FormatRepeatedDisplayLine(log[log.Count - 1], line, count);
             log[log.Count - 1] = line;
             activities[activities.Count - 1] = activity;
             entryId = logEntryIds[logEntryIds.Count - 1];
@@ -160,25 +161,91 @@ public class CharacterLog : SerializedMonoBehaviour
             displayText,
             activity);
         bool wasPending = pendingDisplayEntryIds.Contains(entryId);
-        bool deferDisplay = narrativeService != null
+        string immediateLine = string.Empty;
+        bool usedImmediateLine = narrativeService != null
+            && narrativeService.TryBuildImmediateLine(this, entry, out immediateLine);
+        if (usedImmediateLine)
+        {
+            line = immediateLine.Trim();
+            int index = logEntryIds.IndexOf(entryId);
+            if (index >= 0 && index < log.Count)
+            {
+                log[index] = line;
+            }
+
+            entry = new CharacterLogEntry(
+                entryId,
+                activity.KindId,
+                line,
+                count,
+                displayText,
+                activity);
+        }
+
+        bool deferDisplay = !usedImmediateLine
+            && narrativeService != null
             && narrativeService.ShouldDeferDisplay(entry);
         SetDisplayPending(entryId, deferDisplay || wasPending);
         OnLogAdded?.Invoke(entry);
 
         if (deferDisplay)
         {
-            if (!narrativeService.RequestNarrative(this, entry))
-            {
-                narrativeService.TryApplyFallback(this, entry);
-            }
+            narrativeService.RequestNarrative(this, entry);
         }
         else if (wasPending)
         {
-            narrativeService?.TryApplyFallback(this, entry);
+            narrativeService?.RequestNarrative(this, entry);
         }
     }
 
+    private static string FormatRepeatedDisplayLine(string previousLine, string fallbackLine, int count)
+    {
+        if (count <= 1)
+        {
+            return fallbackLine;
+        }
+
+        string baseLine = StripRepeatSuffix(previousLine);
+        return string.IsNullOrWhiteSpace(baseLine)
+            ? fallbackLine
+            : $"{baseLine} x{count}";
+    }
+
+    private static string StripRepeatSuffix(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = line.Trim();
+        int marker = trimmed.LastIndexOf(" x", StringComparison.Ordinal);
+        if (marker < 0 || marker >= trimmed.Length - 2)
+        {
+            return trimmed;
+        }
+
+        for (int i = marker + 2; i < trimmed.Length; i++)
+        {
+            if (!char.IsDigit(trimmed[i]))
+            {
+                return trimmed;
+            }
+        }
+
+        return trimmed.Substring(0, marker).TrimEnd();
+    }
+
     public bool TryUpdateDisplayLine(int entryId, string expectedLine, string displayLine)
+    {
+        return TryUpdateDisplayLine(entryId, expectedLine, string.Empty, displayLine);
+    }
+
+    public bool TryUpdateDisplayLine(
+        int entryId,
+        string expectedLine,
+        string alternateExpectedLine,
+        string displayLine)
     {
         if (entryId <= 0 || string.IsNullOrWhiteSpace(displayLine))
         {
@@ -189,7 +256,9 @@ public class CharacterLog : SerializedMonoBehaviour
         int index = logEntryIds.IndexOf(entryId);
         if (index < 0
             || index >= log.Count
-            || !string.Equals(log[index], expectedLine, StringComparison.Ordinal))
+            || (!string.Equals(log[index], expectedLine, StringComparison.Ordinal)
+                && (string.IsNullOrWhiteSpace(alternateExpectedLine)
+                    || !string.Equals(log[index], alternateExpectedLine, StringComparison.Ordinal))))
         {
             return false;
         }

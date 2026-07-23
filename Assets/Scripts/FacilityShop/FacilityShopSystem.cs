@@ -495,14 +495,18 @@ public static class FacilityShopService
             return false;
         }
 
-        if (gameData.holdingMoney.Value < offer.Cost)
+        if (!DungeonDebugRuntimeRules.ShouldSkipCosts()
+            && gameData.holdingMoney.Value < offer.Cost)
         {
             result = new FacilityShopPurchaseResult(false, offer, offer.Cost, "자금 부족");
             FacilityShopPurchasedEvent.Trigger(result);
             return false;
         }
 
-        gameData.holdingMoney.Value -= offer.Cost;
+        if (!DungeonDebugRuntimeRules.ShouldSkipCosts())
+        {
+            gameData.holdingMoney.Value -= offer.Cost;
+        }
         string message = offer.ApplyPurchase(unlockState);
         result = new FacilityShopPurchaseResult(true, offer, offer.Cost, message);
         FacilityShopPurchasedEvent.Trigger(result);

@@ -13,6 +13,7 @@ public class AbilityMove : CharacterAbility
     private ICharacterAiSchedulingService aiSchedulingService;
     private Coroutine enterDungeonRoutine;
     private Coroutine activeActionMovementRoutine;
+    private Vector2Int? activeManualMoveDestination;
 
     public bool LastGridMoveWasBlocked { get; private set; }
 
@@ -224,6 +225,59 @@ public class AbilityMove : CharacterAbility
             StopCoroutine(activeActionMovementRoutine);
             activeActionMovementRoutine = null;
         }
+
+        if (activeManualMoveDestination.HasValue)
+        {
+            Vector2Int destination = activeManualMoveDestination.Value;
+            activeManualMoveDestination = null;
+            actor?.Brain?.CompleteManualMoveCommand(destination, succeeded: false);
+        }
+    }
+
+    public bool TryStartPlayerMove(Vector2Int destination, out string message)
+    {
+        CacheCommonReferences();
+        if (actor == null || grid == null)
+        {
+            message = "이동할 캐릭터나 그리드를 찾을 수 없습니다.";
+            return false;
+        }
+
+        if (!grid.IsValidGridPos(destination) || !grid.IsWalkable(destination))
+        {
+            message = "해당 칸으로 이동할 수 없습니다.";
+            return false;
+        }
+
+        Vector2Int start = grid.GetXY(transform.position);
+        if (start == destination)
+        {
+            actor.Brain?.CompleteManualMoveCommand(destination, succeeded: true);
+            message = "이미 해당 칸에 있습니다.";
+            return true;
+        }
+
+        GridPathSearchResult search = grid.SearchPath(start);
+        if (search == null || !search.ContainsPosition(destination))
+        {
+            message = "해당 칸까지 이어지는 경로가 없습니다.";
+            return false;
+        }
+
+        Queue<GridMoveStep> path = search.GetMovePath(position => position == destination);
+        if (path == null || path.Count == 0)
+        {
+            message = "이동 경로를 만들 수 없습니다.";
+            return false;
+        }
+
+        CancelActiveMovement();
+        actor.Brain?.BeginManualMoveCommand(destination);
+        activeManualMoveDestination = destination;
+        activeActionMovementRoutine = StartCoroutine(
+            TrackActionMovement(ExecutePlayerMove(path, destination)));
+        message = $"({destination.x}, {destination.y}) 칸으로 이동";
+        return true;
     }
 
     private void StartTrackedActionMovement(IEnumerator routine)
@@ -236,6 +290,19 @@ public class AbilityMove : CharacterAbility
     {
         yield return routine;
         activeActionMovementRoutine = null;
+    }
+
+    private IEnumerator ExecutePlayerMove(
+        Queue<GridMoveStep> path,
+        Vector2Int destination)
+    {
+        LastGridMoveWasBlocked = false;
+        yield return MoveByPath(path);
+        bool succeeded = !LastGridMoveWasBlocked
+            && grid != null
+            && grid.GetXY(transform.position) == destination;
+        activeManualMoveDestination = null;
+        actor?.Brain?.CompleteManualMoveCommand(destination, succeeded);
     }
 
     private AIAction GetCurrentAction()
@@ -383,9 +450,14 @@ public class AbilityMove : CharacterAbility
             return null;
         }
 
-        return actor != null && actor.Brain != null
-            ? actor.Brain.GetPathSearch(actor)
-            : grid.SearchPath(originalPos);
+        if (actor != null && actor.Brain != null)
+        {
+            return actor.Brain.GetPathSearch(actor);
+        }
+
+        return GridPathSearchBroker.TryGetSearch(grid, originalPos, () => true, out GridPathSearchResult search)
+            ? search
+            : null;
     }
 
     private void SnapToGridRowIfWalkable(Vector2Int gridPosition)
@@ -699,6 +771,10 @@ public class AbilityMove : CharacterAbility
 
         UpdateFacingForMovement(endPos.x - transform.position.x);
         transform.position = endPos;
+        if (blockedGridPosition.HasValue)
+        {
+            actor?.AiMemory?.RecordMovement(blockedGridPosition.Value, distance, true);
+        }
     }
 
     private bool TryRollbackForChangedGridBlock(
@@ -709,6 +785,13 @@ public class AbilityMove : CharacterAbility
         if (!blockedGridPosition.HasValue || grid == null)
         {
             return false;
+        }
+
+        if (DefenseEngagementRuntime.Active?.IsCellReservedForOther(actor, blockedGridPosition.Value) ?? false)
+        {
+            transform.position = blockedFallbackPosition;
+            SetGridMoveBlocked();
+            return true;
         }
 
         int currentGridVersion = grid.version;
@@ -733,7 +816,8 @@ public class AbilityMove : CharacterAbility
         return step != null
             && step.MoveType == GridMoveType.Walk
             && grid != null
-            && grid.IsMovementBlockedByWall(step.To);
+            && (grid.IsMovementBlockedByWall(step.To)
+                || (DefenseEngagementRuntime.Active?.IsCellReservedForOther(actor, step.To) ?? false));
     }
 
     private bool IsAtStepStart(GridMoveStep step)
@@ -746,6 +830,11 @@ public class AbilityMove : CharacterAbility
     private void SetGridMoveBlocked()
     {
         LastGridMoveWasBlocked = true;
+        actor?.AiMemory?.RecordMovement(
+            grid != null ? grid.GetXY(transform.position) : Vector2Int.zero,
+            0f,
+            false,
+            "길 막힘");
         if (actor == null || actor.Brain == null)
         {
             return;

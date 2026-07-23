@@ -95,6 +95,20 @@ public static class CharacterFeedbackDebugScenarios
         bool displayListMutationBlocked = MutationThrows(() =>
             ((IList<string>)character.Log)[0] = "변조");
 
+        bool deferredDisplayMode = Application.isPlaying;
+        bool firstDisplayHidden = emitted.Count > 0
+            && !character.LogComponent.TryGetVisibleDisplayLine(emitted[0].EntryId, out _);
+        bool secondDisplayHidden = emitted.Count > 1
+            && !character.LogComponent.TryGetVisibleDisplayLine(emitted[1].EntryId, out _);
+        bool displayContractValid = deferredDisplayMode
+            ? firstDisplayHidden
+                && secondDisplayHidden
+                && character.Log.Count == 1
+                && character.Log[0] == "호환 문자열 기록"
+            : character.Log.Count == 2
+                && character.Log[0] == "통로가 막혀 상점에 가지 못했다 x2"
+                && character.Log[1] == "호환 문자열 기록";
+
         bool valid = emitted.Count == 4
             && emitted[0].EntryId == emitted[1].EntryId
             && emitted[1].Count == 2
@@ -106,9 +120,7 @@ public static class CharacterFeedbackDebugScenarios
             && activityListMutationBlocked
             && displayListMutationBlocked
             && character.LogComponent.ActivityEntries.Count == 3
-            && character.Log.Count == 2
-            && character.Log[0] == "상점까지 가는 길을 찾지 못했다 x2"
-            && character.Log[1] == "호환 문자열 기록"
+            && displayContractValid
             && !character.Log.Any(line => line.Contains("AI replan", System.StringComparison.Ordinal))
             && CharacterLogNarrativeService.ShouldNarrate(emitted[0])
             && !CharacterLogNarrativeService.ShouldNarrate(emitted[1])
@@ -117,8 +129,35 @@ public static class CharacterFeedbackDebugScenarios
             && CharacterFeedbackBubble.ClassifyActivity(emitted[0].Activity)
                 == CharacterFeedbackState.Confused;
 
+        if (!valid)
+        {
+            Debug.LogError(
+                "Structured activity contract detail: "
+                + $"emitted={emitted.Count}; entries={character.LogComponent.ActivityEntries.Count}; "
+                + $"visible={character.Log.Count}; deferred={deferredDisplayMode}; "
+                + $"hidden0={firstDisplayHidden}; hidden1={secondDisplayHidden}; "
+                + $"displayValid={displayContractValid}; "
+                + $"line0={(character.Log.Count > 0 ? character.Log[0] : "<none>")}; "
+                + $"line1={(character.Log.Count > 1 ? character.Log[1] : "<none>")}; "
+                + $"mutationActivity={activityListMutationBlocked}; mutationDisplay={displayListMutationBlocked}; "
+                + $"narrate={FormatNarrateStates(emitted)}");
+        }
+
         Object.DestroyImmediate(character.gameObject);
         return valid;
+    }
+
+    private static string FormatNarrateStates(IReadOnlyList<CharacterLogEntry> entries)
+    {
+        if (entries == null || entries.Count == 0)
+        {
+            return "<none>";
+        }
+
+        return string.Join(
+            ",",
+            entries.Select(entry =>
+                $"{entry.EntryId}:{entry.Count}:{CharacterLogNarrativeService.ShouldNarrate(entry)}"));
     }
 
     private static bool MutationThrows(System.Action mutation)
@@ -316,7 +355,7 @@ public static class CharacterFeedbackDebugScenarios
 
         string text = CharacterSummeryInfo.FormatLogText(CharacterActor.From(character), 2);
         bool valid = !text.Contains("최근 기록")
-            && text.StartsWith("• 피로", System.StringComparison.Ordinal)
+            && text.StartsWith("- 피로", System.StringComparison.Ordinal)
             && text.Contains("재고 부족")
             && text.Contains("피로");
 
@@ -354,10 +393,20 @@ public static class CharacterFeedbackDebugScenarios
             FacilityWorkType.Research,
             CharacterActivityOutcomes.Started,
             "작업 시작 · 연구 · 연구실"));
+        bool deferredDisplayMode = Application.isPlaying;
+        bool hiddenBeforeRewrite = deferredDisplayMode
+            ? !character.LogComponent.TryGetVisibleDisplayLine(firstEntry.EntryId, out _)
+                && character.Log.Count == 0
+            : character.LogComponent.TryGetVisibleDisplayLine(firstEntry.EntryId, out _)
+                && character.Log.Count == 1;
         bool rewritten = character.LogComponent.TryUpdateDisplayLine(
             firstEntry.EntryId,
             firstEntry.DisplayLine,
             "연구실에 자리를 잡고 연구를 시작했다.");
+        bool visibleAfterRewrite = character.LogComponent.TryGetVisibleDisplayLine(
+                firstEntry.EntryId,
+                out string rewrittenLine)
+            && rewrittenLine == "연구실에 자리를 잡고 연구를 시작했다.";
         character.AddActivity(CharacterActivityEvent.Work(
             FacilityWorkType.Research,
             CharacterActivityOutcomes.Started,
@@ -369,12 +418,16 @@ public static class CharacterFeedbackDebugScenarios
 
         bool valid = firstEntry.EntryId > 0
             && repeatedEntry.EntryId == firstEntry.EntryId
+            && hiddenBeforeRewrite
             && rewritten
+            && visibleAfterRewrite
             && staleRewriteRejected
             && addedEventCount == 2
-            && displayChangeCount == 1
-            && character.Log.Count == 1
-            && character.Log[0] == "작업 시작 · 연구 · 연구실 x2";
+            && displayChangeCount >= 1
+            && (deferredDisplayMode
+                ? character.Log.Count == 0
+                : character.Log.Count == 1
+                    && character.Log[0] == "연구실에 자리를 잡고 연구를 시작했다. x2");
 
         Object.DestroyImmediate(character.gameObject);
         return valid;

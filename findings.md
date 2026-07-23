@@ -179,3 +179,184 @@
 - Generated/offense skill verification must treat control and setup modules as real combat actions. Looking only for `OffenseDamageEffect` made valid vulnerability, delay, multi-target, and conditional-amplify skills invisible to the direct-play battle driver.
 - Late-stage direct-play proof needs a stronger gate than `CanJoinExpedition`. The product rule correctly blocks only below 25% health or 80 stress, but a player-style final boss run should wait for a healthy trained party and spend camp/medicine before engaging.
 - The previous 900x1600 HUD width gap is fixed. Upper-right controls are clamped to the canvas width, top/bottom tab buttons no longer retain template widths, and `Temp/resolution-matrix-report.txt` now verifies 900x1600 gameplay bounds with `RESULT=PASS; failures=0`.
+
+## 2026-07-22 Work amount and construction findings
+
+- GameplayScene PlayMode verifiers must first complete the current start-party fallback before testing world input. Otherwise the owner-selection overlay can remain visible while tests interact with UI behind it, producing false world-click failures.
+- `Grid.CountBuilding(BuildingSO)` counts any occupant with the same `GridId`, including a construction site using the target building ID. Tests that need to prove "not instantly built" should inspect the target building layer at the footprint, not the aggregate count.
+- Work target scoring needs an explicit facility-role fit term. Without it, a generally supported work type such as Guard can compete on unrelated facilities and flatten species/work specialization. Guard now favors Training/Security facilities, while Research favors Research facilities.
+## 2026-07-23 Nameplate, wildlife motion, and zoom findings
+
+- `WorldCharacterNameplate` inherited the actor sprite sorting layer and added only `+36` order. Dungeon walls, floors, and furniture can use later sorting layers or much higher orders, so the text can be visibly covered even while the character sprite itself remains readable.
+- `CameraManager` already reads unscaled wheel and keyboard zoom input, but `blockWheelZoomOverUi` calls the broad `IUiPointerBlocker.IsPointerOverUi()`. Full-screen HUD graphics count as UI hits, which suppresses wheel zoom over most or all of the visible world.
+- Wildlife ecology produces meaningful intents, but `ChooseReachablePosition` samples only `origin.x +/- distance`, picks an almost deterministic best score, and immediately becomes eligible for another decision after a route finishes. On a side-view exterior surface this presents as repeated left/right pacing.
+- Natural wildlife motion needs to preserve the one-dimensional walkable surface while varying cadence and intent: weighted target choice, direction momentum, arrival dwell, sprite facing, and eased/bobbed locomotion are the appropriate fixes; allowing arbitrary vertical cells would reintroduce air/wall traversal bugs.
+- The gameplay camera uses the URP `UnityEngine.Rendering.Universal.PixelPerfectCamera`, not the legacy `UnityEngine.U2D` component. Zoom must enter the URP component's Cinemachine-compatible mode before assigning a continuous orthographic size, or `OnPreCull` restores the baseline every frame.
+- Runtime sampling after the wildlife changes showed intent-driven cadence rather than synchronized pacing: most animals remained at forage/drink/rest targets while only one moved at a time, and individual positions changed by only zero to two cells over the next sample window.
+
+## 2026-07-23 Customer checkout patience audit
+
+- Staffed shops already keep customers in `WaitForServingWorker` and raise `Operate` urgency, but the wait has no timeout or personality stage. A shop without a worker therefore holds every customer forever.
+- `CharacterAiPersonality.patience` and trait/species `waitPatienceMultiplier` exist, but no runtime checkout path consumes the latter.
+- `AbilityShopping` always counts a finished interaction as a completed visit. An abandoned checkout needs a separate outcome so the customer avoids that shop without consuming the remaining visit, allowing Utility AI to choose an alternative.
+- The action-phase/nameplate path already exposes current AI phases. Checkout feedback can remain lightweight by updating that phase and using one-shot event alerts instead of adding a new always-visible panel.
+- A queue reaction must not consume the customer's remaining visit. Marking only the abandoned facility as visited lets the existing shopping Utility AI select another reachable shop and naturally fall back to looking around or exiting when none remain.
+- Runtime verification showed the staged path is deterministic at accelerated game speed: an impatient customer reached abandonment, released the queue, lost mood, retained a negative personal facility memory, emitted both service and abandonment alerts, and exposed `구매 포기` as the visible action phase.
+# 2026-07-23 Paused stair and low-needs AI audit
+
+- `CharacterVisual.HideForTraversal` uses `Time.realtimeSinceStartup`, `WaitForSecondsRealtime`, and an unscaled expiry check. Therefore the stair coroutine correctly pauses on scaled waits, but its visibility fail-safe restores the actor while the game remains paused.
+- `CharacterAiDecisionContext.Capture` chooses its strongest need from every registered need. `FUN` can therefore drive `EmergencyScore`, while `BuildEmergencyJobGivers` has no fun response and falls through to work/wait.
+- Emergency job construction currently adds only the single strongest need action. If that facility/action is unavailable, another simultaneously critical survival need is not tried before wait.
+- `AIBrain.UseOwnerWorkActions` omits Eat, Rest, Toilet, and Hygiene. Owners with depleted needs have no self-care action to select.
+- `AIEat.CanStart` rejects every on-duty worker. Hunger is not part of `WorkDutyController.ShouldTakeOffDuty`, so a starving on-duty worker can remain unable to eat indefinitely.
+- Stair traversal itself already uses scaled `WaitForSeconds` and scaled movement. The only pause leak was `CharacterVisual`'s realtime fail-safe, so the correct fix is to scale the fail-safe rather than alter stair timing or DOTween globally.
+- Low hunger should interrupt current work without switching the worker off duty. Sending hunger through the off-duty state breaks return-to-work semantics and makes ordinary meals look like schedule changes.
+- Emergency selection must retain every urgent survival candidate in weighted order. Choosing only one need makes a missing facility turn a solvable hunger/rest/hygiene combination into a generic wait.
+- The focused naturalness regression suite passes after excluding leisure from emergency selection, adding survival fallbacks, and exposing owner self-care actions. Two broader `StaffDutyDebugScenarios` cases around emergency-priority and expedition-return wake-up remain separate pre-existing failures and were not counted as proof for this fix.
+
+# 2026-07-23 Stationary AI fallback audit
+
+- The reported actor is not movement-locked. Its debug panel shows `Emergency -> WaitJobGiver`, no target, and every self-care action rejected by `CanStart`, so the pipeline intentionally commits a stationary wait.
+- A wait action is currently allowed to be the terminal fallback even when the actor is healthy enough to move. Repeating that fallback makes a living actor look frozen despite the BT and scheduler continuing to tick.
+- Low mood already has a mood-impulse model, but several impulse types map back to `Wait`; without a guaranteed locomotion/micro-action fallback, bad mood can still present as standing in place.
+- `AIWait` does request a moving idle behavior, but high recent movement pressure selects `InspectFacilityIdleBehavior`, whose implementation is only `StartWait`. The unresolved emergency then selects the same branch again.
+- Queue waiting is the only stationary wait that should remain intentionally static. Ambient inspection, weather shelter, complaint, and unresolved-need fallbacks need a bounded pause followed by movement or a fresh decision.
+- Routine/job-giver mood bias alone was insufficient because the final routine-group multiplier could make ordinary work win again. Low-mood autonomy therefore has to be enforced once more at the final cross-group candidate comparison.
+- The fixed idle path keeps deliberate queue/chat waits bounded, converts inspection and generic wait into reachable roaming, and ends a failed no-path wait quickly so the next decision can retry instead of holding an infinite action.
+- A real GameplayScene probe with no LLM mood impulse held the actor at mood 17-20, selected `RoutineUtility -> Wait -> 기분 내키는 대로 배회`, and visited six distinct grid cells during the observation window.
+
+# 2026-07-23 Dark survival V11 findings
+
+- Runtime-only filth work targets cannot be resolved through the static `BuildingSO` catalog. Their information panel must format the runtime `WorldFilthWorkTarget` directly.
+- Runtime work targets created outside prefab injection must receive `ConstructBuildableObject(...)` before initialization so grid and work services are available deterministically.
+- Water Tilemap world X is mirrored from logical grid X in this project; verification must query the runtime grid-to-tile conversion rather than assume identical coordinates.
+- `Tilemap.GetUsedTilesCount()` reports distinct tile assets, not occupied cells. Visual verification therefore counts source-cell tiles explicitly.
+- Filth priority is most reliable as target-owned runtime state: it raises Clean urgency and wakes eligible workers without mutating shared SO data.
+- Desperate drinking needs two distinct contracts: stored/clean facility water wins first, while disabling those sources must expose the external unsafe-water fallback and its infection cost.
+- A permanent social-memory entry uses `validUntil = 0`; restore must retain zero-duration snapshots because zero means indefinite, not already expired.
+- Mood modifies breakdown probability, while `selfCare` and `patience` provide a bounded personality adjustment. Even the most stable personality cannot suppress a forced 100-burden breakdown.
+
+# 2026-07-23 Exterior habitat decoration findings
+
+- The ecosystem already consumed `Grass` and `Brush` resources, but had no world visual bound to those values; the missing link was presentation, not another food simulation.
+- The authored flower PNGs are imported as six full cluster sprites. Layering several clusters at stable offsets produces a readable dense patch and lets resource thresholds remove whole clusters without modifying source art.
+- Trees and rocks must remain nonblocking visual decoration. They use `OutsideObject`, while wildlife remains on `Default`, so actors pass in front without changing pathfinding or grid occupancy.
+- `Grass` and `Brush` intent filtering is required when habitat radii overlap; a foraging animal now consumes only forage patches and a drinking animal only water patches.
+- Pure EditMode ecosystem contracts must not create scene decoration roots. Automatic decoration creation is PlayMode-only, while the focused visual contract explicitly creates and disposes its runtime.
+
+# 2026-07-23 Exterior pond visibility findings
+
+- The original default water selector admitted DropZone cells and picked the lowest X cells. That put two tiny sources at Grid `(0,0)` and `(1,0)`, visually buried beside the entrance instead of reading as an exterior water feature.
+- A runtime Tile uses `TileFlags.LockColor` by default, so `Tilemap.SetColor` did not tint the generated white/gray sprite. Setting `TileFlags.None` is required for clean/unsafe/foul source colors to appear.
+- The logical grid world position is the floor of a three-world-unit cell, while a Tilemap sprite is centered in that cell. A half-height water sprite therefore needs a `0.25 - CellWorldHeight/2` local Y offset to sit on the ground.
+- The longest exterior surface run is Grid X `31..59`. Placing shallow water at `56..58` and deep water only at the outer boundary `59` keeps the pond reachable without partitioning the exterior route.
+
+# 2026-07-23 Zoom sky and centered dungeon findings
+
+- The solid sky previously followed only the physical world width. At maximum zoom-out the camera viewed Y `-6..15`, while the sky covered only about `-0.29..14.29`, exposing the camera clear color at the frame edges.
+- Background coverage must be the union of padded physical-world bounds and the current orthographic viewport. Recomputing on camera position, size, or aspect changes keeps every zoom level covered without stretching decorative foreground sprites.
+- The 27-column dungeon interior was authored at Grid X `4..30` inside a 60-column world. A centered start is X `17`, so both area tags and all 93 authored placements require the same `+13` translation.
+- After centering, the entrance resolves to `(17,0)`, the drop zone to X `14..16`, and the interior to X `17..43`. The camera world X is `-29.5`, exactly matching the dungeon interior center.
+- Runtime wall-tile inspection confirms outer-wall tiles at both centered boundaries X `17` and X `43`; the maximum zoom-out camera capture shows both edges in frame.
+
+# 2026-07-23 Entrance outer-wall gap finding
+
+- The entrance door correctly occupied Grid X `14..16`, but three invisible `ExteriorZoneMarker` instances shared X `13` through fixture/overlay layers.
+- `GridWallTileCalculator` used `GridCell.HasOccupant()` for automatic side walls, so those nonstructural markers made X `13` look like a building and pushed the visible wall outward to X `12`.
+- Automatic side-wall topology now reads only `Building` and `Hallway` structural content. Dynamic actors, items, wildlife, filth, construction overlays, and exterior markers no longer move outer walls.
+- Fresh PlayMode verification reports rendered wall `X12=false`, `X13=true`; the entrance arch and wall are visually adjacent.
+
+# 2026-07-23 Exact world click finding
+
+- `WorldInfoClickSelectionService` first used exact `Physics2D.OverlapPointAll` hits, but then fell back to `GridCell.GetBuilding()` whenever no collider was hit.
+- `GridCell.GetBuilding()` intentionally searches every occupant layer and ranks hallway last, so a bare floor click still returned the cell's `Hallway` object and opened corridor information.
+- Ordinary facilities already own runtime colliders. Their selection now requires the pointer world point to overlap that collider; sharing a grid cell or being nearby is not sufficient.
+- Structural wall and interior-door visuals are tile-based and do not always own colliders, so they retain a strictly same-cell `GridLayer.Building` fallback. Hallways, dungeon doors, and normal facilities are excluded from that fallback.
+- The actual pointer regression clicked a facility collider and opened only that facility, clicked a collider-free hallway cell `(28, 0)` and opened nothing, then verified character-over-building priority. The report finished with zero failures, errors, or warnings.
+
+# 2026-07-23 Consecutive wildlife click finding
+
+- `WildlifeInfoPanel.OnTriggerEvent` assigned `current = wildlife` before calling `popupService.CloseAll()`.
+- On the first click the panel was not yet in the popup stack, so the assignment survived. On a consecutive click, `CloseAll()` closed the already-open wildlife panel and `OnClose()` reset `current` to null after the new assignment.
+- Clicking a building between wildlife clicks removed the wildlife panel from the popup stack, which explains why the next wildlife click appeared to work again.
+- The panel now closes the prior popup stack first and assigns the clicked wildlife afterward. Repeated clicks therefore refresh and retain the same target instead of clearing it.
+- The Input System regression performs two consecutive clicks at the same wildlife collider and verifies `CurrentWildlife` and the visible panel after both clicks.
+
+# 2026-07-23 Wildlife horizontal-facing finding
+
+- Wildlife facing used `step.To.x - step.From.x`, but this project's `Grid.GetWorldPos` maps logical X with `origin.x - gridX`; increasing Grid X therefore moves left on screen.
+- The source animal sheets face right, so rightward world movement must keep `flipX=false` and leftward world movement must set `flipX=true`.
+- Facing now uses the actual world-space X delta between movement-step endpoints, which remains correct if the Grid origin or coordinate mapping changes again.
+- The focused natural-motion contract and live GameplayScene checks pass in both directions for every currently spawned species.
+
+# 2026-07-23 Defense interception audit
+
+- Invasion intruders currently run an independent movement coroutine and never enter an engaged state. Defense facilities can delay them, but guards do not stop that coroutine.
+- `SuppressPriorityTarget` moves the guard onto the intruder's exact cell and applies one-way damage every `0.55s`; the intruder neither retaliates nor stops advancing.
+- Guard work currently behaves like ordinary facility work. `InvasionSpawnedEvent` has no runtime listener that assigns on-duty Guard workers to an intruder.
+- Character zero health immediately triggers death and despawn, so retreat and replacement policy directly controls guard survival.
+- The existing boss-only owner rally chooses a shared hallway target rather than an Administration room. It must be replaced by evacuation for every invasion.
+- The defense feature panel already owns threat, intruder, facility, and report sections, making it the correct home for policy editing and live engagement status. Several strings in that section are mojibake and need replacement while it is changed.
+- The current top-level save version is V11 and invasion state already has a dedicated snapshot, so V12 can extend that boundary without mixing policy state into character or shared SO assets.
+
+# 2026-07-23 Defense interception completion findings
+
+- The live intruder coroutine must consult the engagement runtime before every Grid step. Merely pausing facility damage is insufficient because a previously started movement path can otherwise cross the frontline.
+- Combat presentation must animate only the actor's visual child. Moving the actor root for a lunge corrupts logical Grid occupancy and can let the intruder or guard appear to cross the line.
+- Policy switching keeps the same engagement and intruder reservation while swapping lead and reserve positions. Verification must follow the intruder runtime rather than assume a replacement engagement ID.
+- Owner final defense can be planned while the intruder is still several cells away. `InterceptPlanned` is expected until the intruder reaches the reserved stop cell; only then does reciprocal combat begin.
+- A real PlayMode run held the intruder at `(1,0)` against a lead at `(2,0)` for at least three exchanges, with reciprocal damage and no additional facility damage. Policy switching changed the lead without moving the intruder.
+- The owner reached fallback evacuation cell `(41,2)`. After the non-owner frontline collapsed, final combat held the intruder at `(40,2)` against the owner at `(41,2)` for 20 exchanges with no reserve.
+- Unity 6000.3.8 emits one editor-startup `The referenced script (Unknown) on this Behaviour is missing!` warning despite project-wide loaded-scene, prefab, ScriptableObject, animator, renderer-feature, and volume-profile scans finding no missing project scripts. Unity issue UUM-133323 lists the fix in 6000.3.12f1. After clearing that startup-only engine warning, the complete defense probe produced `Error 0 / Warning 0`.
+
+# 2026-07-23 Developer mode findings
+
+- Commands remain maintainable when each provider declares category, exact target contract, mutation status, and execution; the registry validates 112 unique IDs.
+- Exact targeting uses pointer colliders for actors/items/facilities and only the resolved cursor cell for GridCell commands. There is no nearest-target fallback.
+- Pure overlays do not mark a run modified. Stateful commands do, while palette visibility, targeting, cheats, and overlays reset when developer mode is disabled or a save is loaded.
+- The palette remains non-modal at `1600x900` and becomes a bounded scrollable bottom sheet at `900x1600`.
+- Camera Capture comparison confirmed the Grid overlay appears only while enabled and leaves no lines, labels, or pooled renderer residue after disable.
+
+# 2026-07-23 Construction material delivery audit
+
+- `WorkOrderRuntime.TryCreateConstructionOrder` immediately requests every missing material through `WorldItemStackRuntime.TryRequestFacilityDelivery`.
+- Construction readiness correctly consumes only `FacilityBuffer` stock at the construction destination, so the expected final step is a worker deposit.
+- The suspicious path is the delivery-request implementation: it may be representing demand by creating a visible `Loose` stack at the construction cell instead of reserving physical stock at its warehouse/source location.
+- Correct behavior is source-preserving: order creation creates demand/reservations, pickup removes quantity from the warehouse stack, and only worker deposit creates the construction-site buffer.
+- `TryRequestFacilityDelivery` delegates part of its work to a dedicated `RequestLooseStockDelivery` method. The construction bug is therefore localized around request-time stock conversion and the haul-plan candidate rules.
+- Root cause confirmed: `TryRequestFacilityDelivery` calls `warehouse.Inventory.Withdraw(...)` immediately, removes the physical `Stored` quantity, then respawns it at the warehouse cell as a destination-tagged visible `Loose` stack.
+- The stack is not teleported to the construction cell, but it is incorrectly dropped onto the warehouse floor before any worker pickup. That is the yellow pile visible immediately after placement.
+- The fix must let destination-tagged warehouse stock remain `Stored` and hidden, make it haulable only as outbound reserved stock, and withdraw aggregate warehouse inventory only when the worker actually picks it up.
+- Both pickup APIs currently only decrement the selected world stack and add it to `CharacterCarryInventory`; they do not touch `WarehouseInventory`. This confirms the aggregate withdrawal was intentionally front-loaded and must move into pickup for outbound stored stacks.
+- Facility deposit already has the correct endpoint: carried items become `FacilityBuffer` only after the worker reaches the destination.
+- The haul planner already understands destination-tagged stacks and routes them to `FacilityBuffer`, including multi-pickup plans and partial carry quantities.
+- A focused extension is sufficient: allow only destination-tagged `Stored` stacks as outbound haul candidates, then perform the matching warehouse aggregate withdrawal atomically during pickup.
+- Stored-stack save restoration currently rebuilds each warehouse aggregate from `destinationId` values prefixed with `warehouse:`. Overwriting that field with a construction destination would lose warehouse ownership on reload.
+- Outbound stock therefore needs separate source-storage metadata. Cancellation must clear the delivery destination and merge the reserved quantity back into normal stored stock rather than deleting it.
+- `DungeonPhysicalItemSaveData` currently enforces nested version 1 exactly. Source-storage ownership can be added as an optional serialized field while retaining version 1 compatibility; older V12 saves deserialize the new field as empty.
+- `WarehouseInventory` exposes bounded `Withdraw` and `Deposit` operations but no reservation model. Reservation should remain physical-stack metadata, with pickup performing `Withdraw` and rolling back via `Deposit` if carry insertion fails.
+- Existing item regressions explicitly expect warehouse stock to drop at request time, so they currently preserve the defect. They must assert stock remains unchanged and no visible loose stack appears until pickup, then assert the aggregate drops at pickup.
+- `BuildPlacementUxPlayModeVerifier` bypasses hauling by spawning a `FacilityBuffer` directly at the site. It cannot be final proof for this fix and needs either a real-haul path or a separate focused pointer/play verifier.
+- The first live haul exposed a second root cause: warehouse storage IDs use `BuildableObject.GridId`, which is the shared building-definition ID. Two warehouses of the same type both became `warehouse:1050`.
+- The worker reached the reserved stack's physical warehouse, but pickup resolved the other same-type warehouse by the colliding ID and could not withdraw its stock. Warehouse ownership must use a per-building persistent/runtime instance key.
+- Warehouse keys now use `building definition ID + center grid position`, which is stable across saves and unique for same-type warehouses. Legacy two-part IDs are normalized by matching the saved stack position during restore.
+
+## 2026-07-23 Medieval dark fantasy combat V13
+
+- The defense and offense loops previously owned separate damage assumptions. Both now route attacks through `ICombatResolutionService`, with adapters supplying real Grid distance/LOS or formation distance/cover.
+- The active equipment instance, not a character template, is the authoritative source for range profiles, attack verb, quality, loaded ammunition, fire modes, recoverable throws, armor layers, shield state, and durability.
+- Wildlife hunting still used a bespoke random hit roll after defense and offense had moved to the shared core. It now uses the same line-of-sight, friendly-fire, cover, range, evasion, body-part, and presentation rules.
+- Wildlife uses a deliberately smaller body profile: head, torso, and combined limbs. Limb damage lowers mobility/evasion; vital-part destruction kills; the profile is persisted in wildlife save data.
+- Ranged hunters now seek a valid firing cell instead of always pathing adjacent, refuse unsafe friendly-fire lines, reload from their physical carry inventory over scaled game time, and stop cleanly when ammo or a firing position is unavailable.
+- A PlayMode command probe exposed a manual-move lock leak: owner evacuation could cancel the movement coroutine without clearing `AIBrain.manualCommandActive`. `AbilityMove.CancelActiveMovement` now completes cancelled manual commands and releases the lock.
+- Live defense verification retained the intended phase order: 12-second external rally with guards waiting, dispatch only after breach, then four held reciprocal exchanges on adjacent cells.
+- Unity Console finished at `Error 0 / Warning 0`. The MCP camera preview renderer failed twice for the live camera, while Unity's direct Game View screenshot succeeded.
+## 2026-07-23 Construction material delivery
+
+- The yellow pile was not a harmless preview. `TryRequestFacilityDelivery` withdrew aggregate warehouse stock and respawned it as a visible `Loose` stack at the warehouse cell as soon as the construction order was created.
+- Construction readiness already consumed only `FacilityBuffer` stock, so the defect was isolated to the request/pickup boundary.
+- Warehouse building-definition IDs are shared by every instance. Using only `GridId` as storage identity caused two same-type warehouses to collide; storage IDs now include the warehouse grid position.
+- The correct three-stage ownership model is now explicit: ordinary hidden `Stored` stock, destination-reserved hidden `Stored` stock, then carried stock and destination `FacilityBuffer`.
+- A delivery request does not alter aggregate warehouse inventory. Pickup atomically withdraws it, and failed carry insertion deposits it back.
+- The pointer-driven build verifier previously spawned `FacilityBuffer` stacks directly. That shortcut was removed so it cannot hide a future request-time drop regression.
+- The work-amount save contract had a stale `save.version == 9` assertion despite the product using V12; the assertion now follows `DungeonGameSaveData.CurrentVersion`.

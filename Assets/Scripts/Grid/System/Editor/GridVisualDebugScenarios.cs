@@ -29,6 +29,7 @@ public static class GridVisualDebugScenarios
         List<string> errors = new List<string>();
         RunScenario("sprite tile visual footprint alignment", VerifySpriteTileTransformMatchesGridFootprint, errors);
         RunScenario("structural wall keeps full-height render", VerifyStructuralWallKeepsFullHeightRender, errors);
+        RunScenario("runtime markers do not shift automatic outer walls", VerifyRuntimeMarkersDoNotShiftAutomaticOuterWalls, errors);
         RunScenario("interior wall ceiling overlay renders in front", VerifyInteriorWallCeilingOverlayRendersInFront, errors);
         RunScenario("dungeon door keeps original three-cell art", VerifyDungeonDoorKeepsOriginalArt, errors);
         RunScenario("interior door fits one wall cell", VerifyInteriorDoorFitsOneCell, errors);
@@ -150,6 +151,43 @@ public static class GridVisualDebugScenarios
         Object.DestroyImmediate(wallTile);
         Object.DestroyImmediate(floorTile);
         return rendered;
+    }
+
+    private static bool VerifyRuntimeMarkersDoNotShiftAutomaticOuterWalls()
+    {
+        Grid grid = new Grid(5, 1);
+        TestGridOccupant content = new TestGridOccupant(1);
+        TestGridOccupant floorMarker = new TestGridOccupant(2);
+        TestGridOccupant wallMarker = new TestGridOccupant(3);
+        TestGridOccupant ceilingMarker = new TestGridOccupant(4);
+        Vector2Int markerPosition = new Vector2Int(2, 0);
+        Vector2Int contentPosition = new Vector2Int(3, 0);
+
+        bool registered = grid.RegisterOccupant(
+                content,
+                GridLayer.Hallway,
+                new[] { contentPosition },
+                false)
+            && grid.RegisterOccupant(
+                floorMarker,
+                GridLayer.FloorOverlay,
+                new[] { markerPosition },
+                false)
+            && grid.RegisterOccupant(
+                wallMarker,
+                GridLayer.WallFixture,
+                new[] { markerPosition },
+                false)
+            && grid.RegisterOccupant(
+                ceilingMarker,
+                GridLayer.CeilingFixture,
+                new[] { markerPosition },
+                false);
+
+        HashSet<Vector2Int> walls = new GridWallTileCalculator().GetWallTilePositions(grid);
+        return registered
+            && walls.Contains(markerPosition)
+            && !walls.Contains(markerPosition + Vector2Int.left);
     }
 
     private static bool VerifyInteriorWallCeilingOverlayRendersInFront()
@@ -640,6 +678,19 @@ public static class GridVisualDebugScenarios
                 false,
                 "Grid visual fixture has no blueprint research runtime.");
         }
+    }
+
+    private sealed class TestGridOccupant : IGridOccupant
+    {
+        public TestGridOccupant(int gridId)
+        {
+            GridId = gridId;
+        }
+
+        public int GridId { get; }
+        public bool IsGridDestroyed => false;
+        public bool IsGridVisitable => false;
+        public bool IsGridMovement => false;
     }
 
     private sealed class NoopWorldInfoClickSelector : IWorldInfoClickSelector

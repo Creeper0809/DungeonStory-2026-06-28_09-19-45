@@ -74,10 +74,71 @@ public class GridBuildingPlacementService
         this.grid = grid;
     }
 
-    public bool TryPlaceBuilding(BuildingSO buildingData, Vector2Int position, out string errorMessage)
+    public bool TryPlaceConstructionSite(BuildingSO buildingData, Vector2Int position, out string errorMessage)
     {
         if (!CanPlaceBuilding(buildingData, position, out errorMessage))
         {
+            return false;
+        }
+
+        if (WorkOrderRuntime.Active == null)
+        {
+            return TryPlaceBuildingImmediate(buildingData, position, out errorMessage);
+        }
+
+        EnsureHallwayUnderBuildingFootprint(buildingData, position);
+        if (!CreateConstructionSite(buildingData, position, out ConstructionSite site, out errorMessage))
+        {
+            return false;
+        }
+
+        if (!WorkOrderRuntime.Active.TryCreateConstructionOrder(
+                site,
+                buildingData,
+                position,
+                out string orderId,
+                out string orderFailure))
+        {
+            RemoveConstructionSite(site);
+            errorMessage = string.IsNullOrWhiteSpace(orderFailure)
+                ? "공사 주문을 만들 수 없습니다."
+                : orderFailure;
+            return false;
+        }
+
+        site.ConfigureSite(
+            orderId,
+            () => TryPlaceBuildingImmediateUnchecked(buildingData, position, chargeCost: false, out _),
+            () => RemoveConstructionSite(site));
+        placementValidator.ApplyBuildSuccess(buildingData);
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    public bool TryPlaceBuilding(BuildingSO buildingData, Vector2Int position, out string errorMessage)
+    {
+        return TryPlaceBuildingImmediate(buildingData, position, out errorMessage);
+    }
+
+    public bool TryPlaceBuildingImmediate(BuildingSO buildingData, Vector2Int position, out string errorMessage)
+    {
+        if (!CanPlaceBuilding(buildingData, position, out errorMessage))
+        {
+            return false;
+        }
+
+        return TryPlaceBuildingImmediateUnchecked(buildingData, position, chargeCost: true, out errorMessage);
+    }
+
+    public bool TryPlaceBuildingImmediateUnchecked(
+        BuildingSO buildingData,
+        Vector2Int position,
+        bool chargeCost,
+        out string errorMessage)
+    {
+        if (grid == null || buildingData == null)
+        {
+            errorMessage = "그리드 또는 건물 데이터가 없습니다.";
             return false;
         }
 
@@ -111,7 +172,11 @@ public class GridBuildingPlacementService
             replacedWall.DestroySelf();
         }
 
-        placementValidator.ApplyBuildSuccess(buildingData);
+        if (chargeCost)
+        {
+            placementValidator.ApplyBuildSuccess(buildingData);
+        }
+
         return true;
     }
 
@@ -122,6 +187,19 @@ public class GridBuildingPlacementService
 
     public bool CanPlaceBuilding(BuildingSO buildingData, Vector2Int position, out string errorMessage)
     {
+        if (DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.IgnorePlacementRules))
+        {
+            if (grid == null || buildingData == null)
+            {
+                errorMessage = "그리드 또는 건물 데이터가 없습니다.";
+                return false;
+            }
+
+            bool insideGrid = buildingData.GetGridPosList(position).All(grid.IsValidGridPos);
+            errorMessage = insideGrid ? string.Empty : "그리드 바깥에는 설치할 수 없습니다.";
+            return insideGrid;
+        }
+
         return placementValidator.CanBuild(grid, buildingData, position, out errorMessage);
     }
 
@@ -388,6 +466,70 @@ public class GridBuildingPlacementService
         return true;
     }
 
+    private bool CreateConstructionSite(
+        BuildingSO buildingData,
+        Vector2Int position,
+        out ConstructionSite site,
+        out string errorMessage)
+    {
+        site = null;
+        if (grid == null || buildingData == null)
+        {
+            errorMessage = "그리드 또는 건물 데이터가 없습니다.";
+            return false;
+        }
+
+        foreach (Vector2Int gridPos in buildingData.GetGridPosList(position))
+        {
+            GridCell cell = grid.GetGridCell(gridPos);
+            if (cell == null || !cell.CanOccupy(GridLayer.Construction))
+            {
+                errorMessage = "이미 공사가 진행 중인 칸입니다.";
+                return false;
+            }
+        }
+
+        GameObject siteObject = new GameObject($"ConstructionSite_{buildingData.objectName}_{position.x}_{position.y}");
+        DungeonRuntimeHierarchy.Parent(siteObject, DungeonRuntimeHierarchy.Construction);
+        site = siteObject.AddComponent<ConstructionSite>();
+        site.transform.position = grid.GetWorldPos(position);
+        site.SetGrid(grid);
+        site.Initialization(buildingData, position);
+        bool registered = grid.RegisterOccupant(
+            site,
+            GridLayer.Construction,
+            buildingData.GetGridPosList(position),
+            false);
+        if (!registered)
+        {
+            UnityEngine.Object.Destroy(siteObject);
+            site = null;
+            errorMessage = "공사 현장을 그리드에 등록하지 못했습니다.";
+            return false;
+        }
+
+        errorMessage = string.Empty;
+        return true;
+    }
+
+    private void RemoveConstructionSite(ConstructionSite site)
+    {
+        if (site == null || grid == null)
+        {
+            return;
+        }
+
+        grid.RemoveOccupant(
+            site,
+            GridLayer.Construction,
+            site.buildPoses,
+            false);
+        if (site != null)
+        {
+            UnityEngine.Object.Destroy(site.gameObject);
+        }
+    }
+
     private bool CanRegisterBuilding(BuildingSO buildingData, Vector2Int position)
     {
         if (grid == null || buildingData == null)
@@ -546,7 +688,8 @@ public class BuildingPlacementValidator
         }
 
         BuildingConditionContext context = CreateConditionContext();
-        if (!FacilityProgression.IsUnlocked(
+        if (!DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.IgnoreUnlocks)
+            && !FacilityProgression.IsUnlocked(
                 buildingData,
                 context.GameData,
                 context.BuildingUnlockState))
@@ -557,7 +700,9 @@ public class BuildingPlacementValidator
         }
 
         int constructionCost = buildingData.GetConstructionCost();
-        if (context.GameData != null
+        if (!DungeonDebugRuntimeRules.ShouldSkipCosts()
+            && !DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.FreeConstruction)
+            && context.GameData != null
             && context.GameData.holdingMoney != null
             && constructionCost > context.GameData.holdingMoney.Value)
         {
@@ -642,7 +787,11 @@ public class BuildingPlacementValidator
 
         BuildingConditionContext context = CreateConditionContext();
         int constructionCost = buildingData.GetConstructionCost();
-        if (context.GameData != null && context.GameData.holdingMoney != null && constructionCost > 0)
+        if (!DungeonDebugRuntimeRules.ShouldSkipCosts()
+            && !DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.FreeConstruction)
+            && context.GameData != null
+            && context.GameData.holdingMoney != null
+            && constructionCost > 0)
         {
             context.GameData.holdingMoney.Value -= constructionCost;
         }
@@ -722,6 +871,11 @@ public static class GridBuildingExtensions
         if (building == null || building.BuildingData == null)
         {
             return 0;
+        }
+
+        if (building is ConstructionSite)
+        {
+            return 65;
         }
 
         return building.BuildingData.Placement.Layer switch

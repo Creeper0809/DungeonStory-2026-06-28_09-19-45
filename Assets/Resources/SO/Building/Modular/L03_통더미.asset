@@ -46,6 +46,8 @@ MonoBehaviour:
     - rid: 7302562991791408041
     - rid: 7302562991791408042
     - rid: 7302562991791408043
+    - rid: 7302563106683093090
+    - rid: 7302563106683093091
   width: 1
   height: 1
   layer: 1
@@ -92,3 +94,21 @@ MonoBehaviour:
         category: 0
         capacity: 14
         allCategories: 0
+    - rid: 7302563106683093090
+      type: {class: BuildingWaterSourceAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingWaterSourceAbility
+        waterPerWork: 3
+        workSeconds: 1.1
+        blockedByFreezingWeather: 0
+    - rid: 7302563106683093091
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 0
+          capacity: 1
+          useDuration: 1
+          requiredWorkers: 1
+          supportedWorkTypes: 8192
+          disabledWhenDamaged: 1

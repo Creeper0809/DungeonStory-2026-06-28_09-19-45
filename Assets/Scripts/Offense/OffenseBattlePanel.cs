@@ -14,6 +14,8 @@ public sealed class OffenseBattlePanel : MonoBehaviour
     private IRunCharacterCatalog characterCatalog;
     private IInvasionThreatRuntimeProvider threatProvider;
     private ITmpKoreanFontService fontService;
+    private ICombatEquipmentRuntime combatEquipment;
+    private ICombatEquipmentCatalog combatEquipmentCatalog;
     private IOffenseBattleRuntime runtime;
     private GameObject contentRoot;
     private GameObject returnButtonObject;
@@ -27,6 +29,7 @@ public sealed class OffenseBattlePanel : MonoBehaviour
     private RectTransform actionRoot;
     private OffenseBattleActionType selectedAction = OffenseBattleActionType.BasicAttack;
     private string selectedAbilityId = string.Empty;
+    private string previewTargetId = string.Empty;
     private string lastActorId = string.Empty;
     private string statusMessage = string.Empty;
 
@@ -35,12 +38,17 @@ public sealed class OffenseBattlePanel : MonoBehaviour
         IOffensePanelButtonFactory buttonFactory,
         IRunCharacterCatalog characterCatalog,
         IInvasionThreatRuntimeProvider threatProvider,
-        ITmpKoreanFontService fontService)
+        ITmpKoreanFontService fontService,
+        ICombatEquipmentRuntime combatEquipment,
+        ICombatEquipmentCatalog combatEquipmentCatalog)
     {
         this.buttonFactory = buttonFactory ?? throw new ArgumentNullException(nameof(buttonFactory));
         this.characterCatalog = characterCatalog ?? throw new ArgumentNullException(nameof(characterCatalog));
         this.threatProvider = threatProvider ?? throw new ArgumentNullException(nameof(threatProvider));
         this.fontService = fontService ?? throw new ArgumentNullException(nameof(fontService));
+        this.combatEquipment = combatEquipment ?? throw new ArgumentNullException(nameof(combatEquipment));
+        this.combatEquipmentCatalog = combatEquipmentCatalog
+            ?? throw new ArgumentNullException(nameof(combatEquipmentCatalog));
     }
 
     public void Bind(IOffenseBattleRuntime source)
@@ -69,6 +77,7 @@ public sealed class OffenseBattlePanel : MonoBehaviour
             lastActorId = current?.PersistentId ?? string.Empty;
             selectedAction = OffenseBattleActionType.BasicAttack;
             selectedAbilityId = string.Empty;
+            previewTargetId = string.Empty;
             statusMessage = string.Empty;
         }
 
@@ -249,6 +258,52 @@ public sealed class OffenseBattlePanel : MonoBehaviour
             false,
             () => ExecuteImmediate(OffenseBattleActionType.Guard, current.PersistentId, string.Empty));
 
+        CombatWeaponSnapshot weapon = current.Weapon ?? CombatWeaponSnapshot.CreateUnarmed();
+        if (weapon.RequiresAmmo)
+        {
+            Button reload = CreateActionButton(
+                $"재장전 {weapon.LoadedAmmo}/{weapon.MagazineCapacity}",
+                false,
+                false,
+                () => ExecuteImmediate(
+                    OffenseBattleActionType.Reload,
+                    current.PersistentId,
+                    string.Empty));
+            reload.interactable = weapon.LoadedAmmo < weapon.MagazineCapacity;
+        }
+
+        IReadOnlyList<CombatEquipmentInstance> alternateWeapons = GetAlternateWeapons(current);
+        if (alternateWeapons.Count > 0)
+        {
+            CreateActionButton(
+                "무기 교체",
+                false,
+                false,
+                () => SwitchToNextWeapon(current, alternateWeapons));
+        }
+
+        if (weapon.IsRanged)
+        {
+            CreateFireModeButton(current, weapon, CombatFireMode.Aimed, "조준");
+            CreateFireModeButton(current, weapon, CombatFireMode.Rapid, "속사");
+            CreateFireModeButton(current, weapon, CombatFireMode.Suppressive, "제압");
+        }
+
+        OffenseBattleCombatant previewTarget = session.FindCombatant(previewTargetId);
+        if (selectedAction == OffenseBattleActionType.BasicAttack
+            && previewTarget != null
+            && IsSelectableTarget(current, previewTarget))
+        {
+            CreateActionButton(
+                "공격 확정",
+                true,
+                false,
+                () => ExecuteImmediate(
+                    OffenseBattleActionType.BasicAttack,
+                    previewTarget.PersistentId,
+                    string.Empty));
+        }
+
         foreach (CharacterCombatAbilityDefinition ability in current.Abilities)
         {
             int cooldown = current.GetCooldown(ability.Id);
@@ -317,6 +372,7 @@ public sealed class OffenseBattlePanel : MonoBehaviour
     {
         selectedAction = action;
         selectedAbilityId = abilityId ?? string.Empty;
+        previewTargetId = string.Empty;
         statusMessage = action == OffenseBattleActionType.BasicAttack
             ? "공격할 적을 선택하세요."
             : "대상을 선택하세요.";
@@ -338,6 +394,7 @@ public sealed class OffenseBattlePanel : MonoBehaviour
 
         selectedAction = OffenseBattleActionType.Ability;
         selectedAbilityId = ability.Id;
+        previewTargetId = string.Empty;
         statusMessage = ability.TargetRule == OffenseBattleTargetRule.Ally
             ? "능력을 적용할 아군을 선택하세요."
             : "능력을 사용할 적을 선택하세요.";
@@ -350,6 +407,14 @@ public sealed class OffenseBattlePanel : MonoBehaviour
         if (!IsSelectableTarget(current, target))
         {
             statusMessage = "이 행동의 대상이 아닙니다.";
+            Refresh();
+            return;
+        }
+
+        if (selectedAction == OffenseBattleActionType.BasicAttack)
+        {
+            previewTargetId = target.PersistentId;
+            statusMessage = BuildAttackPreview(runtime.Session, current, target);
             Refresh();
             return;
         }
@@ -367,6 +432,7 @@ public sealed class OffenseBattlePanel : MonoBehaviour
             statusMessage = result.Message;
             selectedAction = OffenseBattleActionType.BasicAttack;
             selectedAbilityId = string.Empty;
+            previewTargetId = string.Empty;
         }
         else
         {
@@ -374,6 +440,113 @@ public sealed class OffenseBattlePanel : MonoBehaviour
         }
 
         Refresh();
+    }
+
+    private void CreateFireModeButton(
+        OffenseBattleCombatant current,
+        CombatWeaponSnapshot weapon,
+        CombatFireMode mode,
+        string label)
+    {
+        bool supported = mode switch
+        {
+            CombatFireMode.Aimed => weapon.SupportsAimed,
+            CombatFireMode.Rapid => weapon.SupportsRapid,
+            CombatFireMode.Suppressive => weapon.SupportsSuppressive,
+            _ => false
+        };
+        if (!supported)
+        {
+            return;
+        }
+
+        CreateActionButton(
+            label,
+            current.FireMode == mode,
+            false,
+            () => ExecuteImmediate(
+                OffenseBattleActionType.SetFireMode,
+                current.PersistentId,
+                mode.ToString()));
+    }
+
+    private IReadOnlyList<CombatEquipmentInstance> GetAlternateWeapons(
+        OffenseBattleCombatant current)
+    {
+        if (current == null)
+        {
+            return Array.Empty<CombatEquipmentInstance>();
+        }
+
+        return combatEquipment.Instances
+            .Where(instance =>
+                instance != null
+                && string.Equals(
+                    instance.ownerCharacterId,
+                    current.PersistentId,
+                    StringComparison.Ordinal)
+                && !string.Equals(
+                    instance.instanceId,
+                    current.Weapon?.InstanceId,
+                    StringComparison.Ordinal)
+                && combatEquipmentCatalog.TryGet(
+                    instance.definitionId,
+                    out CombatEquipmentDefinitionSO definition)
+                && definition.Kind is CombatEquipmentKind.MeleeWeapon
+                    or CombatEquipmentKind.RangedWeapon
+                    or CombatEquipmentKind.RecoverableThrowingWeapon)
+            .OrderBy(instance => instance.instanceId, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private void SwitchToNextWeapon(
+        OffenseBattleCombatant current,
+        IReadOnlyList<CombatEquipmentInstance> candidates)
+    {
+        CombatEquipmentInstance next = candidates?.FirstOrDefault();
+        if (next == null)
+        {
+            statusMessage = "교체할 무기가 없습니다.";
+            Refresh();
+            return;
+        }
+
+        ExecuteImmediate(
+            OffenseBattleActionType.SwitchWeapon,
+            current.PersistentId,
+            next.instanceId);
+    }
+
+    private static string BuildAttackPreview(
+        OffenseBattleSession session,
+        OffenseBattleCombatant source,
+        OffenseBattleCombatant target)
+    {
+        CombatAttackPreview preview = session.PreviewBasicAttack(source, target);
+        int distance = session.GetFormationDistanceForPreview(source, target);
+        if (!preview.Valid)
+        {
+            return $"{target.DisplayName}: {preview.FailureReason}";
+        }
+
+        return $"{target.DisplayName} 공격 예상 · {FormatRangeBand(preview.RangeBand)} {distance}칸"
+            + $" · 명중 {preview.HitChance * 100f:0}%"
+            + $" · 엄폐 {preview.CoverBlockChance * 100f:0}%"
+            + $" · 회피 {preview.EvasionChance * 100f:0}%"
+            + $" · 적중 피해 {preview.DamageOnHit:0.#}"
+            + $" · 기대 피해 {preview.ExpectedDamage:0.#}";
+    }
+
+    private static string FormatRangeBand(CombatRangeBand band)
+    {
+        return band switch
+        {
+            CombatRangeBand.Contact => "접촉",
+            CombatRangeBand.Near => "근거리",
+            CombatRangeBand.Medium => "중거리",
+            CombatRangeBand.Long => "장거리",
+            _ => "사거리 밖"
+        };
     }
 
     private bool IsSelectableTarget(
@@ -519,15 +692,36 @@ public sealed class OffenseBattlePanel : MonoBehaviour
     private static string BuildStatusText(OffenseBattleCombatant combatant)
     {
         if (combatant.IsDead) return "사망";
+        if (combatant.IsDowned) return "쓰러짐 · 구조 필요";
         string formation = OffenseFormationUtility.GetDisplayName(combatant.Formation);
-        if (combatant.Statuses.Count == 0) return $"{formation} · 정상";
-        return formation + " · " + string.Join(" · ", combatant.Statuses.Select(status => status.Type switch
+        CombatWeaponSnapshot weapon = combatant.Weapon ?? CombatWeaponSnapshot.CreateUnarmed();
+        string weaponState = weapon.RequiresAmmo
+            ? $"탄약 {weapon.LoadedAmmo}/{weapon.MagazineCapacity} · {FormatFireMode(combatant.FireMode)}"
+            : weapon.IsRanged
+                ? FormatFireMode(combatant.FireMode)
+                : "근접";
+        if (combatant.Statuses.Count == 0)
+        {
+            return $"{formation} · {weaponState} · 정상";
+        }
+
+        return formation + $" · {weaponState} · " + string.Join(" · ", combatant.Statuses.Select(status => status.Type switch
         {
             OffenseBattleStatusType.Guard => $"방어 {Mathf.RoundToInt(status.Value * 100f)}%",
             OffenseBattleStatusType.Vulnerability => $"취약 {Mathf.RoundToInt(status.Value * 100f)}%",
             OffenseBattleStatusType.DamageOverTime => $"지속 피해 {status.Value:0.#}",
             _ => status.Type.ToString()
         }));
+    }
+
+    private static string FormatFireMode(CombatFireMode mode)
+    {
+        return mode switch
+        {
+            CombatFireMode.Rapid => "속사",
+            CombatFireMode.Suppressive => "제압",
+            _ => "조준"
+        };
     }
 
     private static bool IsPositionAllowed(OffenseFormationMask mask, OffenseFormationSlot slot)

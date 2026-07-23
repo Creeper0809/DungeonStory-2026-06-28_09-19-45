@@ -69,6 +69,9 @@ public sealed class CameraTimeScaleVerificationRunner : MonoBehaviour
     private Vector3 originalPosition;
     private float originalTimeScale;
     private bool originalEdgeScroll;
+    private bool originalZoomEnabled;
+    private bool originalBlockWheelZoomOverUi;
+    private float originalOrthographicSize;
     private bool stateCaptured;
 
     private IEnumerator Start()
@@ -110,6 +113,8 @@ public sealed class CameraTimeScaleVerificationRunner : MonoBehaviour
                 "CAMERA_TIME_SCALE_INDEPENDENT",
                 $"paused={pausedDistance:0.0000}; oneX={oneXDistance:0.0000}; fiveX={fiveXDistance:0.0000}; difference={difference:0.0000}; tolerance={tolerance:0.0000}");
             report.Add("movementClock=Time.unscaledDeltaTime");
+
+            yield return VerifyZoomInput();
         }
 
         RestoreState();
@@ -143,7 +148,49 @@ public sealed class CameraTimeScaleVerificationRunner : MonoBehaviour
         originalPosition = cameraManager.transform.position;
         originalTimeScale = Time.timeScale;
         originalEdgeScroll = cameraManager.enableEdgeScroll;
+        originalZoomEnabled = cameraManager.enableZoom;
+        originalBlockWheelZoomOverUi = cameraManager.blockWheelZoomOverUi;
+        Camera camera = cameraManager.GetComponent<Camera>();
+        originalOrthographicSize = camera != null ? camera.orthographicSize : 0f;
         stateCaptured = true;
+    }
+
+    private IEnumerator VerifyZoomInput()
+    {
+        Camera camera = cameraManager.GetComponent<Camera>();
+        Check(camera != null && camera.orthographic, "CAMERA_ZOOM_CAMERA", "orthographic gameplay camera resolved");
+        if (camera == null || !camera.orthographic)
+        {
+            yield break;
+        }
+
+        Time.timeScale = 0f;
+        cameraManager.enableZoom = true;
+        cameraManager.blockWheelZoomOverUi = true;
+        float minimum = Mathf.Min(cameraManager.zoomBounds.x, cameraManager.zoomBounds.y);
+        float maximum = Mathf.Max(cameraManager.zoomBounds.x, cameraManager.zoomBounds.y);
+        camera.orthographicSize = Mathf.Clamp((minimum + maximum) * 0.5f, minimum, maximum);
+        DungeonAutomationInputState.MovePointer(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f));
+        yield return null;
+
+        float before = camera.orthographicSize;
+        DungeonAutomationInputState.Scroll(120f);
+        yield return null;
+        float zoomedIn = camera.orthographicSize;
+        DungeonAutomationInputState.Scroll(-120f);
+        yield return null;
+        float zoomedOut = camera.orthographicSize;
+
+        Check(zoomedIn < before - 0.01f,
+            "CAMERA_WHEEL_ZOOM_IN",
+            $"before={before:0.###}; after={zoomedIn:0.###}");
+        Check(zoomedOut > zoomedIn + 0.01f,
+            "CAMERA_WHEEL_ZOOM_OUT",
+            $"in={zoomedIn:0.###}; out={zoomedOut:0.###}");
+        Check(Mathf.Abs(zoomedOut - before) <= cameraManager.wheelZoomStep + 0.05f,
+            "CAMERA_WHEEL_ZOOM_REVERSIBLE",
+            $"before={before:0.###}; restored={zoomedOut:0.###}");
+        report.Add("zoomClock=Time.unscaledDeltaTime; wheelUiRule=scrollable-only");
     }
 
     private void RestoreState()
@@ -157,6 +204,13 @@ public sealed class CameraTimeScaleVerificationRunner : MonoBehaviour
 
         Time.timeScale = originalTimeScale;
         cameraManager.enableEdgeScroll = originalEdgeScroll;
+        cameraManager.enableZoom = originalZoomEnabled;
+        cameraManager.blockWheelZoomOverUi = originalBlockWheelZoomOverUi;
+        Camera camera = cameraManager.GetComponent<Camera>();
+        if (camera != null && originalOrthographicSize > 0f)
+        {
+            camera.orthographicSize = originalOrthographicSize;
+        }
         cameraManager.transform.position = originalPosition;
         cameraManager.ClampToCurrentBounds();
         stateCaptured = false;

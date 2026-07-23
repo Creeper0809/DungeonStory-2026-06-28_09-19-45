@@ -46,6 +46,7 @@ MonoBehaviour:
     - rid: 7302562995605602464
     - rid: 7302562995605602465
     - rid: 7302562995605602466
+    - rid: 7302563106683093106
   width: 1
   height: 1
   layer: 1
@@ -95,3 +96,9 @@ MonoBehaviour:
         category: 0
         capacity: 20
         allCategories: 0
+    - rid: 7302563106683093106
+      type: {class: BuildingPreservationAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingPreservationAbility
+        freshnessMultiplier: 5
+        preservedMealsPerCook: 2

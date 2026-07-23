@@ -28,6 +28,7 @@ GameObject:
   - component: {fileID: 7586730358295892990}
   - component: {fileID: 2916327639639527830}
   - component: {fileID: 8090790671964402091}
+  - component: {fileID: 3567375306304386171}
   m_Layer: 0
   m_Name: CharacterPrefab
   m_TagString: Character
@@ -426,6 +427,7 @@ MonoBehaviour:
   personaRuntime: {fileID: 0}
   dialogueRuntime: {fileID: 0}
   socialMemory: {fileID: 0}
+  aiMemory: {fileID: 0}
   behaviorTree: {fileID: 0}
 --- !u!114 &2960411396873024836
 MonoBehaviour:
@@ -548,6 +550,16 @@ MonoBehaviour:
   committedAction: {fileID: 0}
   committedDestination: {fileID: 0}
   minCommitUntil: 0
+  softLockIntent:
+    branch: 0
+    intention: 0
+    label: 
+    targetGridId: -1
+    startedAt: 0
+    minUntil: 0
+    expiresAt: 0
+    interruptible: 1
+    lastBreakReason: 
   activeMacroGoal:
     type: 0
     reason: 
@@ -566,6 +578,9 @@ MonoBehaviour:
   lastJobGiverUtilitySummary: 
   selectedJobGiverUtilitySummary: 
   lastRoutineGroupPrioritySummary: 
+  lastUtilityBreakdownSummary: 
+  lastDecisionContextSummary: 
+  topUtilityBreakdowns: []
   recentDecisionTrace: []
   lastCommitBreakReason: 
   lastFailureReason: 
@@ -775,6 +790,20 @@ MonoBehaviour:
     skillGenerationRevision: 0
   narrativeLedger:
     facts: []
+--- !u!114 &3567375306304386171
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3240235570985505524}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fcb5dff113b596b41abc64d9f21b3c77, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterAiMemoryRuntime
+  actor: {fileID: 0}
+  recentEntries: []
 --- !u!1 &7074455978653400085
 GameObject:
   m_ObjectHideFlags: 0

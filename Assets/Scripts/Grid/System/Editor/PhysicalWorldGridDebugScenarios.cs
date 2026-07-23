@@ -21,6 +21,8 @@ public static class PhysicalWorldGridDebugScenarios
     {
         List<string> errors = new List<string>();
         Run("area flags gate movement, item, and building layers", VerifyAreaFlags, errors);
+        Run("default manager opens only the exterior ground lane", VerifyDefaultManagerAreas, errors);
+        Run("centered manager balances exterior around the dungeon", VerifyCenteredManagerAreas, errors);
         Run("drop zone query prefers tagged drop zone", VerifyDropZoneQuery, errors);
         Run("room detector excludes exterior cells", VerifyRoomDetectorExcludesExterior, errors);
         Run("search path crosses exterior into entrance", VerifyExteriorPathToEntrance, errors);
@@ -51,21 +53,82 @@ public static class PhysicalWorldGridDebugScenarios
         GridCell exterior = grid.GetGridCell(new Vector2Int(0, 0));
         GridCell dropZone = grid.GetGridCell(new Vector2Int(1, 0));
         GridCell entrance = grid.GetGridCell(new Vector2Int(2, 0));
-        GridCell blocked = grid.GetGridCell(new Vector2Int(0, 1));
+        GridCell upperExterior = grid.GetGridCell(new Vector2Int(0, 1));
         GridCell interior = grid.GetGridCell(new Vector2Int(3, 0));
 
         return grid.IsWalkable(exterior.Position)
             && grid.IsWalkable(dropZone.Position)
             && grid.IsWalkable(entrance.Position)
             && grid.IsWalkable(interior.Position)
-            && !grid.IsWalkable(blocked.Position)
+            && grid.IsWalkable(upperExterior.Position)
             && exterior.CanOccupy(GridLayer.Character)
             && exterior.CanOccupy(GridLayer.Item)
             && !exterior.IsBuildableArea
             && dropZone.AllowsItemDrop
-            && !blocked.AllowsItemDrop
+            && upperExterior.AllowsItemDrop
             && entrance.CanOccupy(GridLayer.Building)
             && interior.IsBuildableArea;
+    }
+
+    private static bool VerifyDefaultManagerAreas()
+    {
+        Grid grid = new Grid(36, 3);
+        GridSystemManager.ApplyPhysicalWorldAreas(
+            grid,
+            dungeonInteriorStartX: 4,
+            dungeonInteriorColumnCount: 27,
+            dropZoneWidth: 3,
+            entranceGridPosition: new Vector2Int(4, 0));
+
+        int total = grid.GetCells().Count(cell => cell != null);
+        int interior = grid.GetCells().Count(cell =>
+            cell != null && cell.AreaType == GridCellAreaType.DungeonInterior);
+        int exterior = grid.GetCells().Count(cell =>
+            cell != null && cell.AreaType == GridCellAreaType.ExteriorPath);
+        int dropZone = grid.GetCells().Count(cell =>
+            cell != null && cell.AreaType == GridCellAreaType.DropZone);
+        int entrance = grid.GetCells().Count(cell =>
+            cell != null && cell.AreaType == GridCellAreaType.Entrance);
+        int blocked = grid.GetCells().Count(cell =>
+            cell != null && cell.AreaType == GridCellAreaType.BlockedExterior);
+
+        return total == 108
+            && interior == 80
+            && exterior == 6
+            && dropZone == 3
+            && entrance == 1
+            && blocked == 18;
+    }
+
+    private static bool VerifyCenteredManagerAreas()
+    {
+        Grid grid = new Grid(60, 3);
+        int interiorStart = GridSystemManager.CalculateCenteredDungeonInteriorStartX(
+            grid.width,
+            27);
+        Vector2Int entrance = new Vector2Int(interiorStart, 0);
+        GridSystemManager.ApplyPhysicalWorldAreas(
+            grid,
+            interiorStart,
+            dungeonInteriorColumnCount: 27,
+            dropZoneWidth: 3,
+            entranceGridPosition: entrance);
+
+        bool rightExterior = Enumerable.Range(0, 14).All(x =>
+            grid.GetGridCell(new Vector2Int(x, 0))?.AreaType == GridCellAreaType.ExteriorPath);
+        bool dropZone = Enumerable.Range(14, 3).All(x =>
+            grid.GetGridCell(new Vector2Int(x, 0))?.AreaType == GridCellAreaType.DropZone);
+        bool interior = Enumerable.Range(18, 26).All(x =>
+            grid.GetGridCell(new Vector2Int(x, 0))?.AreaType == GridCellAreaType.DungeonInterior);
+        bool leftExterior = Enumerable.Range(44, 16).All(x =>
+            grid.GetGridCell(new Vector2Int(x, 0))?.AreaType == GridCellAreaType.ExteriorPath);
+
+        return interiorStart == 17
+            && grid.GetGridCell(entrance)?.AreaType == GridCellAreaType.Entrance
+            && rightExterior
+            && dropZone
+            && interior
+            && leftExterior;
     }
 
     private static bool VerifyDropZoneQuery()
@@ -158,9 +221,9 @@ public static class PhysicalWorldGridDebugScenarios
         grid.SetAreaType(new Vector2Int(0, 0), GridCellAreaType.ExteriorPath);
         grid.SetAreaType(new Vector2Int(1, 0), GridCellAreaType.DropZone);
         grid.SetAreaType(new Vector2Int(2, 0), GridCellAreaType.Entrance);
-        grid.SetAreaType(new Vector2Int(0, 1), GridCellAreaType.BlockedExterior);
-        grid.SetAreaType(new Vector2Int(1, 1), GridCellAreaType.BlockedExterior);
-        grid.SetAreaType(new Vector2Int(2, 1), GridCellAreaType.BlockedExterior);
+        grid.SetAreaType(new Vector2Int(0, 1), GridCellAreaType.ExteriorPath);
+        grid.SetAreaType(new Vector2Int(1, 1), GridCellAreaType.ExteriorPath);
+        grid.SetAreaType(new Vector2Int(2, 1), GridCellAreaType.ExteriorPath);
         return grid;
     }
 

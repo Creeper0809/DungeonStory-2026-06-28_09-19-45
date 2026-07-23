@@ -46,6 +46,7 @@ MonoBehaviour:
     - rid: 7302562991791408011
     - rid: 7302562991791408012
     - rid: 7302562991791408013
+    - rid: 7302563106683093084
   width: 1
   height: 1
   layer: 5
@@ -90,3 +91,9 @@ MonoBehaviour:
       data:
         abilityId: BuildingCleaningAbility
         restoredCleanliness: 100
+    - rid: 7302563106683093084
+      type: {class: BuildingVentilationAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingVentilationAbility
+        hygieneRiskReduction: 18
+        smokeRiskReduction: 8

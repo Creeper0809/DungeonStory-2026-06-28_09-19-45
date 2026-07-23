@@ -14,7 +14,10 @@ public enum OffenseBattleActionType
     BasicAttack,
     Guard,
     Ability,
-    Retreat
+    Retreat,
+    Reload,
+    SwitchWeapon,
+    SetFireMode
 }
 
 public enum OffenseBattleOutcome
@@ -43,7 +46,9 @@ public sealed class OffenseBattleStats
         float strength,
         float toughness,
         float dexterity,
-        float moveSpeed)
+        float moveSpeed,
+        float shooting = -1f,
+        float evasion = -1f)
     {
         MaxHealth = Mathf.Max(1f, maxHealth);
         Attack = Mathf.Max(0f, attack);
@@ -51,6 +56,8 @@ public sealed class OffenseBattleStats
         Toughness = Mathf.Max(0f, toughness);
         Dexterity = Mathf.Max(0f, dexterity);
         MoveSpeed = Mathf.Max(0f, moveSpeed);
+        Shooting = shooting < 0f ? Attack : Mathf.Max(0f, shooting);
+        Evasion = evasion < 0f ? MoveSpeed : Mathf.Max(0f, evasion);
     }
 
     public float MaxHealth { get; }
@@ -59,6 +66,8 @@ public sealed class OffenseBattleStats
     public float Toughness { get; }
     public float Dexterity { get; }
     public float MoveSpeed { get; }
+    public float Shooting { get; }
+    public float Evasion { get; }
 }
 
 [Serializable]
@@ -104,6 +113,9 @@ public sealed class OffenseBattleCombatant
     private readonly List<OffenseBattleStatus> statuses = new List<OffenseBattleStatus>();
     private readonly IReadOnlyList<OffenseBattleStatus> statusesView;
     private readonly Dictionary<string, int> cooldowns = new Dictionary<string, int>(StringComparer.Ordinal);
+    private readonly List<CharacterBodyPartHealthState> bodyParts = new List<CharacterBodyPartHealthState>();
+    private readonly IReadOnlyList<CharacterBodyPartHealthState> bodyPartsView;
+    private IReadOnlyList<CombatArmorSnapshot> armor = Array.Empty<CombatArmorSnapshot>();
 
     public OffenseBattleCombatant(
         string persistentId,
@@ -131,6 +143,8 @@ public sealed class OffenseBattleCombatant
             .ToList() ?? new List<CharacterCombatAbilityDefinition>();
         abilitiesView = this.abilities.AsReadOnly();
         statusesView = statuses.AsReadOnly();
+        bodyPartsView = bodyParts.AsReadOnly();
+        ResetBodyParts();
         PortraitDataId = portraitDataId;
         Formation = formation;
     }
@@ -142,15 +156,51 @@ public sealed class OffenseBattleCombatant
     public OffenseBattleStats Stats { get; }
     public float CurrentHealth { get; private set; }
     public float HealthRatio => CurrentHealth / Mathf.Max(1f, Stats.MaxHealth);
-    public bool IsDead => CurrentHealth <= 0f;
+    public bool IsDead => CurrentHealth <= 0f || IsVitalPartDestroyed();
+    public bool IsDowned { get; private set; }
+    public bool CanTakeTurn => !IsDead && !IsDowned && !PinnedThisTurn;
     public float InitiativePenalty { get; private set; }
-    public float Initiative => Mathf.Max(0f, Stats.Dexterity * 2f + Stats.MoveSpeed - InitiativePenalty);
+    public float Initiative => Mathf.Max(
+        0f,
+        Stats.Dexterity * 2f * Manipulation
+        + Stats.MoveSpeed * Mobility
+        - InitiativePenalty);
     public float TotalDamageTaken { get; private set; }
     public int PortraitDataId { get; }
     public OffenseFormationSlot Formation { get; private set; }
     public int TurnsStarted { get; private set; }
     public IReadOnlyList<CharacterCombatAbilityDefinition> Abilities => abilitiesView;
     public IReadOnlyList<OffenseBattleStatus> Statuses => statusesView;
+    public IReadOnlyList<CharacterBodyPartHealthState> BodyParts => bodyPartsView;
+    public CombatWeaponSnapshot Weapon { get; private set; } = CombatWeaponSnapshot.CreateUnarmed();
+    public IReadOnlyList<CombatArmorSnapshot> Armor => armor;
+    public float Suppression { get; private set; }
+    public float BloodLoss { get; private set; }
+    public float Consciousness => CalculateConsciousness();
+    public float Manipulation => CalculateLimbAverage(CombatBodyPart.LeftArm, CombatBodyPart.RightArm);
+    public float Mobility => CalculateLimbAverage(CombatBodyPart.LeftLeg, CombatBodyPart.RightLeg);
+    public bool PinnedThisTurn { get; private set; }
+    public CombatBodyPart LastHitBodyPart { get; private set; } = CombatBodyPart.Torso;
+    public float CoverBlockChance { get; private set; }
+    public CombatFireMode FireMode { get; private set; } = CombatFireMode.Aimed;
+
+    public void SetCombatEquipment(
+        CombatWeaponSnapshot weapon,
+        IReadOnlyList<CombatArmorSnapshot> armor)
+    {
+        Weapon = weapon ?? CombatWeaponSnapshot.CreateUnarmed();
+        this.armor = armor ?? Array.Empty<CombatArmorSnapshot>();
+    }
+
+    public void SetCover(float blockChance)
+    {
+        CoverBlockChance = Mathf.Clamp01(blockChance);
+    }
+
+    public void SetFireMode(CombatFireMode mode)
+    {
+        FireMode = mode;
+    }
 
     public int GetCooldown(string abilityId)
     {
@@ -206,6 +256,79 @@ public sealed class OffenseBattleCombatant
         }
 
         TurnsStarted++;
+        PinnedThisTurn = Suppression >= 75f;
+        Suppression = Mathf.Max(0f, Suppression - 12f);
+        if (BloodLoss > 0f && !IsDead)
+        {
+            ApplyRawDamage(Mathf.Max(0.25f, BloodLoss * 0.0125f));
+        }
+
+        UpdateDowned();
+    }
+
+    internal float ApplyCombatInjury(CombatAttackResult result)
+    {
+        Suppression = Mathf.Clamp(Suppression + result.Suppression, 0f, 100f);
+        if (!result.Hit || result.AppliedDamage <= 0f)
+        {
+            return 0f;
+        }
+
+        LastHitBodyPart = result.BodyPart;
+        BloodLoss = Mathf.Clamp(BloodLoss + result.Bleeding, 0f, 100f);
+        CharacterBodyPartHealthState part = GetBodyPart(result.BodyPart);
+        part.currentHealth = Mathf.Max(0f, part.currentHealth - result.AppliedDamage);
+        part.bleedingPerSecond = Mathf.Max(
+            0f,
+            part.bleedingPerSecond + result.Bleeding * 0.01f);
+        float applied = ApplyRawDamage(result.AppliedDamage);
+        if (IsVitalPartDestroyed())
+        {
+            ApplyRawDamage(CurrentHealth);
+        }
+
+        UpdateDowned();
+        return applied;
+    }
+
+    internal void RestoreCombatState(
+        float suppression,
+        float bloodLoss,
+        CombatBodyPart lastHitBodyPart,
+        CombatFireMode fireMode = CombatFireMode.Aimed)
+    {
+        Suppression = Mathf.Clamp(suppression, 0f, 100f);
+        BloodLoss = Mathf.Clamp(bloodLoss, 0f, 100f);
+        LastHitBodyPart = lastHitBodyPart;
+        FireMode = fireMode;
+        UpdateDowned();
+    }
+
+    public CharacterBodyHealthSnapshot CaptureBodyHealth()
+    {
+        return new CharacterBodyHealthSnapshot(
+            bodyParts.Select(CloneBodyPart).ToArray(),
+            BloodLoss,
+            Suppression,
+            Consciousness,
+            Manipulation,
+            Mobility,
+            IsDowned);
+    }
+
+    public void ApplyBodyHealth(CharacterBodyHealthSnapshot snapshot)
+    {
+        if (snapshot.Parts == null || snapshot.Parts.Count == 0)
+        {
+            return;
+        }
+
+        bodyParts.Clear();
+        bodyParts.AddRange(snapshot.Parts.Select(CloneBodyPart));
+        EnsureBodyParts();
+        BloodLoss = Mathf.Clamp(snapshot.BloodLoss, 0f, 100f);
+        Suppression = Mathf.Clamp(snapshot.Suppression, 0f, 100f);
+        UpdateDowned();
     }
 
     internal void RestoreTurnsStarted(int turns)
@@ -231,13 +354,30 @@ public sealed class OffenseBattleCombatant
 
         float before = CurrentHealth;
         CurrentHealth = Mathf.Min(Stats.MaxHealth, CurrentHealth + Mathf.Max(0f, amount));
-        return CurrentHealth - before;
+        float applied = CurrentHealth - before;
+        float remaining = applied;
+        foreach (CharacterBodyPartHealthState part in bodyParts.OrderBy(part => part.HealthRatio))
+        {
+            float restored = Mathf.Min(remaining, part.maxHealth - part.currentHealth);
+            part.currentHealth += restored;
+            part.bleedingPerSecond = Mathf.Max(0f, part.bleedingPerSecond - applied * 0.0025f);
+            remaining -= restored;
+            if (remaining <= 0f)
+            {
+                break;
+            }
+        }
+
+        BloodLoss = Mathf.Max(0f, BloodLoss - applied * 0.5f);
+        UpdateDowned();
+        return applied;
     }
 
     internal void RestoreHealth(float currentHealth, float totalDamageTaken)
     {
         CurrentHealth = Mathf.Clamp(currentHealth, 0f, Stats.MaxHealth);
         TotalDamageTaken = Mathf.Max(0f, totalDamageTaken);
+        UpdateDowned();
     }
 
     internal void AddStatus(OffenseBattleStatus status)
@@ -307,6 +447,106 @@ public sealed class OffenseBattleCombatant
     {
         Formation = formation;
     }
+
+    private void ResetBodyParts()
+    {
+        bodyParts.Clear();
+        bodyParts.Add(CreateBodyPart(CombatBodyPart.Head, 18f));
+        bodyParts.Add(CreateBodyPart(CombatBodyPart.Torso, 45f));
+        bodyParts.Add(CreateBodyPart(CombatBodyPart.LeftArm, 22f));
+        bodyParts.Add(CreateBodyPart(CombatBodyPart.RightArm, 22f));
+        bodyParts.Add(CreateBodyPart(CombatBodyPart.LeftLeg, 26f));
+        bodyParts.Add(CreateBodyPart(CombatBodyPart.RightLeg, 26f));
+        UpdateDowned();
+    }
+
+    private void EnsureBodyParts()
+    {
+        EnsureBodyPart(CombatBodyPart.Head, 18f);
+        EnsureBodyPart(CombatBodyPart.Torso, 45f);
+        EnsureBodyPart(CombatBodyPart.LeftArm, 22f);
+        EnsureBodyPart(CombatBodyPart.RightArm, 22f);
+        EnsureBodyPart(CombatBodyPart.LeftLeg, 26f);
+        EnsureBodyPart(CombatBodyPart.RightLeg, 26f);
+    }
+
+    private void EnsureBodyPart(CombatBodyPart bodyPart, float maxHealth)
+    {
+        CharacterBodyPartHealthState part = bodyParts.FirstOrDefault(value => value.bodyPart == bodyPart);
+        if (part == null)
+        {
+            bodyParts.Add(CreateBodyPart(bodyPart, maxHealth));
+            return;
+        }
+
+        part.maxHealth = Mathf.Max(1f, part.maxHealth);
+        part.currentHealth = Mathf.Clamp(part.currentHealth, 0f, part.maxHealth);
+        part.bleedingPerSecond = Mathf.Max(0f, part.bleedingPerSecond);
+    }
+
+    private CharacterBodyPartHealthState GetBodyPart(CombatBodyPart bodyPart)
+    {
+        EnsureBodyParts();
+        return bodyParts.First(part => part.bodyPart == bodyPart);
+    }
+
+    private float CalculateConsciousness()
+    {
+        if (bodyParts.Count == 0)
+        {
+            return 1f;
+        }
+
+        float vitalHealth = Mathf.Min(
+            GetBodyPart(CombatBodyPart.Head).HealthRatio,
+            GetBodyPart(CombatBodyPart.Torso).HealthRatio);
+        return Mathf.Clamp01(vitalHealth * Mathf.Lerp(1f, 0.2f, BloodLoss / 100f));
+    }
+
+    private float CalculateLimbAverage(CombatBodyPart first, CombatBodyPart second)
+    {
+        if (bodyParts.Count == 0)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp01((GetBodyPart(first).HealthRatio + GetBodyPart(second).HealthRatio) * 0.5f);
+    }
+
+    private bool IsVitalPartDestroyed()
+    {
+        return bodyParts.Count > 0
+            && (GetBodyPart(CombatBodyPart.Head).currentHealth <= 0f
+                || GetBodyPart(CombatBodyPart.Torso).currentHealth <= 0f);
+    }
+
+    private void UpdateDowned()
+    {
+        IsDowned = !IsDead && (Consciousness < 0.25f || Mobility < 0.2f);
+    }
+
+    private static CharacterBodyPartHealthState CreateBodyPart(
+        CombatBodyPart bodyPart,
+        float maxHealth)
+    {
+        return new CharacterBodyPartHealthState
+        {
+            bodyPart = bodyPart,
+            maxHealth = maxHealth,
+            currentHealth = maxHealth
+        };
+    }
+
+    private static CharacterBodyPartHealthState CloneBodyPart(CharacterBodyPartHealthState source)
+    {
+        return new CharacterBodyPartHealthState
+        {
+            bodyPart = source.bodyPart,
+            maxHealth = source.maxHealth,
+            currentHealth = source.currentHealth,
+            bleedingPerSecond = source.bleedingPerSecond
+        };
+    }
 }
 
 public sealed class OffenseBattleCommand
@@ -360,8 +600,17 @@ public sealed class OffenseBattlePersistenceState
     public long lastProcessedCommandId;
     public List<string> initiativeOrder = new List<string>();
     public List<string> log = new List<string>();
+    public List<OffenseThrownEquipmentPersistenceState> thrownEquipment =
+        new List<OffenseThrownEquipmentPersistenceState>();
     public List<OffenseBattleCombatantPersistenceState> combatants =
         new List<OffenseBattleCombatantPersistenceState>();
+}
+
+[Serializable]
+public sealed class OffenseThrownEquipmentPersistenceState
+{
+    public string instanceId = string.Empty;
+    public string ownerCharacterId = string.Empty;
 }
 
 [Serializable]
@@ -373,6 +622,11 @@ public sealed class OffenseBattleCombatantPersistenceState
     public float initiativePenalty;
     public int turnsStarted;
     public OffenseFormationSlot formation;
+    public float suppression;
+    public float bloodLoss;
+    public CombatBodyPart lastHitBodyPart = CombatBodyPart.Torso;
+    public CombatFireMode fireMode = CombatFireMode.Aimed;
+    public List<CharacterBodyPartHealthState> bodyParts = new List<CharacterBodyPartHealthState>();
     public List<OffenseBattleCooldownPersistenceState> cooldowns =
         new List<OffenseBattleCooldownPersistenceState>();
     public List<OffenseBattleStatusPersistenceState> statuses =
@@ -405,6 +659,11 @@ public sealed class OffenseBattleSession
     private readonly IReadOnlyList<string> initiativeOrderView;
     private readonly List<string> log = new List<string>();
     private readonly IReadOnlyList<string> logView;
+    private readonly ICombatResolutionService combatResolution;
+    private readonly ICombatEquipmentRuntime combatEquipmentRuntime;
+    private readonly Dictionary<string, string> thrownOwnerByInstance =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+    private bool recoverableEquipmentFinalized;
     private int currentOrderIndex = -1;
 
     public OffenseBattleSession(
@@ -413,7 +672,9 @@ public sealed class OffenseBattleSession
         string targetId,
         string targetTitle,
         DungeonDifficulty difficulty,
-        IEnumerable<OffenseBattleCombatant> combatants)
+        IEnumerable<OffenseBattleCombatant> combatants,
+        ICombatResolutionService combatResolution = null,
+        ICombatEquipmentRuntime combatEquipmentRuntime = null)
         : this(
             battleId,
             expeditionId,
@@ -421,6 +682,8 @@ public sealed class OffenseBattleSession
             targetTitle,
             difficulty,
             combatants,
+            combatResolution,
+            combatEquipmentRuntime,
             true)
     {
     }
@@ -432,6 +695,8 @@ public sealed class OffenseBattleSession
         string targetTitle,
         DungeonDifficulty difficulty,
         IEnumerable<OffenseBattleCombatant> combatants,
+        ICombatResolutionService combatResolution,
+        ICombatEquipmentRuntime combatEquipmentRuntime,
         bool startImmediately)
     {
         BattleId = string.IsNullOrWhiteSpace(battleId) ? Guid.NewGuid().ToString("N") : battleId;
@@ -447,6 +712,9 @@ public sealed class OffenseBattleSession
         combatantsView = this.combatants.AsReadOnly();
         initiativeOrderView = initiativeOrder.AsReadOnly();
         logView = log.AsReadOnly();
+        this.combatResolution = combatResolution
+            ?? new CombatResolutionService(new UnityCombatRandomSource());
+        this.combatEquipmentRuntime = combatEquipmentRuntime;
 
         Outcome = startImmediately ? ResolveOutcome() : OffenseBattleOutcome.InProgress;
         if (startImmediately && Outcome == OffenseBattleOutcome.InProgress)
@@ -455,6 +723,11 @@ public sealed class OffenseBattleSession
             BuildInitiativeOrder();
             currentOrderIndex = 0;
             PrepareCurrentTurn();
+            if (!IsComplete && CurrentActor?.PinnedThisTurn == true)
+            {
+                AddLog($"{CurrentActor.DisplayName}은(는) 제압되어 이번 행동을 잃었습니다.");
+                AdvanceTurn();
+            }
             AddLog($"{TargetTitle} 전투가 시작되었습니다.");
         }
     }
@@ -500,6 +773,14 @@ public sealed class OffenseBattleSession
             lastProcessedCommandId = LastProcessedCommandId,
             initiativeOrder = initiativeOrder.ToList(),
             log = log.ToList(),
+            thrownEquipment = thrownOwnerByInstance
+                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => new OffenseThrownEquipmentPersistenceState
+                {
+                    instanceId = pair.Key,
+                    ownerCharacterId = pair.Value
+                })
+                .ToList(),
             combatants = combatants.Select(combatant => new OffenseBattleCombatantPersistenceState
             {
                 persistentId = combatant.PersistentId,
@@ -508,6 +789,19 @@ public sealed class OffenseBattleSession
                 initiativePenalty = combatant.InitiativePenalty,
                 turnsStarted = combatant.TurnsStarted,
                 formation = combatant.Formation,
+                suppression = combatant.Suppression,
+                bloodLoss = combatant.BloodLoss,
+                lastHitBodyPart = combatant.LastHitBodyPart,
+                fireMode = combatant.FireMode,
+                bodyParts = combatant.BodyParts
+                    .Select(part => new CharacterBodyPartHealthState
+                    {
+                        bodyPart = part.bodyPart,
+                        maxHealth = part.maxHealth,
+                        currentHealth = part.currentHealth,
+                        bleedingPerSecond = part.bleedingPerSecond
+                    })
+                    .ToList(),
                 cooldowns = combatant.GetCooldownSnapshot()
                     .Where(pair => pair.Value > 0)
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
@@ -531,7 +825,9 @@ public sealed class OffenseBattleSession
 
     public static OffenseBattleSession Restore(
         OffenseBattlePersistenceState state,
-        IEnumerable<OffenseBattleCombatant> configuredCombatants)
+        IEnumerable<OffenseBattleCombatant> configuredCombatants,
+        ICombatResolutionService combatResolution = null,
+        ICombatEquipmentRuntime combatEquipmentRuntime = null)
     {
         if (state == null)
         {
@@ -545,6 +841,8 @@ public sealed class OffenseBattleSession
             state.targetTitle,
             state.difficulty,
             configuredCombatants,
+            combatResolution,
+            combatEquipmentRuntime,
             false);
         foreach (OffenseBattleCombatantPersistenceState saved in state.combatants
             ?? new List<OffenseBattleCombatantPersistenceState>())
@@ -556,6 +854,22 @@ public sealed class OffenseBattleSession
             combatant.RestoreInitiativePenalty(saved.initiativePenalty);
             combatant.RestoreTurnsStarted(saved.turnsStarted);
             combatant.RestoreFormation(saved.formation);
+            combatant.RestoreCombatState(
+                saved.suppression,
+                saved.bloodLoss,
+                saved.lastHitBodyPart,
+                saved.fireMode);
+            if (saved.bodyParts != null && saved.bodyParts.Count > 0)
+            {
+                combatant.ApplyBodyHealth(new CharacterBodyHealthSnapshot(
+                    saved.bodyParts,
+                    saved.bloodLoss,
+                    saved.suppression,
+                    1f,
+                    1f,
+                    1f,
+                    false));
+            }
             combatant.RestoreCooldowns((saved.cooldowns
                     ?? new List<OffenseBattleCooldownPersistenceState>())
                 .Where(value => value != null)
@@ -578,6 +892,17 @@ public sealed class OffenseBattleSession
             state.lastProcessedCommandId,
             state.outcome,
             state.log);
+        foreach (OffenseThrownEquipmentPersistenceState thrown in state.thrownEquipment
+            ?? new List<OffenseThrownEquipmentPersistenceState>())
+        {
+            if (thrown != null && !string.IsNullOrWhiteSpace(thrown.instanceId))
+            {
+                session.thrownOwnerByInstance[thrown.instanceId] =
+                    thrown.ownerCharacterId ?? string.Empty;
+            }
+        }
+
+        session.FinalizeRecoverableEquipment();
         return session;
     }
 
@@ -604,7 +929,7 @@ public sealed class OffenseBattleSession
         }
 
         OffenseBattleCombatant actor = CurrentActor;
-        if (actor == null || actor.IsDead
+        if (actor == null || !actor.CanTakeTurn
             || !string.Equals(actor.PersistentId, command.ActorId, StringComparison.Ordinal))
         {
             result = new OffenseBattleCommandResult(false, "현재 행동할 캐릭터가 아닙니다.");
@@ -623,20 +948,23 @@ public sealed class OffenseBattleSession
             AdvanceTurn();
         }
 
+        FinalizeRecoverableEquipment();
         return true;
     }
 
     public OffenseBattleCommand CreateEnemyCommand(long commandId)
     {
         OffenseBattleCombatant actor = CurrentActor;
-        if (actor == null || actor.Team != OffenseBattleTeam.Enemies || actor.IsDead)
+        if (actor == null || actor.Team != OffenseBattleTeam.Enemies || !actor.CanTakeTurn)
         {
             return null;
         }
 
         List<OffenseBattleCombatant> targets = combatants
-            .Where(target => target.Team == OffenseBattleTeam.Allies && !target.IsDead)
-            .Where(IsReachableByBasicAttack)
+            .Where(target => target.Team == OffenseBattleTeam.Allies
+                && !target.IsDead
+                && !target.IsDowned)
+            .Where(target => IsReachableByBasicAttack(actor, target))
             .OrderBy(target => WouldBasicAttackKill(actor, target) ? 0 : 1)
             .ThenBy(target => target.HealthRatio)
             .ThenByDescending(target => target.Stats.Attack)
@@ -697,11 +1025,69 @@ public sealed class OffenseBattleSession
         float attackMultiplier = 1f + source.Statuses
             .Where(status => status.Type == OffenseBattleStatusType.AttackModifier)
             .Sum(status => status.Value);
+        CombatWeaponSnapshot weapon = source.Weapon ?? CombatWeaponSnapshot.CreateUnarmed();
+        CombatAttackVerb verb = weapon.Verb ?? CombatWeaponSnapshot.CreateUnarmed().Verb;
+        CombatRangeBand band = CombatRangeRules.GetBand(GetFormationDistance(source, target));
+        float rangeDamage = Mathf.Max(0.1f, weapon.GetDamageMultiplier(band));
         return Mathf.Max(
             1f,
-            source.Stats.Attack * Mathf.Max(0.1f, attackMultiplier) * 2f
-            + source.Stats.Strength
-            - target.Stats.Toughness * 0.75f);
+            (verb.baseDamage
+                + (weapon.IsRanged ? source.Stats.Shooting * 0.45f : source.Stats.Attack * 0.75f)
+                + source.Stats.Strength * 0.35f)
+            * rangeDamage
+            * Mathf.Max(0.1f, attackMultiplier)
+            - target.Stats.Toughness * 0.2f);
+    }
+
+    public CombatAttackPreview PreviewBasicAttack(
+        OffenseBattleCombatant source,
+        OffenseBattleCombatant target)
+    {
+        if (source == null || target == null)
+        {
+            return new CombatAttackPreview(
+                false,
+                "공격 대상을 선택하세요.",
+                CombatRangeBand.OutOfRange,
+                0f,
+                0f,
+                0f,
+                0f,
+                0f,
+                0f);
+        }
+
+        int distance = GetFormationDistance(source, target);
+        return combatResolution.Preview(new CombatAttackRequest(
+            $"{BattleId}:preview",
+            source.PersistentId,
+            target.PersistentId,
+            CreateCombatStats(source),
+            CreateCombatStats(target),
+            source.Weapon ?? CombatWeaponSnapshot.CreateUnarmed(),
+            distance,
+            source.FireMode,
+            target.CoverBlockChance > 0f
+                ? new CombatCoverSnapshot(
+                    CombatCoverHeight.Low,
+                    target.CoverBlockChance,
+                    0f,
+                    "offense-cover")
+                : default,
+            defenderDowned: target.IsDowned,
+            defenderMeleeLocked: distance <= 1,
+            attackerSuppression: source.Suppression,
+            defenderSuppression: target.Suppression,
+            defenderArmor: target.Armor));
+    }
+
+    public int GetFormationDistanceForPreview(
+        OffenseBattleCombatant source,
+        OffenseBattleCombatant target)
+    {
+        return source == null || target == null
+            ? 0
+            : GetFormationDistance(source, target);
     }
 
     internal float ApplyDamage(
@@ -729,6 +1115,11 @@ public sealed class OffenseBattleSession
         if (target.IsDead)
         {
             AddLog($"{target.DisplayName}이(가) 쓰러졌습니다.");
+            CompactFormation(target.Team);
+        }
+        else if (target.IsDowned)
+        {
+            AddLog($"{target.DisplayName}은(는) 부상으로 쓰러졌습니다.");
             CompactFormation(target.Team);
         }
 
@@ -855,6 +1246,12 @@ public sealed class OffenseBattleSession
                 return true;
             case OffenseBattleActionType.Ability:
                 return TryUseAbility(actor, command.TargetId, command.AbilityId, out result);
+            case OffenseBattleActionType.Reload:
+                return TryReloadWeapon(actor, out result);
+            case OffenseBattleActionType.SwitchWeapon:
+                return TrySwitchWeapon(actor, command.AbilityId, out result);
+            case OffenseBattleActionType.SetFireMode:
+                return TrySetFireMode(actor, command.AbilityId, out result);
             default:
                 result = new OffenseBattleCommandResult(false, "지원하지 않는 행동입니다.");
                 return false;
@@ -868,16 +1265,192 @@ public sealed class OffenseBattleSession
     {
         OffenseBattleCombatant target = FindCombatant(targetId);
         if (!IsValidTarget(actor, target, OffenseBattleTargetRule.Enemy)
-            || !IsReachableByBasicAttack(target))
+            || !IsReachableByBasicAttack(actor, target))
         {
             result = new OffenseBattleCommandResult(false, "공격할 수 없는 대상입니다.");
             return false;
         }
 
-        float damage = ApplyDamage(actor, target, CalculateBasicDamage(actor, target));
-        AddLog($"{actor.DisplayName}이(가) {target.DisplayName}에게 {damage:0.#} 피해를 줬습니다.");
-        result = new OffenseBattleCommandResult(true, "공격 성공", damage);
+        CombatWeaponSnapshot weapon = actor.Weapon ?? CombatWeaponSnapshot.CreateUnarmed();
+        int distance = GetFormationDistance(actor, target);
+        CombatAttackResult resolved = combatResolution.Resolve(new CombatAttackRequest(
+            $"{BattleId}:{LastProcessedCommandId + 1}:basic",
+            actor.PersistentId,
+            target.PersistentId,
+            CreateCombatStats(actor),
+            CreateCombatStats(target),
+            weapon,
+            distance,
+            actor.FireMode,
+            target.CoverBlockChance > 0f
+                ? new CombatCoverSnapshot(CombatCoverHeight.Low, target.CoverBlockChance, 0f, "offense-cover")
+                : default,
+            defenderDowned: target.HealthRatio <= 0.15f,
+            defenderMeleeLocked: distance <= 1,
+            attackerSuppression: actor.Suppression,
+            defenderSuppression: target.Suppression,
+            defenderArmor: target.Armor));
+        if (!resolved.Executed)
+        {
+            result = new OffenseBattleCommandResult(false, resolved.FailureReason);
+            return false;
+        }
+
+        if (weapon.RequiresAmmo && !string.IsNullOrWhiteSpace(weapon.InstanceId))
+        {
+            combatEquipmentRuntime?.TryConsumeLoadedAmmo(weapon.InstanceId);
+            if (combatEquipmentRuntime != null
+                && combatEquipmentRuntime.TryGetActiveWeapon(
+                    actor.PersistentId,
+                    out CombatWeaponSnapshot refreshed))
+            {
+                actor.SetCombatEquipment(refreshed, actor.Armor);
+            }
+        }
+        else if (weapon.Verb?.DropsWeaponOnUse == true
+            && !string.IsNullOrWhiteSpace(weapon.InstanceId))
+        {
+            thrownOwnerByInstance[weapon.InstanceId] = actor.PersistentId;
+            actor.SetCombatEquipment(CombatWeaponSnapshot.CreateUnarmed(), actor.Armor);
+        }
+
+        float damage = ApplyResolvedCombatDamage(actor, target, resolved);
+        string combatMessage = resolved.Hit
+            ? $"{actor.DisplayName}이(가) {target.DisplayName}의 {GetBodyPartName(resolved.BodyPart)}에 {damage:0.#} 피해를 줬습니다."
+            : resolved.CoverBlocked
+                ? $"{target.DisplayName}이(가) 엄폐물 뒤에서 공격을 피했습니다."
+                : resolved.Evaded
+                    ? $"{target.DisplayName}이(가) 공격을 회피했습니다."
+                    : $"{actor.DisplayName}의 공격이 빗나갔습니다.";
+        AddLog(combatMessage);
+        result = new OffenseBattleCommandResult(true, combatMessage, damage);
         return true;
+    }
+
+    private bool TryReloadWeapon(
+        OffenseBattleCombatant actor,
+        out OffenseBattleCommandResult result)
+    {
+        CombatWeaponSnapshot weapon = actor?.Weapon;
+        if (actor == null
+            || weapon == null
+            || !weapon.RequiresAmmo
+            || string.IsNullOrWhiteSpace(weapon.InstanceId)
+            || combatEquipmentRuntime == null
+            || !combatEquipmentRuntime.TryReloadFromCharacterInventory(
+                actor.PersistentId,
+                weapon.InstanceId,
+                out int consumedAmmo)
+            || consumedAmmo <= 0
+            || !combatEquipmentRuntime.TryGetActiveWeapon(
+                actor.PersistentId,
+                out CombatWeaponSnapshot refreshed))
+        {
+            result = new OffenseBattleCommandResult(false, "재장전할 탄약이 없습니다.");
+            return false;
+        }
+
+        actor.SetCombatEquipment(refreshed, actor.Armor);
+        result = new OffenseBattleCommandResult(
+            true,
+            $"{actor.DisplayName}이(가) {consumedAmmo}발을 재장전했습니다.");
+        return true;
+    }
+
+    private bool TrySwitchWeapon(
+        OffenseBattleCombatant actor,
+        string instanceId,
+        out OffenseBattleCommandResult result)
+    {
+        string failureReason = string.Empty;
+        if (actor == null
+            || combatEquipmentRuntime == null
+            || !combatEquipmentRuntime.TrySetActiveWeapon(
+                actor.PersistentId,
+                instanceId,
+                out failureReason)
+            || !combatEquipmentRuntime.TryGetActiveWeapon(
+                actor.PersistentId,
+                out CombatWeaponSnapshot weapon))
+        {
+            result = new OffenseBattleCommandResult(
+                false,
+                string.IsNullOrWhiteSpace(failureReason)
+                    ? "교체할 무기가 없습니다."
+                    : failureReason);
+            return false;
+        }
+
+        actor.SetCombatEquipment(weapon, actor.Armor);
+        result = new OffenseBattleCommandResult(
+            true,
+            $"{actor.DisplayName}이(가) 무기를 교체했습니다.");
+        return true;
+    }
+
+    private static bool TrySetFireMode(
+        OffenseBattleCombatant actor,
+        string modeId,
+        out OffenseBattleCommandResult result)
+    {
+        if (actor == null
+            || !Enum.TryParse(modeId, ignoreCase: true, out CombatFireMode mode)
+            || !SupportsFireMode(actor.Weapon, mode))
+        {
+            result = new OffenseBattleCommandResult(false, "이 무기로 사용할 수 없는 사격 모드입니다.");
+            return false;
+        }
+
+        actor.SetFireMode(mode);
+        result = new OffenseBattleCommandResult(
+            true,
+            $"사격 모드를 {GetFireModeName(mode)}(으)로 변경했습니다.");
+        return true;
+    }
+
+    private static bool SupportsFireMode(CombatWeaponSnapshot weapon, CombatFireMode mode)
+    {
+        if (weapon == null || !weapon.IsRanged)
+        {
+            return false;
+        }
+
+        return mode switch
+        {
+            CombatFireMode.Aimed => weapon.SupportsAimed,
+            CombatFireMode.Rapid => weapon.SupportsRapid,
+            CombatFireMode.Suppressive => weapon.SupportsSuppressive,
+            _ => false
+        };
+    }
+
+    private static string GetFireModeName(CombatFireMode mode)
+    {
+        return mode switch
+        {
+            CombatFireMode.Rapid => "속사",
+            CombatFireMode.Suppressive => "제압",
+            _ => "조준"
+        };
+    }
+
+    private void FinalizeRecoverableEquipment()
+    {
+        if (!IsComplete || recoverableEquipmentFinalized)
+        {
+            return;
+        }
+
+        recoverableEquipmentFinalized = true;
+        bool battleRecovered = Outcome == OffenseBattleOutcome.Victory;
+        foreach (KeyValuePair<string, string> thrown in thrownOwnerByInstance)
+        {
+            OffenseBattleCombatant owner = FindCombatant(thrown.Value);
+            if (!battleRecovered || owner == null || owner.IsDead)
+            {
+                combatEquipmentRuntime?.TryMarkLost(thrown.Key);
+            }
+        }
     }
 
     private bool TryUseAbility(
@@ -947,17 +1520,21 @@ public sealed class OffenseBattleSession
 
             PrepareCurrentTurn();
             Outcome = ResolveOutcome();
+            if (!IsComplete && CurrentActor?.PinnedThisTurn == true)
+            {
+                AddLog($"{CurrentActor.DisplayName}은(는) 제압되어 이번 행동을 잃었습니다.");
+            }
             attempts++;
         }
         while (!IsComplete
-            && (CurrentActor == null || CurrentActor.IsDead)
+            && (CurrentActor == null || !CurrentActor.CanTakeTurn)
             && attempts <= combatants.Count * 2);
     }
 
     private void PrepareCurrentTurn()
     {
         OffenseBattleCombatant actor = CurrentActor;
-        if (actor == null || actor.IsDead)
+        if (actor == null || actor.IsDead || actor.IsDowned)
         {
             return;
         }
@@ -983,7 +1560,7 @@ public sealed class OffenseBattleSession
     {
         initiativeOrder.Clear();
         initiativeOrder.AddRange(combatants
-            .Where(combatant => !combatant.IsDead)
+            .Where(combatant => !combatant.IsDead && !combatant.IsDowned)
             .OrderByDescending(combatant => combatant.Initiative)
             .ThenBy(combatant => combatant.PersistentId, StringComparer.Ordinal)
             .Select(combatant => combatant.PersistentId));
@@ -991,8 +1568,14 @@ public sealed class OffenseBattleSession
 
     private OffenseBattleOutcome ResolveOutcome()
     {
-        bool alliesAlive = combatants.Any(combatant => combatant.Team == OffenseBattleTeam.Allies && !combatant.IsDead);
-        bool enemiesAlive = combatants.Any(combatant => combatant.Team == OffenseBattleTeam.Enemies && !combatant.IsDead);
+        bool alliesAlive = combatants.Any(combatant =>
+            combatant.Team == OffenseBattleTeam.Allies
+            && !combatant.IsDead
+            && !combatant.IsDowned);
+        bool enemiesAlive = combatants.Any(combatant =>
+            combatant.Team == OffenseBattleTeam.Enemies
+            && !combatant.IsDead
+            && !combatant.IsDowned);
         if (!alliesAlive) return OffenseBattleOutcome.Defeat;
         if (!enemiesAlive) return OffenseBattleOutcome.Victory;
         return Outcome is OffenseBattleOutcome.Retreated or OffenseBattleOutcome.AbortedOwnerDeath
@@ -1014,7 +1597,7 @@ public sealed class OffenseBattleSession
         {
             OffenseBattleTargetRule.Self => ReferenceEquals(actor, target),
             OffenseBattleTargetRule.Ally => actor.Team == target.Team,
-            OffenseBattleTargetRule.Enemy => actor.Team != target.Team,
+            OffenseBattleTargetRule.Enemy => actor.Team != target.Team && !target.IsDowned,
             _ => false
         };
     }
@@ -1029,15 +1612,31 @@ public sealed class OffenseBattleSession
             && IsPositionAllowed(ability.TargetPositions, target.Formation);
     }
 
-    private bool IsReachableByBasicAttack(OffenseBattleCombatant target)
+    private bool IsReachableByBasicAttack(
+        OffenseBattleCombatant source,
+        OffenseBattleCombatant target)
     {
-        if (target == null || target.IsDead)
+        if (source == null || target == null || target.IsDead || target.IsDowned)
         {
             return false;
         }
 
+        CombatWeaponSnapshot weapon = source.Weapon ?? CombatWeaponSnapshot.CreateUnarmed();
+        int distance = GetFormationDistance(source, target);
+        if (distance > weapon.MaximumRange
+            || weapon.GetAccuracyMultiplier(CombatRangeRules.GetBand(distance)) <= 0f)
+        {
+            return false;
+        }
+
+        if (weapon.IsRanged)
+        {
+            return true;
+        }
+
         bool hasForwardTarget = combatants.Any(candidate => candidate.Team == target.Team
             && !candidate.IsDead
+            && !candidate.IsDowned
             && candidate.Formation != OffenseFormationSlot.Rear);
         return !hasForwardTarget || target.Formation != OffenseFormationSlot.Rear;
     }
@@ -1050,7 +1649,9 @@ public sealed class OffenseBattleSession
     private void CompactFormation(OffenseBattleTeam team)
     {
         OffenseBattleCombatant[] survivors = combatants
-            .Where(combatant => combatant.Team == team && !combatant.IsDead)
+            .Where(combatant => combatant.Team == team
+                && !combatant.IsDead
+                && !combatant.IsDowned)
             .OrderBy(combatant => combatant.Formation)
             .ThenBy(combatant => combatant.PersistentId, StringComparer.Ordinal)
             .Take(3)
@@ -1064,6 +1665,110 @@ public sealed class OffenseBattleSession
     private bool WouldBasicAttackKill(OffenseBattleCombatant source, OffenseBattleCombatant target)
     {
         return CalculateBasicDamage(source, target) >= target.CurrentHealth;
+    }
+
+    private float ApplyResolvedCombatDamage(
+        OffenseBattleCombatant source,
+        OffenseBattleCombatant target,
+        CombatAttackResult resolved)
+    {
+        if (!resolved.Hit)
+        {
+            target.ApplyCombatInjury(resolved);
+            return 0f;
+        }
+
+        float guard = target.Statuses
+            .Where(status => status.Type == OffenseBattleStatusType.Guard)
+            .Select(status => status.Value)
+            .DefaultIfEmpty(0f)
+            .Max();
+        float vulnerability = target.Statuses
+            .Where(status => status.Type == OffenseBattleStatusType.Vulnerability)
+            .Select(status => status.Value)
+            .DefaultIfEmpty(0f)
+            .Max();
+        float adjustedDamage = Mathf.Max(
+            0.5f,
+            resolved.AppliedDamage
+            * (1f - Mathf.Clamp01(guard))
+            * (1f + vulnerability));
+        CombatAttackResult adjusted = new CombatAttackResult(
+            resolved.Executed,
+            resolved.Hit,
+            resolved.CoverBlocked,
+            resolved.Evaded,
+            resolved.BodyPart,
+            resolved.RawDamage,
+            adjustedDamage,
+            resolved.Bleeding,
+            resolved.Suppression,
+            resolved.ArmorDurabilityDamage,
+            resolved.ArmorInstanceId,
+            resolved.FailureReason,
+            resolved.ShieldBlocked,
+            resolved.CoverSourceId,
+            resolved.CoverDamage,
+            resolved.ArmorDurabilityHits);
+        float applied = target.ApplyCombatInjury(adjusted);
+        if (resolved.ArmorDurabilityHits.Count > 0)
+        {
+            for (int i = 0; i < resolved.ArmorDurabilityHits.Count; i++)
+            {
+                CombatArmorDurabilityHit hit = resolved.ArmorDurabilityHits[i];
+                combatEquipmentRuntime?.TryApplyDurabilityDamage(hit.InstanceId, hit.Damage);
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(resolved.ArmorInstanceId))
+        {
+            combatEquipmentRuntime?.TryApplyDurabilityDamage(
+                resolved.ArmorInstanceId,
+                resolved.ArmorDurabilityDamage);
+        }
+
+        if (target.IsDead)
+        {
+            AddLog($"{target.DisplayName}이(가) 쓰러졌습니다.");
+            CompactFormation(target.Team);
+        }
+
+        return applied;
+    }
+
+    private static CombatStatSnapshot CreateCombatStats(OffenseBattleCombatant combatant)
+    {
+        float manipulation = combatant.Manipulation * combatant.Consciousness;
+        float mobility = combatant.Mobility * combatant.Consciousness;
+        return new CombatStatSnapshot(
+            combatant.Stats.Attack * manipulation,
+            combatant.Stats.Shooting * manipulation,
+            combatant.Stats.Evasion * mobility,
+            combatant.Stats.MoveSpeed * mobility,
+            combatant.Stats.Strength * manipulation,
+            combatant.Stats.Toughness,
+            combatant.Stats.Dexterity * manipulation,
+            Mathf.Min(combatant.HealthRatio, combatant.Consciousness));
+    }
+
+    private static int GetFormationDistance(
+        OffenseBattleCombatant source,
+        OffenseBattleCombatant target)
+    {
+        return 1 + ((int)source.Formation + (int)target.Formation) * 4;
+    }
+
+    private static string GetBodyPartName(CombatBodyPart bodyPart)
+    {
+        return bodyPart switch
+        {
+            CombatBodyPart.Head => "머리",
+            CombatBodyPart.Torso => "몸통",
+            CombatBodyPart.LeftArm => "왼팔",
+            CombatBodyPart.RightArm => "오른팔",
+            CombatBodyPart.LeftLeg => "왼다리",
+            CombatBodyPart.RightLeg => "오른다리",
+            _ => "몸"
+        };
     }
 
     private static float EstimateAbilityDamageMultiplier(CharacterCombatAbilityDefinition ability)
@@ -1142,7 +1847,9 @@ public static class OffenseEncounterCatalog
                 actor.GetCharacterStat(CharacterStatType.Strength) * stressMultiplier + equipment.strength,
                 actor.GetCharacterStat(CharacterStatType.Toughness) * stressMultiplier + equipment.toughness,
                 actor.GetCharacterStat(CharacterStatType.Dexterity) * stressMultiplier + equipment.dexterity,
-                actor.GetCharacterStat(CharacterStatType.MoveSpeed) * stressMultiplier + equipment.moveSpeed),
+                actor.GetCharacterStat(CharacterStatType.MoveSpeed) * stressMultiplier + equipment.moveSpeed,
+                actor.GetCharacterStat(CharacterStatType.Shooting) * stressMultiplier,
+                actor.GetCharacterStat(CharacterStatType.Evasion) * stressMultiplier),
             Mathf.Clamp(actor.CurrentHealth + equipment.maxHealth, 0f, maxHealth),
             CharacterCombatAbilityCatalog.GetAbilities(actor),
             identity?.Data != null ? identity.Data.id : -1,

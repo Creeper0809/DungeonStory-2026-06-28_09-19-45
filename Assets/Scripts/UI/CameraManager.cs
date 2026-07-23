@@ -1,21 +1,30 @@
 using System;
 using UnityEngine;
 using VContainer;
+using PixelPerfectCamera = UnityEngine.Rendering.Universal.PixelPerfectCamera;
 
 public class CameraManager : MonoBehaviour
 {
     public float speed = 5.0f;
     public float edgeThreshold = 10.0f;
     public bool enableEdgeScroll = false;
+    public bool enableZoom = true;
     public Vector2 movementPadding = new Vector2(4f, 1f);
+    public Vector2 zoomBounds = new Vector2(3.25f, 10.5f);
+    public float wheelZoomStep = 0.85f;
+    public float keyboardZoomSpeed = 4.5f;
+    public bool blockWheelZoomOverUi = true;
+    public bool centerDungeonOnStart = true;
     public Vector2 maxBound;
     public Vector2 minBound;
 
     private IGridSystemProvider gridSystemProvider;
     private IMainCameraProvider mainCameraProvider;
     private IPlayerInputReader inputReader;
+    private IUiPointerBlocker uiPointerBlocker;
     private GridSystemManager gridSystemManager;
     private Camera targetCamera;
+    private PixelPerfectCamera pixelPerfectCamera;
     private float height;
     private float width;
     private float userSpeedMultiplier = 1f;
@@ -25,17 +34,20 @@ public class CameraManager : MonoBehaviour
     public void Construct(
         IGridSystemProvider gridSystemProvider,
         IMainCameraProvider mainCameraProvider,
-        IPlayerInputReader inputReader)
+        IPlayerInputReader inputReader,
+        IUiPointerBlocker uiPointerBlocker)
     {
         this.gridSystemProvider = gridSystemProvider ?? throw new ArgumentNullException(nameof(gridSystemProvider));
         this.mainCameraProvider = mainCameraProvider ?? throw new ArgumentNullException(nameof(mainCameraProvider));
         this.inputReader = inputReader ?? throw new ArgumentNullException(nameof(inputReader));
+        this.uiPointerBlocker = uiPointerBlocker;
         SubscribeToGridExpansionIfInjected();
     }
 
     private void Awake()
     {
         targetCamera = GetComponent<Camera>();
+        pixelPerfectCamera = GetComponent<PixelPerfectCamera>();
     }
 
     private void OnEnable()
@@ -49,6 +61,11 @@ public class CameraManager : MonoBehaviour
         UpdateViewportSize();
         if (gridSystemProvider != null)
         {
+            if (centerDungeonOnStart)
+            {
+                CenterOnDungeonInterior();
+            }
+
             ClampToCurrentBounds();
         }
     }
@@ -73,6 +90,9 @@ public class CameraManager : MonoBehaviour
         }
 
         IPlayerInputReader input = inputReader;
+        HandleZoomInput(input);
+        UpdateViewportSize();
+
         bool useWasd = controlScheme != DungeonCameraControlScheme.ArrowsOnly;
         bool useArrows = controlScheme != DungeonCameraControlScheme.WasdOnly;
         float effectiveSpeed = speed * userSpeedMultiplier;
@@ -98,6 +118,41 @@ public class CameraManager : MonoBehaviour
         ClampToCurrentBounds();
     }
 
+    public void ApplyZoomDelta(float zoomInAmount)
+    {
+        Camera camera = targetCamera != null ? targetCamera : ResolveMainCamera();
+        if (camera == null || !camera.orthographic || Mathf.Approximately(zoomInAmount, 0f))
+        {
+            return;
+        }
+
+        float min = Mathf.Min(zoomBounds.x, zoomBounds.y);
+        float max = Mathf.Max(zoomBounds.x, zoomBounds.y);
+        float nextSize = Mathf.Clamp(camera.orthographicSize - zoomInAmount, min, max);
+        PreparePixelPerfectCameraForZoom(nextSize);
+        camera.orthographicSize = nextSize;
+        UpdateViewportSize();
+        if (gridSystemProvider != null)
+        {
+            ClampToCurrentBounds();
+        }
+    }
+
+    private void PreparePixelPerfectCameraForZoom(float targetSize)
+    {
+        if (pixelPerfectCamera == null)
+        {
+            pixelPerfectCamera = GetComponent<PixelPerfectCamera>();
+        }
+
+        if (pixelPerfectCamera != null && pixelPerfectCamera.isActiveAndEnabled)
+        {
+            // Compatibility mode keeps pixel snapping active without restoring the
+            // camera's orthographic size during PixelPerfectCamera.OnPreCull().
+            pixelPerfectCamera.CorrectCinemachineOrthoSize(targetSize);
+        }
+    }
+
     public void ClampToCurrentBounds()
     {
         UpdateViewportSize();
@@ -106,6 +161,32 @@ public class CameraManager : MonoBehaviour
         float clampX = ClampAxis(transform.position.x, lowerBound.x, upperBound.x, width);
         float clampY = ClampAxis(transform.position.y, lowerBound.y, upperBound.y, height);
         transform.position = new Vector3(clampX, clampY, -10f);
+    }
+
+    public bool CenterOnDungeonInterior()
+    {
+        Grid grid = RequireGrid();
+        float minX = float.PositiveInfinity;
+        float maxX = float.NegativeInfinity;
+        foreach (GridCell cell in grid.GetCells())
+        {
+            if (cell == null || cell.AreaType != GridCellAreaType.DungeonInterior)
+            {
+                continue;
+            }
+
+            float worldX = grid.GetWorldPos(cell.Position).x;
+            minX = Mathf.Min(minX, worldX);
+            maxX = Mathf.Max(maxX, worldX);
+        }
+
+        if (float.IsInfinity(minX) || float.IsInfinity(maxX))
+        {
+            return false;
+        }
+
+        transform.position = new Vector3((minX + maxX) * 0.5f, transform.position.y, -10f);
+        return true;
     }
 
     public void ApplyUserPreferences(
@@ -218,6 +299,55 @@ public class CameraManager : MonoBehaviour
         return negativePressed ? -1f : 1f;
     }
 
+    private void HandleZoomInput(IPlayerInputReader input)
+    {
+        if (!enableZoom || input == null)
+        {
+            return;
+        }
+
+        float zoomInAmount = 0f;
+        float rawScrollDelta = input.ScrollDeltaY;
+        if (!Mathf.Approximately(rawScrollDelta, 0f) && !IsWheelZoomBlocked())
+        {
+            zoomInAmount += NormalizeScrollDelta(rawScrollDelta) * wheelZoomStep;
+        }
+
+        float keyboardAxis = GetKeyboardAxis(
+            input.GetKey(KeyCode.Minus)
+                || input.GetKey(KeyCode.KeypadMinus)
+                || input.GetKey(KeyCode.PageDown),
+            input.GetKey(KeyCode.Equals)
+                || input.GetKey(KeyCode.KeypadPlus)
+                || input.GetKey(KeyCode.PageUp));
+        zoomInAmount += keyboardAxis * keyboardZoomSpeed * Time.unscaledDeltaTime;
+        ApplyZoomDelta(zoomInAmount);
+    }
+
+    private bool IsWheelZoomBlocked()
+    {
+        if (!blockWheelZoomOverUi || uiPointerBlocker == null)
+        {
+            return false;
+        }
+
+        return uiPointerBlocker is EventSystemUiPointerBlocker eventSystemBlocker
+            ? eventSystemBlocker.IsPointerOverScrollableUi()
+            : uiPointerBlocker.IsPointerOverUi();
+    }
+
+    private static float NormalizeScrollDelta(float rawDelta)
+    {
+        if (Mathf.Approximately(rawDelta, 0f))
+        {
+            return 0f;
+        }
+
+        return Mathf.Abs(rawDelta) > 10f
+            ? rawDelta / 120f
+            : rawDelta;
+    }
+
     private float GetHorizontalEdgeAxis(IPlayerInputReader input, Vector3 mousePosition)
     {
         if (!IsUsableEdgeScrollPointer(input, mousePosition))
@@ -273,7 +403,7 @@ public class CameraManager : MonoBehaviour
     {
         if (mainCameraProvider == null)
         {
-            return Camera.main;
+            return targetCamera;
         }
 
         Camera camera = mainCameraProvider.Camera;

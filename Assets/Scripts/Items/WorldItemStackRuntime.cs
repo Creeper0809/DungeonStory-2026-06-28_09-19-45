@@ -38,10 +38,16 @@ public sealed class WorldItemStackSaveData
     public int gridY;
     public string reservedByPersistentId = string.Empty;
     public string destinationId = string.Empty;
+    public string sourceStorageDestinationId = string.Empty;
     public bool hasDestinationPosition;
     public int destinationGridX;
     public int destinationGridY;
     public bool forbidden;
+    public string sourceCharacterId = string.Empty;
+    public string sourceDisplayName = string.Empty;
+    public string sourceSpeciesTag = string.Empty;
+    public string sourceDeathReason = string.Empty;
+    public bool emergencyButcheryAllowed;
 }
 
 public sealed class WorldItemStackSnapshot
@@ -59,9 +65,16 @@ public sealed class WorldItemStackSnapshot
     public Vector2Int Position { get; set; }
     public string ReservedByPersistentId { get; set; }
     public string DestinationId { get; set; }
+    public string SourceStorageDestinationId { get; set; }
     public bool HasDestinationPosition { get; set; }
     public Vector2Int DestinationPosition { get; set; }
     public bool Forbidden { get; set; }
+    public string SourceCharacterId { get; set; }
+    public string SourceDisplayName { get; set; }
+    public string SourceSpeciesTag { get; set; }
+    public string SourceDeathReason { get; set; }
+    public bool EmergencyButcheryAllowed { get; set; }
+    public bool HasUniqueMetadata => !string.IsNullOrWhiteSpace(SourceCharacterId);
     public float TotalWeight => UnitWeight * Quantity;
     public int TotalValue => UnitPrice * Quantity;
     public bool IsReserved => !string.IsNullOrWhiteSpace(ReservedByPersistentId);
@@ -93,6 +106,115 @@ public enum WorldItemHaulDestinationKind
 {
     Warehouse = 0,
     FacilityBuffer = 1
+}
+
+public enum WorldItemHaulPlanUnloadReason
+{
+    None = 0,
+    LoadLimitReached = 1,
+    NoPickupCandidate = 2,
+    JobChanged = 3,
+    Idle = 4,
+    Interrupted = 5,
+    Completed = 6
+}
+
+public readonly struct WorldItemReservedStackQuantity
+{
+    public WorldItemReservedStackQuantity(
+        string stackId,
+        string itemId,
+        int quantity,
+        Vector2Int position,
+        WorldItemHaulDestinationKind destinationKind,
+        string destinationId)
+    {
+        StackId = stackId ?? string.Empty;
+        ItemId = itemId ?? string.Empty;
+        Quantity = Mathf.Max(0, quantity);
+        Position = position;
+        DestinationKind = destinationKind;
+        DestinationId = destinationId ?? string.Empty;
+    }
+
+    public string StackId { get; }
+    public string ItemId { get; }
+    public int Quantity { get; }
+    public Vector2Int Position { get; }
+    public WorldItemHaulDestinationKind DestinationKind { get; }
+    public string DestinationId { get; }
+    public bool IsValid => !string.IsNullOrWhiteSpace(StackId) && Quantity > 0;
+}
+
+public readonly struct WorldItemHaulPlanLeg
+{
+    public WorldItemHaulPlanLeg(
+        WorldItemReservedStackQuantity reservation,
+        Vector2Int pickupStandPosition,
+        IWarehouseFacility warehouse,
+        Vector2Int deliveryPosition,
+        Vector2Int dropPosition)
+    {
+        Reservation = reservation;
+        PickupStandPosition = pickupStandPosition;
+        Warehouse = warehouse;
+        DeliveryPosition = deliveryPosition;
+        DropPosition = dropPosition;
+    }
+
+    public WorldItemReservedStackQuantity Reservation { get; }
+    public Vector2Int ItemPosition => Reservation.Position;
+    public Vector2Int PickupStandPosition { get; }
+    public IWarehouseFacility Warehouse { get; }
+    public Vector2Int DeliveryPosition { get; }
+    public Vector2Int DropPosition { get; }
+    public WorldItemHaulDestinationKind DestinationKind => Reservation.DestinationKind;
+    public string DestinationId => Reservation.DestinationId;
+    public bool IsValid => Reservation.IsValid
+        && (DestinationKind == WorldItemHaulDestinationKind.FacilityBuffer || Warehouse != null);
+}
+
+public sealed class WorldItemHaulPlan
+{
+    public WorldItemHaulPlan(
+        IReadOnlyList<WorldItemHaulPlanLeg> pickupLegs,
+        IReadOnlyList<WorldItemHaulPlanLeg> deliveryLegs,
+        IReadOnlyList<WorldItemReservedStackQuantity> reservedStackQuantities,
+        float totalWeight,
+        int expectedDetourCost,
+        WorldItemHaulDestinationKind primaryDestination,
+        string primaryDestinationId)
+    {
+        PickupLegs = pickupLegs ?? Array.Empty<WorldItemHaulPlanLeg>();
+        DeliveryLegs = deliveryLegs ?? Array.Empty<WorldItemHaulPlanLeg>();
+        ReservedStackQuantities = reservedStackQuantities ?? Array.Empty<WorldItemReservedStackQuantity>();
+        TotalWeight = Mathf.Max(0f, totalWeight);
+        ExpectedDetourCost = Mathf.Max(0, expectedDetourCost);
+        PrimaryDestination = primaryDestination;
+        PrimaryDestinationId = primaryDestinationId ?? string.Empty;
+    }
+
+    public IReadOnlyList<WorldItemHaulPlanLeg> PickupLegs { get; }
+    public IReadOnlyList<WorldItemHaulPlanLeg> DeliveryLegs { get; }
+    public IReadOnlyList<WorldItemReservedStackQuantity> ReservedStackQuantities { get; }
+    public float TotalWeight { get; }
+    public int ExpectedDetourCost { get; }
+    public WorldItemHaulDestinationKind PrimaryDestination { get; }
+    public string PrimaryDestinationId { get; }
+    public bool IsValid => PickupLegs.Count > 0 && DeliveryLegs.Count > 0 && ReservedStackQuantities.Count > 0;
+    public string Summary => $"{ReservedStackQuantities.Count}스택 · {TotalWeight:0.#}kg";
+}
+
+public interface IHaulPlanBuilder
+{
+    bool TryReserveBestHaulPlan(CharacterActor actor, out WorldItemHaulPlan plan, out string failureReason);
+    bool TryReserveStoredItemForDirectPickup(
+        CharacterActor actor,
+        string itemId,
+        int quantity,
+        out WorldItemReservedStackQuantity reservation,
+        out Vector2Int pickupStandPosition,
+        out string failureReason);
 }
 
 public readonly struct WorldItemHaulJob
@@ -135,6 +257,8 @@ public interface IWorldItemStackRuntime
     IDungeonItemCatalogProvider CatalogProvider { get; }
     IItemHaulingSettingsProvider HaulingSettingsProvider { get; }
     bool StoredItemMarkersVisible { get; }
+    int ItemStackVersion { get; }
+    int HaulJobVersion { get; }
     DungeonPhysicalItemSaveData Capture();
     void Restore(DungeonPhysicalItemSaveData snapshot);
     void SetStoredItemMarkersVisible(bool visible);
@@ -153,6 +277,17 @@ public interface IWorldItemStackRuntime
         WorldItemStackState state,
         string destinationId,
         out int spawned);
+    bool SpawnUniqueItemAt(
+        string itemId,
+        Vector2Int position,
+        WorldItemStackState state,
+        string destinationId,
+        out string stackId);
+    bool SpawnHumanoidCorpse(
+        CharacterActor source,
+        Vector2Int position,
+        string deathReason,
+        out string stackId);
     bool TryRequestFacilityDelivery(
         StockCategory category,
         int amount,
@@ -168,7 +303,21 @@ public interface IWorldItemStackRuntime
     IReadOnlyList<WorldItemStackSnapshot> GetStacksAt(Vector2Int position, bool includeStored = false);
     IReadOnlyList<WorldItemStackSnapshot> GetAllStacks();
     bool HasAvailableHaulJob(CharacterActor actor);
+    bool TryReserveBestHaulPlan(CharacterActor actor, out WorldItemHaulPlan plan, out string failureReason);
+    bool TryReserveStoredItemForDirectPickup(
+        CharacterActor actor,
+        string itemId,
+        int quantity,
+        out WorldItemReservedStackQuantity reservation,
+        out Vector2Int pickupStandPosition,
+        out string failureReason);
     bool TryReserveBestHaulJob(CharacterActor actor, out WorldItemHaulJob job, out string failureReason);
+    bool TryPickupReservedStackQuantity(
+        CharacterActor actor,
+        CharacterCarryInventory inventory,
+        WorldItemReservedStackQuantity reservation,
+        out int pickedUp,
+        out string failureReason);
     bool TryPickupReservedStack(
         CharacterActor actor,
         CharacterCarryInventory inventory,
@@ -199,6 +348,8 @@ public interface IWorldItemStackRuntime
     bool SetForbidden(string stackId, bool forbidden);
     bool PrioritizeHaul(string stackId);
     bool DeleteStack(string stackId);
+    bool TryConsumeStackQuantity(string stackId, int quantity, out WorldItemStackSnapshot consumed);
+    bool SetEmergencyButcheryAllowed(string stackId, bool allowed);
     int RemoveStacksByStateAndDestination(WorldItemStackState state, string destinationId);
 }
 
@@ -211,18 +362,26 @@ internal sealed class WorldItemStackRecord
     public Vector2Int position;
     public string reservedByPersistentId = string.Empty;
     public string destinationId = string.Empty;
+    public string sourceStorageDestinationId = string.Empty;
     public bool hasDestinationPosition;
     public Vector2Int destinationPosition;
     public bool forbidden;
+    public string sourceCharacterId = string.Empty;
+    public string sourceDisplayName = string.Empty;
+    public string sourceSpeciesTag = string.Empty;
+    public string sourceDeathReason = string.Empty;
+    public bool emergencyButcheryAllowed;
 }
 
 public sealed class WorldItemStackRuntime :
     IWorldItemStackRuntime,
+    IHaulPlanBuilder,
     IStartable,
     IDisposable
 {
     public const string FacilityInputDestinationPrefix = "facility-input:";
     public const string WarehouseStorageDestinationPrefix = "warehouse:";
+    public const string CombatLoadoutDestinationPrefix = "combat-loadout-pickup:";
 
     private readonly IGridSystemProvider gridSystemProvider;
     private readonly IDungeonSceneComponentQuery sceneQuery;
@@ -231,13 +390,20 @@ public sealed class WorldItemStackRuntime :
     private readonly ICharacterIdRegistry characterIdRegistry;
     private readonly IWorldDropZoneQuery worldDropZoneQuery;
     private readonly ICharacterSpawnerProvider characterSpawnerProvider;
+    private Camera cachedMainCamera;
     private readonly List<WorldItemStackRecord> stacks = new List<WorldItemStackRecord>();
     private readonly Dictionary<string, WorldItemStackRecord> stacksById =
         new Dictionary<string, WorldItemStackRecord>(StringComparer.Ordinal);
+    private readonly Dictionary<Vector2Int, List<WorldItemStackRecord>> stacksByPosition =
+        new Dictionary<Vector2Int, List<WorldItemStackRecord>>();
+    private readonly List<WorldItemStackRecord> haulableStacksCache = new List<WorldItemStackRecord>();
+    private readonly HashSet<string> prioritizedHaulStackIds =
+        new HashSet<string>(StringComparer.Ordinal);
     private readonly Dictionary<Vector2Int, WorldItemStackMarker> markersByPosition =
         new Dictionary<Vector2Int, WorldItemStackMarker>();
     private int nextStackSequence = 1;
     private bool storedItemMarkersVisible;
+    private bool haulableStacksDirty = true;
 
     public WorldItemStackRuntime(
         IGridSystemProvider gridSystemProvider,
@@ -264,6 +430,20 @@ public sealed class WorldItemStackRuntime :
     public IDungeonItemCatalogProvider CatalogProvider => catalogProvider;
     public IItemHaulingSettingsProvider HaulingSettingsProvider => haulingSettingsProvider;
     public bool StoredItemMarkersVisible => storedItemMarkersVisible;
+    public int ItemStackVersion { get; private set; }
+    public int HaulJobVersion { get; private set; }
+    internal Camera MainCamera
+    {
+        get
+        {
+            if (cachedMainCamera == null)
+            {
+                cachedMainCamera = sceneQuery.First<Camera>(includeInactive: true);
+            }
+
+            return cachedMainCamera;
+        }
+    }
 
     public void Start()
     {
@@ -280,7 +460,7 @@ public sealed class WorldItemStackRuntime :
 
         foreach (WorldItemStackMarker marker in markersByPosition.Values.Where(marker => marker != null))
         {
-            UnityEngine.Object.Destroy(marker.gameObject);
+            DestroyMarker(marker);
         }
 
         markersByPosition.Clear();
@@ -372,13 +552,20 @@ public sealed class WorldItemStackRuntime :
                 position = new Vector2Int(entry.gridX, entry.gridY),
                 reservedByPersistentId = entry.reservedByPersistentId?.Trim() ?? string.Empty,
                 destinationId = entry.destinationId?.Trim() ?? string.Empty,
+                sourceStorageDestinationId = entry.sourceStorageDestinationId?.Trim() ?? string.Empty,
                 hasDestinationPosition = entry.hasDestinationPosition,
                 destinationPosition = new Vector2Int(entry.destinationGridX, entry.destinationGridY),
                 forbidden = entry.forbidden
+                ,sourceCharacterId = entry.sourceCharacterId?.Trim() ?? string.Empty
+                ,sourceDisplayName = entry.sourceDisplayName?.Trim() ?? string.Empty
+                ,sourceSpeciesTag = entry.sourceSpeciesTag?.Trim() ?? string.Empty
+                ,sourceDeathReason = entry.sourceDeathReason?.Trim() ?? string.Empty
+                ,emergencyButcheryAllowed = entry.emergencyButcheryAllowed
             };
             AddRecord(record);
         }
 
+        NormalizeLegacyWarehouseStorageIds();
         SyncWarehouseInventoriesFromStoredStacks();
         RefreshAllMarkers();
     }
@@ -431,6 +618,82 @@ public sealed class WorldItemStackRuntime :
         return spawned == amount;
     }
 
+    public bool SpawnUniqueItemAt(
+        string itemId,
+        Vector2Int position,
+        WorldItemStackState state,
+        string destinationId,
+        out string stackId)
+    {
+        stackId = string.Empty;
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return false;
+        }
+
+        HashSet<string> existingIds = stacks
+            .Where(record => record != null)
+            .Select(record => record.stackId)
+            .ToHashSet(StringComparer.Ordinal);
+        int spawned = Spawn(
+            itemId.Trim(),
+            1,
+            position,
+            state,
+            destinationId ?? string.Empty);
+        WorldItemStackRecord created = stacks.LastOrDefault(record =>
+            record != null && !existingIds.Contains(record.stackId));
+        if (spawned != 1 || created == null)
+        {
+            return false;
+        }
+
+        stackId = created.stackId;
+        return true;
+    }
+
+    public bool SpawnHumanoidCorpse(
+        CharacterActor source,
+        Vector2Int position,
+        string deathReason,
+        out string stackId)
+    {
+        stackId = string.Empty;
+        if (source == null)
+        {
+            return false;
+        }
+
+        string persistentId = source.Identity?.PersistentId;
+        if (string.IsNullOrWhiteSpace(persistentId))
+        {
+            persistentId = $"character:{source.GetInstanceID()}";
+        }
+
+        int before = nextStackSequence;
+        int spawned = Spawn(
+            DarkSurvivalItemDefinitions.HumanoidCorpseItemId,
+            1,
+            position,
+            WorldItemStackState.Loose,
+            string.Empty,
+            sourceCharacterId: persistentId,
+            sourceDisplayName: source.Identity?.DisplayName ?? source.name,
+            sourceSpeciesTag: source.Identity?.SpeciesTag ?? string.Empty,
+            sourceDeathReason: deathReason ?? string.Empty,
+            emergencyButcheryAllowed: false);
+        if (spawned <= 0)
+        {
+            return false;
+        }
+
+        stackId = stacks.LastOrDefault(record => record != null
+            && record.itemId == DarkSurvivalItemDefinitions.HumanoidCorpseItemId
+            && record.sourceCharacterId == persistentId
+            && record.position == position)?.stackId ?? $"stack:{before:D8}";
+        return true;
+    }
+
     public bool TryRequestFacilityDelivery(
         StockCategory category,
         int amount,
@@ -454,56 +717,42 @@ public sealed class WorldItemStackRuntime :
             return false;
         }
 
+        DungeonItemDefinition definition = catalogProvider.GetDefinition(category);
         IWarehouseFacility[] warehouses = GetWarehouses().ToArray();
-        if (warehouses.Sum(candidate => candidate.Inventory.GetStock(category)) < remaining)
+        foreach (IWarehouseFacility warehouse in warehouses)
+        {
+            EnsureStoredWarehouseMirror(warehouse, definition.ItemId, category);
+        }
+
+        int looseAvailable = CountLooseStockAvailable(definition.ItemId);
+        int warehouseAvailable = warehouses.Sum(candidate =>
+            CountUnassignedStoredStock(candidate, definition.ItemId));
+        if (looseAvailable + warehouseAvailable < remaining)
         {
             failureReason = "stock unavailable";
             return false;
         }
 
-        DungeonItemDefinition definition = catalogProvider.GetDefinition(category);
-        foreach (IWarehouseFacility warehouse in warehouses
-            .Where(candidate => candidate.Inventory.GetStock(category) > 0)
-            .OrderBy(candidate => candidate is BuildableObject building
-                ? Mathf.Abs(building.centerPos.x - destinationPosition.x)
-                    + Mathf.Abs(building.centerPos.y - destinationPosition.y)
-                : int.MaxValue))
+        int looseRequested = RequestLooseStockDelivery(
+            definition.ItemId,
+            remaining,
+            destinationPosition,
+            normalizedDestination);
+        requested += looseRequested;
+        remaining -= looseRequested;
+        if (remaining <= 0)
         {
-            int withdrawn = warehouse.Inventory.Withdraw(category, remaining);
-            if (withdrawn <= 0)
-            {
-                continue;
-            }
-
-            int storedRemoved = RemoveStoredWarehouseItems(warehouse, definition.ItemId, withdrawn);
-            Vector2Int sourcePosition = warehouse is BuildableObject building
-                ? building.centerPos
-                : Vector2Int.zero;
-            int spawned = Spawn(
-                definition.ItemId,
-                withdrawn,
-                sourcePosition,
-                WorldItemStackState.Loose,
-                normalizedDestination,
-                hasDestinationPosition: true,
-                destinationPosition: destinationPosition);
-            requested += spawned;
-            remaining -= spawned;
-            if (spawned < withdrawn)
-            {
-                int rollback = withdrawn - spawned;
-                warehouse.Inventory.AddStock(category, rollback);
-                if (storedRemoved > 0)
-                {
-                    AddStoredWarehouseItems(warehouse, definition.ItemId, Mathf.Min(rollback, storedRemoved));
-                }
-            }
-
-            if (remaining <= 0)
-            {
-                break;
-            }
+            return true;
         }
+
+        int storedRequested = RequestStoredStockDelivery(
+            warehouses,
+            definition.ItemId,
+            remaining,
+            destinationPosition,
+            normalizedDestination);
+        requested += storedRequested;
+        remaining -= storedRequested;
 
         if (requested <= 0)
         {
@@ -563,10 +812,16 @@ public sealed class WorldItemStackRuntime :
 
     public IReadOnlyList<WorldItemStackSnapshot> GetStacksAt(Vector2Int position, bool includeStored = false)
     {
-        return stacks
+        if (!stacksByPosition.TryGetValue(position, out List<WorldItemStackRecord> records)
+            || records == null
+            || records.Count == 0)
+        {
+            return Array.Empty<WorldItemStackSnapshot>();
+        }
+
+        return records
             .Where(stack => stack != null
                 && stack.quantity > 0
-                && stack.position == position
                 && IsVisibleState(stack.state, includeStored))
             .Select(ToSnapshot)
             .OrderBy(GetStateSortOrder)
@@ -586,7 +841,105 @@ public sealed class WorldItemStackRuntime :
 
     public bool HasAvailableHaulJob(CharacterActor actor)
     {
-        return TryFindBestHaulJob(actor, reserve: false, out _, out _);
+        return TryFindBestHaulPlan(actor, reserve: false, out _, out _);
+    }
+
+    public bool TryReserveBestHaulPlan(
+        CharacterActor actor,
+        out WorldItemHaulPlan plan,
+        out string failureReason)
+    {
+        return TryFindBestHaulPlan(actor, reserve: true, out plan, out failureReason);
+    }
+
+    public bool TryReserveStoredItemForDirectPickup(
+        CharacterActor actor,
+        string itemId,
+        int quantity,
+        out WorldItemReservedStackQuantity reservation,
+        out Vector2Int pickupStandPosition,
+        out string failureReason)
+    {
+        reservation = default;
+        pickupStandPosition = default;
+        failureReason = string.Empty;
+        if (actor == null
+            || string.IsNullOrWhiteSpace(itemId)
+            || quantity <= 0
+            || !TryGetGrid(out Grid grid))
+        {
+            failureReason = "직접 수령 대상이 올바르지 않습니다.";
+            return false;
+        }
+
+        string actorId = characterIdRegistry.GetOrAssignPersistentId(actor);
+        GridPathSearchResult reachable = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
+            : null;
+        if (reachable == null
+            && !GridPathSearchBroker.TryGetSearch(
+                grid,
+                actor.GetNowXY(),
+                () => true,
+                out reachable))
+        {
+            failureReason = "장비 보관 위치로 갈 수 없습니다.";
+            return false;
+        }
+
+        WorldItemStackRecord selected = stacks
+            .Where(record => record != null
+                && record.quantity > 0
+                && record.state == WorldItemStackState.Stored
+                && !record.forbidden
+                && string.IsNullOrWhiteSpace(record.reservedByPersistentId)
+                && string.Equals(record.itemId, itemId, StringComparison.Ordinal))
+            .Select(record => new
+            {
+                Record = record,
+                HasStand = TryResolvePickupStandCell(
+                    grid,
+                    record.position,
+                    out Vector2Int stand),
+                Stand = stand
+            })
+            .Where(candidate => candidate.HasStand
+                && reachable.ContainsPosition(candidate.Stand))
+            .OrderBy(candidate => GetManhattanDistance(
+                actor.GetNowXY(),
+                candidate.Stand))
+            .Select(candidate => candidate.Record)
+            .FirstOrDefault();
+        if (selected == null
+            || !TryResolvePickupStandCell(
+                grid,
+                selected.position,
+                out pickupStandPosition))
+        {
+            failureReason = "창고에 준비된 장비가 없습니다.";
+            return false;
+        }
+
+        if (TryGetWarehouseStockCategory(selected.itemId, out _)
+            && string.IsNullOrWhiteSpace(selected.sourceStorageDestinationId))
+        {
+            selected.sourceStorageDestinationId = selected.destinationId;
+            selected.destinationId = CombatLoadoutDestinationPrefix + actorId;
+            selected.hasDestinationPosition = true;
+            selected.destinationPosition = actor.GetNowXY();
+        }
+
+        selected.reservedByPersistentId = actorId;
+        reservation = new WorldItemReservedStackQuantity(
+            selected.stackId,
+            selected.itemId,
+            Mathf.Min(selected.quantity, Mathf.Max(1, quantity)),
+            selected.position,
+            WorldItemHaulDestinationKind.Warehouse,
+            selected.destinationId);
+        MarkStacksChanged();
+        RefreshMarkerAt(selected.position);
+        return true;
     }
 
     public bool TryReserveBestHaulJob(
@@ -595,6 +948,109 @@ public sealed class WorldItemStackRuntime :
         out string failureReason)
     {
         return TryFindBestHaulJob(actor, reserve: true, out job, out failureReason);
+    }
+
+    public bool TryPickupReservedStackQuantity(
+        CharacterActor actor,
+        CharacterCarryInventory inventory,
+        WorldItemReservedStackQuantity reservation,
+        out int pickedUp,
+        out string failureReason)
+    {
+        pickedUp = 0;
+        failureReason = string.Empty;
+        if (actor == null || inventory == null || !reservation.IsValid)
+        {
+            failureReason = "invalid haul reservation";
+            return false;
+        }
+
+        string actorId = characterIdRegistry.GetOrAssignPersistentId(actor);
+        if (!stacksById.TryGetValue(reservation.StackId, out WorldItemStackRecord record)
+            || record.quantity <= 0)
+        {
+            failureReason = "stack disappeared";
+            return false;
+        }
+
+        if (!string.Equals(record.reservedByPersistentId, actorId, StringComparison.Ordinal))
+        {
+            failureReason = "stack reserved by someone else";
+            return false;
+        }
+
+        int requested = Mathf.Min(record.quantity, Mathf.Max(1, reservation.Quantity));
+        if (IsOutboundStoredStack(record))
+        {
+            int accepted = inventory.GetMaxAcceptableQuantity(
+                record.itemId,
+                requested,
+                catalogProvider,
+                haulingSettingsProvider);
+            if (accepted <= 0)
+            {
+                failureReason = "carry limit";
+                return false;
+            }
+
+            if (!TryWithdrawOutboundStoredStock(
+                    record,
+                    accepted,
+                    out IWarehouseFacility sourceWarehouse,
+                    out StockCategory sourceCategory,
+                    out pickedUp,
+                    out failureReason))
+            {
+                return false;
+            }
+
+            if (!inventory.TryAdd(
+                    record.stackId,
+                    record.itemId,
+                    pickedUp,
+                    catalogProvider,
+                    haulingSettingsProvider,
+                    out string carryFailure))
+            {
+                sourceWarehouse.Inventory.Deposit(sourceCategory, pickedUp);
+                pickedUp = 0;
+                failureReason = string.IsNullOrWhiteSpace(carryFailure) ? "carry limit" : carryFailure;
+                return false;
+            }
+        }
+        else if (!inventory.TryAddPartialStack(
+                     record.stackId,
+                     record.itemId,
+                     requested,
+                     catalogProvider,
+                     haulingSettingsProvider,
+                     out pickedUp,
+                     out failureReason)
+                 || pickedUp <= 0)
+        {
+            failureReason = string.IsNullOrWhiteSpace(failureReason) ? "carry limit" : failureReason;
+            return false;
+        }
+
+        Vector2Int position = record.position;
+        CombatEquipmentRuntime.Active?.TrySetWorldStateBySourceStack(
+            record.stackId,
+            CombatEquipmentWorldState.Carried);
+        record.quantity -= pickedUp;
+        record.reservedByPersistentId = string.Empty;
+        if (record.quantity > 0 && IsCombatLoadoutDestination(record.destinationId))
+        {
+            RestoreDirectPickupStack(record);
+        }
+
+        MarkStacksChanged();
+        if (record.quantity <= 0)
+        {
+            RemoveRecord(record);
+        }
+
+        RefreshMarkerAt(position);
+        return true;
     }
 
     public bool TryPickupReservedStack(
@@ -624,33 +1080,19 @@ public sealed class WorldItemStackRuntime :
             return false;
         }
 
-        int accepted = inventory.GetMaxAcceptableQuantity(
-            record.itemId,
-            record.quantity,
-            catalogProvider,
-            haulingSettingsProvider);
-        if (accepted <= 0)
-        {
-            failureReason = "carry limit";
-            return false;
-        }
-
-        inventory.TryAdd(
+        WorldItemReservedStackQuantity reservation = new WorldItemReservedStackQuantity(
             record.stackId,
             record.itemId,
-            accepted,
-            catalogProvider,
-            haulingSettingsProvider,
-            out _);
-        record.quantity -= accepted;
-        record.reservedByPersistentId = string.Empty;
-        if (record.quantity <= 0)
-        {
-            RemoveRecord(record);
-        }
-
-        RefreshMarkerAt(job.ItemPosition);
-        return true;
+            record.quantity,
+            record.position,
+            job.DestinationKind,
+            job.DestinationId);
+        return TryPickupReservedStackQuantity(
+            actor,
+            inventory,
+            reservation,
+            out _,
+            out failureReason);
     }
 
     public bool TryDepositCarriedItems(
@@ -684,7 +1126,7 @@ public sealed class WorldItemStackRuntime :
             }
 
             int remaining = item.quantity;
-            if (DungeonItemCatalogSO.TryGetStockCategoryFromItemId(item.itemId, out StockCategory category))
+            if (TryGetWarehouseStockCategory(item.itemId, out StockCategory category))
             {
                 int deposited = warehouse.Inventory.Deposit(category, remaining);
                 if (deposited > 0)
@@ -695,12 +1137,52 @@ public sealed class WorldItemStackRuntime :
                 remaining -= deposited;
                 depositedAny |= deposited > 0;
             }
-            else if (DungeonItemCatalogSO.TryGetEquipmentIdFromItemId(item.itemId, out string equipmentId)
-                && ExpeditionEquipmentRuntime.Active != null)
+            else if (DungeonItemCatalogSO.TryGetEquipmentIdFromItemId(item.itemId, out string equipmentId))
             {
-                ExpeditionEquipmentRuntime.Active.AddInventory(equipmentId, remaining);
-                depositedAny |= remaining > 0;
-                remaining = 0;
+                ResourceCombatEquipmentCatalog combatCatalog = new ResourceCombatEquipmentCatalog();
+                bool isCombatEquipment = combatCatalog.TryGet(equipmentId, out _);
+                if (isCombatEquipment
+                    && remaining == 1
+                    && SpawnUniqueItemAt(
+                        item.itemId,
+                        ResolveWarehouseStoragePosition(warehouse),
+                        WorldItemStackState.Stored,
+                        GetWarehouseStorageDestinationId(warehouse),
+                        out string storedStackId))
+                {
+                    ICombatEquipmentRuntime combatRuntime = CombatEquipmentRuntime.Active;
+                    if (combatRuntime != null
+                        && combatRuntime.TryGetInstanceBySourceStack(
+                            item.sourceStackId,
+                            out CombatEquipmentInstance linked))
+                    {
+                        combatRuntime.TryLinkToWorldStack(
+                            linked.instanceId,
+                            storedStackId,
+                            CombatEquipmentWorldState.Stored);
+                    }
+                    else if (combatRuntime != null)
+                    {
+                        CombatEquipmentInstance created = combatRuntime.CreateInstance(
+                            equipmentId,
+                            CombatEquipmentQuality.Normal,
+                            CombatEquipmentWorldState.Stored);
+                        combatRuntime.TryLinkToWorldStack(
+                            created.instanceId,
+                            storedStackId,
+                            CombatEquipmentWorldState.Stored);
+                    }
+
+                    ExpeditionEquipmentRuntime.Active?.AddInventory(equipmentId, 1);
+                    depositedAny = true;
+                    remaining = 0;
+                }
+                else if (!isCombatEquipment && ExpeditionEquipmentRuntime.Active != null)
+                {
+                    ExpeditionEquipmentRuntime.Active.AddInventory(equipmentId, remaining);
+                    depositedAny |= remaining > 0;
+                    remaining = 0;
+                }
             }
 
             if (remaining > 0)
@@ -753,12 +1235,36 @@ public sealed class WorldItemStackRuntime :
                 continue;
             }
 
-            int spawned = Spawn(
-                item.itemId,
-                item.quantity,
-                destinationPosition,
-                WorldItemStackState.FacilityBuffer,
-                normalizedDestination);
+            int spawned;
+            ICombatEquipmentRuntime combatRuntime = CombatEquipmentRuntime.Active;
+            if (item.quantity == 1
+                && combatRuntime != null
+                && combatRuntime.TryGetInstanceBySourceStack(
+                    item.sourceStackId,
+                    out CombatEquipmentInstance linked)
+                && SpawnUniqueItemAt(
+                    item.itemId,
+                    destinationPosition,
+                    WorldItemStackState.FacilityBuffer,
+                    normalizedDestination,
+                    out string bufferStackId))
+            {
+                combatRuntime.TryLinkToWorldStack(
+                    linked.instanceId,
+                    bufferStackId,
+                    CombatEquipmentWorldState.MaintenanceBuffer);
+                spawned = 1;
+            }
+            else
+            {
+                spawned = Spawn(
+                    item.itemId,
+                    item.quantity,
+                    destinationPosition,
+                    WorldItemStackState.FacilityBuffer,
+                    normalizedDestination);
+            }
+
             depositedAny |= spawned > 0;
         }
 
@@ -793,6 +1299,11 @@ public sealed class WorldItemStackRuntime :
             return true;
         }
 
+        if (DungeonDebugRuntimeRules.ShouldSkipCosts())
+        {
+            return true;
+        }
+
         Dictionary<StockCategory, int> available = new Dictionary<StockCategory, int>();
         foreach (WorldItemStackRecord stack in stacks)
         {
@@ -800,7 +1311,7 @@ public sealed class WorldItemStackRuntime :
                 || stack.quantity <= 0
                 || stack.state != WorldItemStackState.FacilityBuffer
                 || !string.Equals(stack.destinationId ?? string.Empty, normalizedDestination, StringComparison.Ordinal)
-                || !DungeonItemCatalogSO.TryGetStockCategoryFromItemId(stack.itemId, out StockCategory category))
+                || !TryGetWarehouseStockCategory(stack.itemId, out StockCategory category))
             {
                 continue;
             }
@@ -832,7 +1343,7 @@ public sealed class WorldItemStackRuntime :
                     || stack.quantity <= 0
                     || stack.state != WorldItemStackState.FacilityBuffer
                     || !string.Equals(stack.destinationId ?? string.Empty, normalizedDestination, StringComparison.Ordinal)
-                    || !DungeonItemCatalogSO.TryGetStockCategoryFromItemId(stack.itemId, out StockCategory category)
+                    || !TryGetWarehouseStockCategory(stack.itemId, out StockCategory category)
                     || category != pair.Key)
                 {
                     continue;
@@ -842,6 +1353,7 @@ public sealed class WorldItemStackRuntime :
                 Vector2Int position = stack.position;
                 stack.quantity -= consumed;
                 remaining -= consumed;
+                MarkStacksChanged();
                 if (stack.quantity <= 0)
                 {
                     RemoveRecord(stack);
@@ -877,8 +1389,8 @@ public sealed class WorldItemStackRuntime :
 
         Vector2Int origin = ResolveActorGridPosition(actor);
         int radius = Mathf.Max(0, searchRadius);
-        HashSet<Vector2Int> reachable = actor.Brain != null
-            ? actor.Brain.GetPathSearch(actor)?.GetReachablePositions().ToHashSet()
+        GridPathSearchResult reachable = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
             : null;
 
         WorldItemStackRecord bestStack = null;
@@ -897,7 +1409,7 @@ public sealed class WorldItemStackRuntime :
 
             int distance = Mathf.Abs(stack.position.x - origin.x) + Mathf.Abs(stack.position.y - origin.y);
             if (distance > radius
-                || (reachable != null && !reachable.Contains(stack.position)))
+                || (reachable != null && !reachable.ContainsPosition(stack.position)))
             {
                 continue;
             }
@@ -956,6 +1468,7 @@ public sealed class WorldItemStackRuntime :
 
         Vector2Int position = bestStack.position;
         bestStack.quantity--;
+        MarkStacksChanged();
         if (bestStack.quantity <= 0)
         {
             RemoveRecord(bestStack);
@@ -977,6 +1490,8 @@ public sealed class WorldItemStackRuntime :
             || string.Equals(record.reservedByPersistentId, persistentId, StringComparison.Ordinal))
         {
             record.reservedByPersistentId = string.Empty;
+            RestoreDirectPickupStack(record);
+            MarkStacksChanged();
             RefreshMarkerAt(record.position);
         }
     }
@@ -990,6 +1505,8 @@ public sealed class WorldItemStackRuntime :
         }
 
         record.reservedByPersistentId = string.Empty;
+        RestoreDirectPickupStack(record);
+        MarkStacksChanged();
         RefreshMarkerAt(record.position);
         return true;
     }
@@ -1003,6 +1520,7 @@ public sealed class WorldItemStackRuntime :
         }
 
         record.forbidden = forbidden;
+        MarkStacksChanged();
         RefreshMarkerAt(record.position);
         return true;
     }
@@ -1017,6 +1535,8 @@ public sealed class WorldItemStackRuntime :
 
         record.forbidden = false;
         record.reservedByPersistentId = string.Empty;
+        prioritizedHaulStackIds.Add(record.stackId);
+        MarkStacksChanged();
         RefreshMarkerAt(record.position);
         return true;
     }
@@ -1032,6 +1552,56 @@ public sealed class WorldItemStackRuntime :
         Vector2Int position = record.position;
         RemoveRecord(record);
         RefreshMarkerAt(position);
+        return true;
+    }
+
+    public bool TryConsumeStackQuantity(string stackId, int quantity, out WorldItemStackSnapshot consumed)
+    {
+        consumed = null;
+        if (string.IsNullOrWhiteSpace(stackId)
+            || quantity <= 0
+            || !stacksById.TryGetValue(stackId, out WorldItemStackRecord record)
+            || record == null
+            || record.quantity <= 0)
+        {
+            return false;
+        }
+
+        if (DungeonDebugRuntimeRules.ShouldSkipCosts())
+        {
+            consumed = ToSnapshot(record);
+            consumed.Quantity = Mathf.Min(quantity, record.quantity);
+            return consumed.Quantity > 0;
+        }
+
+        int amount = Mathf.Min(quantity, record.quantity);
+        consumed = ToSnapshot(record);
+        consumed.Quantity = amount;
+        Vector2Int position = record.position;
+        record.quantity -= amount;
+        MarkStacksChanged();
+        if (record.quantity <= 0)
+        {
+            RemoveRecord(record);
+        }
+
+        RefreshMarkerAt(position);
+        return amount > 0;
+    }
+
+    public bool SetEmergencyButcheryAllowed(string stackId, bool allowed)
+    {
+        if (string.IsNullOrWhiteSpace(stackId)
+            || !stacksById.TryGetValue(stackId, out WorldItemStackRecord record)
+            || record == null
+            || record.itemId != DarkSurvivalItemDefinitions.HumanoidCorpseItemId)
+        {
+            return false;
+        }
+
+        record.emergencyButcheryAllowed = allowed;
+        MarkStacksChanged();
+        RefreshMarkerAt(record.position);
         return true;
     }
 
@@ -1056,11 +1626,465 @@ public sealed class WorldItemStackRuntime :
         {
             Vector2Int position = target.position;
             removed += Mathf.Max(0, target.quantity);
-            RemoveRecord(target);
+            if (state == WorldItemStackState.Stored && IsOutboundStoredStack(target))
+            {
+                int quantity = target.quantity;
+                string itemId = target.itemId;
+                string sourceStorageDestinationId = target.sourceStorageDestinationId;
+                RemoveRecord(target);
+                Spawn(
+                    itemId,
+                    quantity,
+                    position,
+                    WorldItemStackState.Stored,
+                    sourceStorageDestinationId);
+            }
+            else
+            {
+                RemoveRecord(target);
+            }
+
             RefreshMarkerAt(position);
         }
 
         return removed;
+    }
+
+    private int CountLooseStockAvailable(string itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return 0;
+        }
+
+        return stacks
+            .Where(stack => stack != null
+                && stack.quantity > 0
+                && stack.state == WorldItemStackState.Loose
+                && !stack.forbidden
+                && string.IsNullOrWhiteSpace(stack.reservedByPersistentId)
+                && string.IsNullOrWhiteSpace(stack.destinationId)
+                && string.Equals(stack.itemId, itemId, StringComparison.Ordinal))
+            .Sum(stack => stack.quantity);
+    }
+
+    private int RequestLooseStockDelivery(
+        string itemId,
+        int amount,
+        Vector2Int destinationPosition,
+        string destinationId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId)
+            || string.IsNullOrWhiteSpace(destinationId)
+            || amount <= 0)
+        {
+            return 0;
+        }
+
+        int remaining = amount;
+        int requested = 0;
+        foreach (WorldItemStackRecord stack in stacks
+            .Where(stack => stack != null
+                && stack.quantity > 0
+                && stack.state == WorldItemStackState.Loose
+                && !stack.forbidden
+                && string.IsNullOrWhiteSpace(stack.reservedByPersistentId)
+                && string.IsNullOrWhiteSpace(stack.destinationId)
+                && string.Equals(stack.itemId, itemId, StringComparison.Ordinal))
+            .OrderBy(stack => Mathf.Abs(stack.position.x - destinationPosition.x)
+                + Mathf.Abs(stack.position.y - destinationPosition.y))
+            .ToArray())
+        {
+            if (remaining <= 0)
+            {
+                break;
+            }
+
+            int moved = Mathf.Min(remaining, stack.quantity);
+            Vector2Int sourcePosition = stack.position;
+            stack.quantity -= moved;
+            MarkStacksChanged();
+            if (stack.quantity <= 0)
+            {
+                RemoveRecord(stack);
+            }
+
+            requested += Spawn(
+                itemId,
+                moved,
+                sourcePosition,
+                WorldItemStackState.Loose,
+                destinationId,
+                hasDestinationPosition: true,
+                destinationPosition: destinationPosition);
+            remaining -= moved;
+            RefreshMarkerAt(sourcePosition);
+        }
+
+        return requested;
+    }
+
+    private int RequestStoredStockDelivery(
+        IEnumerable<IWarehouseFacility> warehouses,
+        string itemId,
+        int amount,
+        Vector2Int destinationPosition,
+        string destinationId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId)
+            || string.IsNullOrWhiteSpace(destinationId)
+            || amount <= 0)
+        {
+            return 0;
+        }
+
+        int remaining = amount;
+        int requested = 0;
+        foreach (IWarehouseFacility warehouse in (warehouses ?? Enumerable.Empty<IWarehouseFacility>())
+            .Where(candidate => candidate != null && candidate.Inventory != null)
+            .OrderBy(candidate => candidate is BuildableObject building
+                ? GetManhattanDistance(building.centerPos, destinationPosition)
+                : int.MaxValue))
+        {
+            if (remaining <= 0)
+            {
+                break;
+            }
+
+            string storageDestinationId = GetWarehouseStorageDestinationId(warehouse);
+            foreach (WorldItemStackRecord stack in stacks
+                .Where(stack => stack != null
+                    && stack.quantity > 0
+                    && stack.state == WorldItemStackState.Stored
+                    && !stack.forbidden
+                    && string.IsNullOrWhiteSpace(stack.reservedByPersistentId)
+                    && string.IsNullOrWhiteSpace(stack.sourceStorageDestinationId)
+                    && string.Equals(stack.itemId, itemId, StringComparison.Ordinal)
+                    && string.Equals(
+                        stack.destinationId ?? string.Empty,
+                        storageDestinationId,
+                        StringComparison.Ordinal))
+                .ToArray())
+            {
+                if (remaining <= 0)
+                {
+                    break;
+                }
+
+                int assigned = Mathf.Min(remaining, stack.quantity);
+                Vector2Int sourcePosition = stack.position;
+                stack.quantity -= assigned;
+                MarkStacksChanged();
+                if (stack.quantity <= 0)
+                {
+                    RemoveRecord(stack);
+                }
+
+                int created = Spawn(
+                    itemId,
+                    assigned,
+                    sourcePosition,
+                    WorldItemStackState.Stored,
+                    destinationId,
+                    hasDestinationPosition: true,
+                    destinationPosition: destinationPosition,
+                    sourceStorageDestinationId: storageDestinationId);
+                if (created < assigned)
+                {
+                    AddStoredWarehouseItems(warehouse, itemId, assigned - created);
+                }
+
+                requested += created;
+                remaining -= created;
+                RefreshMarkerAt(sourcePosition);
+            }
+        }
+
+        return requested;
+    }
+
+    private void EnsureStoredWarehouseMirror(
+        IWarehouseFacility warehouse,
+        string itemId,
+        StockCategory category)
+    {
+        if (warehouse == null
+            || warehouse.Inventory == null
+            || string.IsNullOrWhiteSpace(itemId))
+        {
+            return;
+        }
+
+        string storageDestinationId = GetWarehouseStorageDestinationId(warehouse);
+        int physicalAmount = stacks
+            .Where(stack => stack != null
+                && stack.quantity > 0
+                && stack.state == WorldItemStackState.Stored
+                && string.Equals(stack.itemId, itemId, StringComparison.Ordinal)
+                && string.Equals(
+                    GetStoredSourceDestinationId(stack),
+                    storageDestinationId,
+                    StringComparison.Ordinal))
+            .Sum(stack => stack.quantity);
+        int missingMirror = Mathf.Max(0, warehouse.Inventory.GetStock(category) - physicalAmount);
+        if (missingMirror > 0)
+        {
+            AddStoredWarehouseItems(warehouse, itemId, missingMirror);
+        }
+    }
+
+    private int CountUnassignedStoredStock(IWarehouseFacility warehouse, string itemId)
+    {
+        if (warehouse == null || string.IsNullOrWhiteSpace(itemId))
+        {
+            return 0;
+        }
+
+        string storageDestinationId = GetWarehouseStorageDestinationId(warehouse);
+        return stacks
+            .Where(stack => stack != null
+                && stack.quantity > 0
+                && stack.state == WorldItemStackState.Stored
+                && !stack.forbidden
+                && string.IsNullOrWhiteSpace(stack.reservedByPersistentId)
+                && string.IsNullOrWhiteSpace(stack.sourceStorageDestinationId)
+                && string.Equals(stack.itemId, itemId, StringComparison.Ordinal)
+                && string.Equals(
+                    stack.destinationId ?? string.Empty,
+                    storageDestinationId,
+                    StringComparison.Ordinal))
+            .Sum(stack => stack.quantity);
+    }
+
+    private bool TryWithdrawOutboundStoredStock(
+        WorldItemStackRecord stack,
+        int requested,
+        out IWarehouseFacility warehouse,
+        out StockCategory category,
+        out int withdrawn,
+        out string failureReason)
+    {
+        warehouse = null;
+        category = default;
+        withdrawn = 0;
+        failureReason = string.Empty;
+        if (!IsOutboundStoredStack(stack)
+            || requested <= 0
+            || !TryGetWarehouseStockCategory(stack.itemId, out category))
+        {
+            failureReason = "stored source unavailable";
+            return false;
+        }
+
+        string sourceStorageDestinationId = stack.sourceStorageDestinationId.Trim();
+        warehouse = GetWarehouses().FirstOrDefault(candidate =>
+            candidate != null
+            && candidate.Inventory != null
+            && string.Equals(
+                GetWarehouseStorageDestinationId(candidate),
+                sourceStorageDestinationId,
+                StringComparison.Ordinal));
+        if (warehouse == null)
+        {
+            failureReason = "source warehouse unavailable";
+            return false;
+        }
+
+        withdrawn = warehouse.Inventory.Withdraw(category, Mathf.Min(requested, stack.quantity));
+        if (withdrawn <= 0)
+        {
+            failureReason = "warehouse stock unavailable";
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryFindBestHaulPlan(
+        CharacterActor actor,
+        bool reserve,
+        out WorldItemHaulPlan plan,
+        out string failureReason)
+    {
+        plan = null;
+        failureReason = string.Empty;
+        if (actor == null || !TryGetGrid(out Grid grid))
+        {
+            failureReason = "no grid";
+            return false;
+        }
+
+        CharacterCarryInventory inventory = CharacterCarryInventory.Ensure(actor);
+        if (inventory == null)
+        {
+            failureReason = "no carry inventory";
+            return false;
+        }
+
+        string actorId = characterIdRegistry.GetOrAssignPersistentId(actor);
+        GridPathSearchResult reachable = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
+            : null;
+        if (reachable == null
+            && !GridPathSearchBroker.TryGetSearch(grid, actor.GetNowXY(), () => true, out reachable))
+        {
+            failureReason = "no reachable cells";
+            return false;
+        }
+
+        HaulCandidate seed = null;
+        foreach (WorldItemStackRecord stack in GetHaulableStacks())
+        {
+            if (!CanUseStackForPlan(stack, actorId)
+                || !TryBuildHaulCandidate(
+                    grid,
+                    reachable,
+                    actor,
+                    inventory,
+                    stack,
+                    plannedWeight: 0f,
+                    out HaulCandidate candidate)
+                || candidate.Score <= (seed?.Score ?? float.NegativeInfinity))
+            {
+                continue;
+            }
+
+            seed = candidate;
+        }
+
+        if (seed == null)
+        {
+            failureReason = "no haulable stack";
+            return false;
+        }
+
+        List<HaulCandidate> selected = new List<HaulCandidate> { seed };
+        HashSet<string> selectedIds = new HashSet<string>(StringComparer.Ordinal) { seed.Stack.stackId };
+        float plannedWeight = seed.TotalWeight;
+        int expectedDetour = 0;
+        int directDistance = GetManhattanDistance(actor.GetNowXY(), seed.PickupStandPosition)
+            + GetManhattanDistance(seed.PickupStandPosition, seed.DeliveryPosition);
+        int detourLimit = Mathf.Min(4, Mathf.Max(1, Mathf.RoundToInt(directDistance * 0.15f)));
+
+        List<HaulCandidate> opportunistic = new List<HaulCandidate>();
+        foreach (WorldItemStackRecord stack in GetHaulableStacks())
+        {
+            if (selectedIds.Contains(stack.stackId)
+                || !CanUseStackForPlan(stack, actorId)
+                || !TryBuildHaulCandidate(
+                    grid,
+                    reachable,
+                    actor,
+                    inventory,
+                    stack,
+                    plannedWeight: 0f,
+                    out HaulCandidate candidate)
+                || !HasSameDestination(seed, candidate))
+            {
+                continue;
+            }
+
+            int detour = GetPlanDetour(seed, candidate);
+            if (detour > detourLimit)
+            {
+                continue;
+            }
+
+            candidate.DetourCost = Mathf.Max(0, detour);
+            opportunistic.Add(candidate);
+        }
+
+        foreach (HaulCandidate candidate in opportunistic
+            .OrderBy(candidate => candidate.DetourCost)
+            .ThenBy(candidate => GetManhattanDistance(seed.PickupStandPosition, candidate.PickupStandPosition))
+            .ThenByDescending(candidate => candidate.Score))
+        {
+            if (selected.Count >= 6)
+            {
+                break;
+            }
+
+            if (!TryBuildHaulCandidate(
+                    grid,
+                    reachable,
+                    actor,
+                    inventory,
+                    candidate.Stack,
+                    plannedWeight,
+                    out HaulCandidate refreshed)
+                || refreshed.Quantity <= 0)
+            {
+                continue;
+            }
+
+            refreshed.DetourCost = candidate.DetourCost;
+            selected.Add(refreshed);
+            selectedIds.Add(refreshed.Stack.stackId);
+            plannedWeight += refreshed.TotalWeight;
+            expectedDetour += refreshed.DetourCost;
+
+            float maxAllowed = Mathf.Max(0.01f, inventory.GetMaxAllowedWeight(haulingSettingsProvider));
+            float actualWeight = inventory.GetCurrentWeight(catalogProvider);
+            if ((actualWeight + plannedWeight) / maxAllowed >= 0.98f)
+            {
+                break;
+            }
+        }
+
+        List<WorldItemHaulPlanLeg> pickupLegs = new List<WorldItemHaulPlanLeg>();
+        List<WorldItemReservedStackQuantity> reservations = new List<WorldItemReservedStackQuantity>();
+        foreach (HaulCandidate candidate in selected)
+        {
+            WorldItemReservedStackQuantity reservation = new WorldItemReservedStackQuantity(
+                candidate.Stack.stackId,
+                candidate.Stack.itemId,
+                candidate.Quantity,
+                candidate.Stack.position,
+                candidate.DestinationKind,
+                candidate.DestinationId);
+            reservations.Add(reservation);
+            pickupLegs.Add(new WorldItemHaulPlanLeg(
+                reservation,
+                candidate.PickupStandPosition,
+                candidate.Warehouse,
+                candidate.DeliveryPosition,
+                candidate.DropPosition));
+        }
+
+        List<WorldItemHaulPlanLeg> deliveryLegs = new List<WorldItemHaulPlanLeg>
+        {
+            new WorldItemHaulPlanLeg(
+                reservations[0],
+                seed.PickupStandPosition,
+                seed.Warehouse,
+                seed.DeliveryPosition,
+                seed.DropPosition)
+        };
+
+        if (reserve)
+        {
+            foreach (HaulCandidate candidate in selected)
+            {
+                candidate.Stack.reservedByPersistentId = actorId;
+                prioritizedHaulStackIds.Remove(candidate.Stack.stackId);
+            }
+
+            MarkStacksChanged();
+            foreach (Vector2Int position in selected.Select(candidate => candidate.Stack.position).Distinct())
+            {
+                RefreshMarkerAt(position);
+            }
+        }
+
+        plan = new WorldItemHaulPlan(
+            pickupLegs,
+            deliveryLegs,
+            reservations,
+            plannedWeight,
+            expectedDetour,
+            seed.DestinationKind,
+            seed.DestinationId);
+        return true;
     }
 
     private int Spawn(
@@ -1070,7 +2094,13 @@ public sealed class WorldItemStackRuntime :
         WorldItemStackState state,
         string destinationId,
         bool hasDestinationPosition = false,
-        Vector2Int destinationPosition = default)
+        Vector2Int destinationPosition = default,
+        string sourceCharacterId = "",
+        string sourceDisplayName = "",
+        string sourceSpeciesTag = "",
+        string sourceDeathReason = "",
+        bool emergencyButcheryAllowed = false,
+        string sourceStorageDestinationId = "")
     {
         int remaining = Mathf.Max(0, amount);
         int spawned = 0;
@@ -1087,11 +2117,18 @@ public sealed class WorldItemStackRuntime :
                 string.Empty,
                 hasDestinationPosition,
                 destinationPosition,
-                maxStack);
+                maxStack,
+                sourceCharacterId,
+                sourceDisplayName,
+                sourceSpeciesTag,
+                sourceDeathReason,
+                emergencyButcheryAllowed,
+                sourceStorageDestinationId);
             if (mergeTarget != null)
             {
                 int merged = Mathf.Min(amountForStack, maxStack - mergeTarget.quantity);
                 mergeTarget.quantity += merged;
+                MarkStacksChanged();
                 amountForStack -= merged;
                 remaining -= merged;
                 spawned += merged;
@@ -1110,8 +2147,14 @@ public sealed class WorldItemStackRuntime :
                 state = state,
                 position = position,
                 destinationId = destinationId ?? string.Empty,
+                sourceStorageDestinationId = sourceStorageDestinationId ?? string.Empty,
                 hasDestinationPosition = hasDestinationPosition,
-                destinationPosition = destinationPosition
+                destinationPosition = destinationPosition,
+                sourceCharacterId = sourceCharacterId ?? string.Empty,
+                sourceDisplayName = sourceDisplayName ?? string.Empty,
+                sourceSpeciesTag = sourceSpeciesTag ?? string.Empty,
+                sourceDeathReason = sourceDeathReason ?? string.Empty,
+                emergencyButcheryAllowed = emergencyButcheryAllowed
             };
             AddRecord(record);
             remaining -= amountForStack;
@@ -1120,6 +2163,164 @@ public sealed class WorldItemStackRuntime :
 
         RefreshMarkerAt(position);
         return spawned;
+    }
+
+    private sealed class HaulCandidate
+    {
+        public WorldItemStackRecord Stack;
+        public int Quantity;
+        public Vector2Int PickupStandPosition;
+        public IWarehouseFacility Warehouse;
+        public Vector2Int DeliveryPosition;
+        public Vector2Int DropPosition;
+        public WorldItemHaulDestinationKind DestinationKind;
+        public string DestinationId = string.Empty;
+        public float Score;
+        public float TotalWeight;
+        public int DetourCost;
+    }
+
+    private bool TryBuildHaulCandidate(
+        Grid grid,
+        GridPathSearchResult reachable,
+        CharacterActor actor,
+        CharacterCarryInventory inventory,
+        WorldItemStackRecord stack,
+        float plannedWeight,
+        out HaulCandidate candidate)
+    {
+        candidate = null;
+        if (grid == null || reachable == null || actor == null || inventory == null || !CanHaulStack(stack))
+        {
+            return false;
+        }
+
+        int acceptable = GetAcceptableQuantityWithPlannedWeight(inventory, stack.itemId, stack.quantity, plannedWeight);
+        if (acceptable <= 0)
+        {
+            return false;
+        }
+
+        if (!TryResolvePickupStandCell(grid, stack.position, out Vector2Int pickupStand)
+            || !reachable.ContainsPosition(pickupStand))
+        {
+            return false;
+        }
+
+        IWarehouseFacility warehouse = null;
+        Vector2Int deliveryCell;
+        Vector2Int dropCell;
+        WorldItemHaulDestinationKind destinationKind;
+        string destinationId = stack.destinationId ?? string.Empty;
+        if (stack.hasDestinationPosition && !string.IsNullOrWhiteSpace(destinationId))
+        {
+            if (!TryResolveFacilityDeliveryCell(grid, stack.destinationPosition, out deliveryCell)
+                || !reachable.ContainsPosition(deliveryCell))
+            {
+                return false;
+            }
+
+            dropCell = stack.destinationPosition;
+            destinationKind = WorldItemHaulDestinationKind.FacilityBuffer;
+        }
+        else if (TryFindWarehouseForStack(
+                     grid,
+                     reachable,
+                     stack,
+                     out warehouse,
+                     out deliveryCell))
+        {
+            dropCell = deliveryCell;
+            destinationKind = WorldItemHaulDestinationKind.Warehouse;
+            destinationId = string.Empty;
+        }
+        else
+        {
+            return false;
+        }
+
+        DungeonItemDefinition definition = catalogProvider.GetDefinition(stack.itemId);
+        int distance = GetManhattanDistance(actor.GetNowXY(), pickupStand)
+            + GetManhattanDistance(pickupStand, deliveryCell);
+        float priorityBonus = prioritizedHaulStackIds.Contains(stack.stackId) ? 12f : 0f;
+        float score = priorityBonus
+            + (definition.UnitPrice * acceptable * 0.02f)
+            + Mathf.Min(acceptable, definition.MaxStack) * 0.01f
+            - distance * 0.01f;
+
+        candidate = new HaulCandidate
+        {
+            Stack = stack,
+            Quantity = acceptable,
+            PickupStandPosition = pickupStand,
+            Warehouse = warehouse,
+            DeliveryPosition = deliveryCell,
+            DropPosition = dropCell,
+            DestinationKind = destinationKind,
+            DestinationId = destinationId,
+            Score = score,
+            TotalWeight = definition.UnitWeight * acceptable
+        };
+        return true;
+    }
+
+    private int GetAcceptableQuantityWithPlannedWeight(
+        CharacterCarryInventory inventory,
+        string itemId,
+        int requestedQuantity,
+        float plannedWeight)
+    {
+        if (inventory == null || requestedQuantity <= 0)
+        {
+            return 0;
+        }
+
+        DungeonItemDefinition definition = catalogProvider.GetDefinition(itemId);
+        float maxAllowed = inventory.GetMaxAllowedWeight(haulingSettingsProvider);
+        float current = inventory.GetCurrentWeight(catalogProvider);
+        float remainingWeight = Mathf.Max(0f, maxAllowed - current - Mathf.Max(0f, plannedWeight));
+        int byWeight = Mathf.FloorToInt(remainingWeight / Mathf.Max(0.01f, definition.UnitWeight));
+        return Mathf.Clamp(byWeight, 0, Mathf.Max(0, requestedQuantity));
+    }
+
+    private static bool CanUseStackForPlan(WorldItemStackRecord stack, string actorId)
+    {
+        return CanHaulStack(stack)
+            && (string.IsNullOrWhiteSpace(stack.reservedByPersistentId)
+                || string.Equals(stack.reservedByPersistentId, actorId, StringComparison.Ordinal));
+    }
+
+    private static bool HasSameDestination(HaulCandidate a, HaulCandidate b)
+    {
+        if (a == null || b == null || a.DestinationKind != b.DestinationKind)
+        {
+            return false;
+        }
+
+        if (a.DestinationKind == WorldItemHaulDestinationKind.FacilityBuffer)
+        {
+            return string.Equals(a.DestinationId, b.DestinationId, StringComparison.Ordinal);
+        }
+
+        return ReferenceEquals(a.Warehouse, b.Warehouse);
+    }
+
+    private static int GetPlanDetour(HaulCandidate seed, HaulCandidate candidate)
+    {
+        if (seed == null || candidate == null)
+        {
+            return int.MaxValue;
+        }
+
+        int direct = GetManhattanDistance(seed.PickupStandPosition, seed.DeliveryPosition);
+        int withPickup = GetManhattanDistance(seed.PickupStandPosition, candidate.PickupStandPosition)
+            + GetManhattanDistance(candidate.PickupStandPosition, seed.DeliveryPosition);
+        return Mathf.Max(0, withPickup - direct);
+    }
+
+    private static int GetManhattanDistance(Vector2Int a, Vector2Int b)
+    {
+        return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
     }
 
     private bool TryFindBestHaulJob(
@@ -1144,10 +2345,11 @@ public sealed class WorldItemStackRuntime :
         }
 
         string actorId = characterIdRegistry.GetOrAssignPersistentId(actor);
-        HashSet<Vector2Int> reachable = actor.Brain != null
-            ? actor.Brain.GetPathSearch(actor)?.GetReachablePositions().ToHashSet()
-            : grid.SearchPath(actor.GetNowXY()).GetReachablePositions().ToHashSet();
-        if (reachable == null || reachable.Count == 0)
+        GridPathSearchResult reachable = actor.Brain != null
+            ? actor.Brain.GetPathSearch(actor)
+            : null;
+        if (reachable == null
+            && !GridPathSearchBroker.TryGetSearch(grid, actor.GetNowXY(), () => true, out reachable))
         {
             failureReason = "no reachable cells";
             return false;
@@ -1162,7 +2364,7 @@ public sealed class WorldItemStackRuntime :
         string bestDestinationId = string.Empty;
         float bestScore = float.NegativeInfinity;
 
-        foreach (WorldItemStackRecord stack in stacks)
+        foreach (WorldItemStackRecord stack in GetHaulableStacks())
         {
             if (!CanHaulStack(stack)
                 || (!string.IsNullOrWhiteSpace(stack.reservedByPersistentId)
@@ -1182,7 +2384,7 @@ public sealed class WorldItemStackRuntime :
             }
 
             if (!TryResolvePickupStandCell(grid, stack.position, out Vector2Int pickupStand)
-                || !reachable.Contains(pickupStand))
+                || !reachable.ContainsPosition(pickupStand))
             {
                 continue;
             }
@@ -1195,7 +2397,7 @@ public sealed class WorldItemStackRuntime :
             if (stack.hasDestinationPosition && !string.IsNullOrWhiteSpace(destinationId))
             {
                 if (!TryResolveFacilityDeliveryCell(grid, stack.destinationPosition, out deliveryCell)
-                    || !reachable.Contains(deliveryCell))
+                    || !reachable.ContainsPosition(deliveryCell))
                 {
                     continue;
                 }
@@ -1252,6 +2454,7 @@ public sealed class WorldItemStackRuntime :
         if (reserve)
         {
             bestStack.reservedByPersistentId = actorId;
+            MarkStacksChanged();
             RefreshMarkerAt(bestStack.position);
         }
 
@@ -1270,14 +2473,14 @@ public sealed class WorldItemStackRuntime :
 
     private bool TryFindWarehouseForStack(
         Grid grid,
-        HashSet<Vector2Int> reachable,
+        GridPathSearchResult reachable,
         WorldItemStackRecord stack,
         out IWarehouseFacility warehouse,
         out Vector2Int deliveryCell)
     {
         warehouse = null;
         deliveryCell = default;
-        bool isStockItem = DungeonItemCatalogSO.TryGetStockCategoryFromItemId(
+        bool isStockItem = TryGetWarehouseStockCategory(
             stack.itemId,
             out StockCategory category);
         bool isEquipmentItem = DungeonItemCatalogSO.TryGetEquipmentIdFromItemId(stack.itemId, out _);
@@ -1298,7 +2501,8 @@ public sealed class WorldItemStackRuntime :
             }
 
             if (!TryResolveDeliveryCell(grid, building, out Vector2Int candidateDelivery)
-                || !reachable.Contains(candidateDelivery))
+                || reachable == null
+                || !reachable.ContainsPosition(candidateDelivery))
             {
                 continue;
             }
@@ -1320,11 +2524,32 @@ public sealed class WorldItemStackRuntime :
 
     private IEnumerable<IWarehouseFacility> GetWarehouses()
     {
-        return sceneQuery.All<MonoBehaviour>(includeInactive: false)
-            .OfType<IWarehouseFacility>()
-            .Where(facility => facility != null
-                && facility.HasWarehouseInventory
-                && facility.Inventory != null);
+        IReadOnlyList<IWarehouseFacility> registeredWarehouses = CharacterAiWorldRegistry.Warehouses;
+        if (registeredWarehouses.Count > 0)
+        {
+            foreach (IWarehouseFacility warehouse in registeredWarehouses)
+            {
+                if (warehouse != null
+                    && warehouse.HasWarehouseInventory
+                    && warehouse.Inventory != null)
+                {
+                    yield return warehouse;
+                }
+            }
+
+            yield break;
+        }
+
+        foreach (IWarehouseFacility warehouse in sceneQuery.All<MonoBehaviour>(includeInactive: false)
+                     .OfType<IWarehouseFacility>())
+        {
+            if (warehouse != null
+                && warehouse.HasWarehouseInventory
+                && warehouse.Inventory != null)
+            {
+                yield return warehouse;
+            }
+        }
     }
 
     private void SyncWarehouseInventoriesFromStoredStacks()
@@ -1336,13 +2561,12 @@ public sealed class WorldItemStackRuntime :
             if (stack == null
                 || stack.quantity <= 0
                 || stack.state != WorldItemStackState.Stored
-                || string.IsNullOrWhiteSpace(stack.destinationId)
-                || !DungeonItemCatalogSO.TryGetStockCategoryFromItemId(stack.itemId, out StockCategory category))
+                || !TryGetWarehouseStockCategory(stack.itemId, out StockCategory category))
             {
                 continue;
             }
 
-            string destinationId = stack.destinationId.Trim();
+            string destinationId = GetStoredSourceDestinationId(stack);
             if (!destinationId.StartsWith(WarehouseStorageDestinationPrefix, StringComparison.Ordinal))
             {
                 continue;
@@ -1403,6 +2627,11 @@ public sealed class WorldItemStackRuntime :
             return 0;
         }
 
+        if (DungeonDebugRuntimeRules.ShouldSkipCosts())
+        {
+            return amount;
+        }
+
         string destinationId = GetWarehouseStorageDestinationId(warehouse);
         int remaining = amount;
         int removed = 0;
@@ -1427,6 +2656,7 @@ public sealed class WorldItemStackRuntime :
             stack.quantity -= consumed;
             remaining -= consumed;
             removed += consumed;
+            MarkStacksChanged();
             if (stack.quantity <= 0)
             {
                 RemoveRecord(stack);
@@ -1442,10 +2672,83 @@ public sealed class WorldItemStackRuntime :
     {
         if (warehouse is BuildableObject building)
         {
-            return WarehouseStorageDestinationPrefix + building.GridId.ToString(CultureInfo.InvariantCulture);
+            return string.Concat(
+                WarehouseStorageDestinationPrefix,
+                building.GridId.ToString(CultureInfo.InvariantCulture),
+                ":",
+                building.centerPos.x.ToString(CultureInfo.InvariantCulture),
+                ":",
+                building.centerPos.y.ToString(CultureInfo.InvariantCulture));
         }
 
         return WarehouseStorageDestinationPrefix + warehouse.GetHashCode().ToString(CultureInfo.InvariantCulture);
+    }
+
+    private void NormalizeLegacyWarehouseStorageIds()
+    {
+        IWarehouseFacility[] warehouses = GetWarehouses().ToArray();
+        foreach (WorldItemStackRecord stack in stacks)
+        {
+            if (stack == null || stack.state != WorldItemStackState.Stored)
+            {
+                continue;
+            }
+
+            stack.destinationId = NormalizeLegacyWarehouseStorageId(
+                stack.destinationId,
+                stack.position,
+                warehouses);
+            stack.sourceStorageDestinationId = NormalizeLegacyWarehouseStorageId(
+                stack.sourceStorageDestinationId,
+                stack.position,
+                warehouses);
+        }
+    }
+
+    private static string NormalizeLegacyWarehouseStorageId(
+        string storageDestinationId,
+        Vector2Int storagePosition,
+        IReadOnlyList<IWarehouseFacility> warehouses)
+    {
+        string normalized = storageDestinationId?.Trim() ?? string.Empty;
+        if (!normalized.StartsWith(WarehouseStorageDestinationPrefix, StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        string suffix = normalized.Substring(WarehouseStorageDestinationPrefix.Length);
+        if (suffix.Contains(":")
+            || !int.TryParse(suffix, NumberStyles.Integer, CultureInfo.InvariantCulture, out int legacyGridId))
+        {
+            return normalized;
+        }
+
+        IWarehouseFacility matchingWarehouse = (warehouses ?? Array.Empty<IWarehouseFacility>())
+            .FirstOrDefault(candidate =>
+                candidate is BuildableObject building
+                && building.GridId == legacyGridId
+                && building.centerPos == storagePosition);
+        return matchingWarehouse != null
+            ? GetWarehouseStorageDestinationId(matchingWarehouse)
+            : normalized;
+    }
+
+    private static string GetStoredSourceDestinationId(WorldItemStackRecord stack)
+    {
+        if (stack == null || stack.state != WorldItemStackState.Stored)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(stack.sourceStorageDestinationId))
+        {
+            return stack.sourceStorageDestinationId.Trim();
+        }
+
+        string destinationId = stack.destinationId?.Trim() ?? string.Empty;
+        return destinationId.StartsWith(WarehouseStorageDestinationPrefix, StringComparison.Ordinal)
+            ? destinationId
+            : string.Empty;
     }
 
     private static Vector2Int ResolveWarehouseStoragePosition(IWarehouseFacility warehouse)
@@ -1460,7 +2763,19 @@ public sealed class WorldItemStackRuntime :
             && !stack.forbidden
             && !IsFacilityInputBuffer(stack)
             && (stack.state == WorldItemStackState.Loose
-                || stack.state == WorldItemStackState.FacilityBuffer);
+                || stack.state == WorldItemStackState.FacilityBuffer
+                || IsOutboundStoredStack(stack));
+    }
+
+    private static bool IsOutboundStoredStack(WorldItemStackRecord stack)
+    {
+        return stack != null
+            && stack.state == WorldItemStackState.Stored
+            && stack.hasDestinationPosition
+            && !string.IsNullOrWhiteSpace(stack.destinationId)
+            && !string.IsNullOrWhiteSpace(stack.sourceStorageDestinationId)
+            && (IsFacilityInputDestination(stack.destinationId)
+                || IsCombatLoadoutDestination(stack.destinationId));
     }
 
     private static bool IsFacilityInputBuffer(WorldItemStackRecord stack)
@@ -1473,7 +2788,44 @@ public sealed class WorldItemStackRuntime :
     private static bool IsFacilityInputDestination(string destinationId)
     {
         return !string.IsNullOrWhiteSpace(destinationId)
-            && destinationId.StartsWith(FacilityInputDestinationPrefix, StringComparison.Ordinal);
+            && (destinationId.StartsWith(FacilityInputDestinationPrefix, StringComparison.Ordinal)
+                || destinationId.StartsWith(WorkOrderRuntime.ConstructionDestinationPrefix, StringComparison.Ordinal));
+    }
+
+    private static bool IsCombatLoadoutDestination(string destinationId)
+    {
+        return !string.IsNullOrWhiteSpace(destinationId)
+            && destinationId.StartsWith(CombatLoadoutDestinationPrefix, StringComparison.Ordinal);
+    }
+
+    private static bool TryGetWarehouseStockCategory(string itemId, out StockCategory category)
+    {
+        if (DungeonItemCatalogSO.TryGetStockCategoryFromItemId(itemId, out category))
+        {
+            return true;
+        }
+
+        if (CombatItemDefinitions.TryGetDefinition(itemId, out DungeonItemDefinition ammunition))
+        {
+            category = ammunition.StockCategory;
+            return true;
+        }
+
+        category = default;
+        return false;
+    }
+
+    private static void RestoreDirectPickupStack(WorldItemStackRecord stack)
+    {
+        if (stack == null || !IsCombatLoadoutDestination(stack.destinationId))
+        {
+            return;
+        }
+
+        stack.destinationId = stack.sourceStorageDestinationId ?? string.Empty;
+        stack.sourceStorageDestinationId = string.Empty;
+        stack.hasDestinationPosition = false;
+        stack.destinationPosition = default;
     }
 
     private static bool TryResolvePickupStandCell(
@@ -1588,18 +2940,37 @@ public sealed class WorldItemStackRuntime :
         string reservedBy,
         bool hasDestinationPosition,
         Vector2Int destinationPosition,
-        int maxStack)
+        int maxStack,
+        string sourceCharacterId,
+        string sourceDisplayName,
+        string sourceSpeciesTag,
+        string sourceDeathReason,
+        bool emergencyButcheryAllowed,
+        string sourceStorageDestinationId)
     {
-        return stacks.FirstOrDefault(stack => stack != null
+        if (!stacksByPosition.TryGetValue(position, out List<WorldItemStackRecord> positionStacks))
+        {
+            return null;
+        }
+
+        return positionStacks.FirstOrDefault(stack => stack != null
             && stack.quantity > 0
             && stack.quantity < maxStack
-            && stack.position == position
             && stack.state == state
             && string.Equals(stack.itemId, itemId, StringComparison.Ordinal)
             && string.Equals(stack.destinationId ?? string.Empty, destinationId ?? string.Empty, StringComparison.Ordinal)
+            && string.Equals(
+                stack.sourceStorageDestinationId ?? string.Empty,
+                sourceStorageDestinationId ?? string.Empty,
+                StringComparison.Ordinal)
             && string.Equals(stack.reservedByPersistentId ?? string.Empty, reservedBy ?? string.Empty, StringComparison.Ordinal)
             && stack.hasDestinationPosition == hasDestinationPosition
-            && (!hasDestinationPosition || stack.destinationPosition == destinationPosition));
+            && (!hasDestinationPosition || stack.destinationPosition == destinationPosition)
+            && string.Equals(stack.sourceCharacterId ?? string.Empty, sourceCharacterId ?? string.Empty, StringComparison.Ordinal)
+            && string.Equals(stack.sourceDisplayName ?? string.Empty, sourceDisplayName ?? string.Empty, StringComparison.Ordinal)
+            && string.Equals(stack.sourceSpeciesTag ?? string.Empty, sourceSpeciesTag ?? string.Empty, StringComparison.Ordinal)
+            && string.Equals(stack.sourceDeathReason ?? string.Empty, sourceDeathReason ?? string.Empty, StringComparison.Ordinal)
+            && stack.emergencyButcheryAllowed == emergencyButcheryAllowed);
     }
 
     private void AddRecord(WorldItemStackRecord record)
@@ -1616,6 +2987,14 @@ public sealed class WorldItemStackRuntime :
 
         stacks.Add(record);
         stacksById[record.stackId] = record;
+        if (!stacksByPosition.TryGetValue(record.position, out List<WorldItemStackRecord> positionStacks))
+        {
+            positionStacks = new List<WorldItemStackRecord>();
+            stacksByPosition[record.position] = positionStacks;
+        }
+
+        positionStacks.Add(record);
+        MarkStacksChanged();
     }
 
     private void RemoveRecord(WorldItemStackRecord record)
@@ -1625,20 +3004,65 @@ public sealed class WorldItemStackRuntime :
             return;
         }
 
+        prioritizedHaulStackIds.Remove(record.stackId);
         stacks.Remove(record);
         stacksById.Remove(record.stackId);
+        if (stacksByPosition.TryGetValue(record.position, out List<WorldItemStackRecord> positionStacks))
+        {
+            positionStacks.Remove(record);
+            if (positionStacks.Count == 0)
+            {
+                stacksByPosition.Remove(record.position);
+            }
+        }
+
+        MarkStacksChanged();
     }
 
     private void ClearRuntimeStacks()
     {
         stacks.Clear();
         stacksById.Clear();
+        stacksByPosition.Clear();
+        prioritizedHaulStackIds.Clear();
+        MarkStacksChanged();
         foreach (WorldItemStackMarker marker in markersByPosition.Values.Where(marker => marker != null))
         {
-            UnityEngine.Object.Destroy(marker.gameObject);
+            DestroyMarker(marker);
         }
 
         markersByPosition.Clear();
+    }
+
+    private IReadOnlyList<WorldItemStackRecord> GetHaulableStacks()
+    {
+        if (!haulableStacksDirty)
+        {
+            return haulableStacksCache;
+        }
+
+        haulableStacksCache.Clear();
+        foreach (WorldItemStackRecord stack in stacks)
+        {
+            if (CanHaulStack(stack))
+            {
+                haulableStacksCache.Add(stack);
+            }
+        }
+
+        haulableStacksDirty = false;
+        return haulableStacksCache;
+    }
+
+    private void MarkStacksChanged()
+    {
+        unchecked
+        {
+            ItemStackVersion++;
+            HaulJobVersion++;
+        }
+
+        haulableStacksDirty = true;
     }
 
     private string AllocateStackId()
@@ -1658,10 +3082,16 @@ public sealed class WorldItemStackRuntime :
             gridY = stack.position.y,
             reservedByPersistentId = stack.reservedByPersistentId ?? string.Empty,
             destinationId = stack.destinationId ?? string.Empty,
+            sourceStorageDestinationId = stack.sourceStorageDestinationId ?? string.Empty,
             hasDestinationPosition = stack.hasDestinationPosition,
             destinationGridX = stack.destinationPosition.x,
             destinationGridY = stack.destinationPosition.y,
             forbidden = stack.forbidden
+            ,sourceCharacterId = stack.sourceCharacterId ?? string.Empty
+            ,sourceDisplayName = stack.sourceDisplayName ?? string.Empty
+            ,sourceSpeciesTag = stack.sourceSpeciesTag ?? string.Empty
+            ,sourceDeathReason = stack.sourceDeathReason ?? string.Empty
+            ,emergencyButcheryAllowed = stack.emergencyButcheryAllowed
         };
     }
 
@@ -1683,9 +3113,15 @@ public sealed class WorldItemStackRuntime :
             Position = stack.position,
             ReservedByPersistentId = stack.reservedByPersistentId ?? string.Empty,
             DestinationId = stack.destinationId ?? string.Empty,
+            SourceStorageDestinationId = stack.sourceStorageDestinationId ?? string.Empty,
             HasDestinationPosition = stack.hasDestinationPosition,
             DestinationPosition = stack.destinationPosition,
             Forbidden = stack.forbidden
+            ,SourceCharacterId = stack.sourceCharacterId ?? string.Empty
+            ,SourceDisplayName = stack.sourceDisplayName ?? string.Empty
+            ,SourceSpeciesTag = stack.sourceSpeciesTag ?? string.Empty
+            ,SourceDeathReason = stack.sourceDeathReason ?? string.Empty
+            ,EmergencyButcheryAllowed = stack.emergencyButcheryAllowed
         };
     }
 
@@ -1714,7 +3150,7 @@ public sealed class WorldItemStackRuntime :
                 && existing != null)
             {
                 grid.RemoveOccupant(existing, GridLayer.Item, new[] { position }, disconnectPositions: false);
-                UnityEngine.Object.Destroy(existing.gameObject);
+                DestroyMarker(existing);
             }
 
             markersByPosition.Remove(position);
@@ -1733,6 +3169,23 @@ public sealed class WorldItemStackRuntime :
     private bool TryGetGrid(out Grid grid)
     {
         return gridSystemProvider.TryGetGrid(out grid);
+    }
+
+    private static void DestroyMarker(WorldItemStackMarker marker)
+    {
+        if (marker == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            UnityEngine.Object.Destroy(marker.gameObject);
+        }
+        else
+        {
+            UnityEngine.Object.DestroyImmediate(marker.gameObject);
+        }
     }
 
     private static bool IsVisibleState(WorldItemStackState state, bool includeStored)
@@ -1786,6 +3239,7 @@ public sealed class WorldItemStackMarker : MonoBehaviour, IGridOccupant
     public bool IsGridDestroyed => this == null || gameObject == null;
     public bool IsGridVisitable => false;
     public bool IsGridMovement => false;
+    public Vector2Int Position => position;
 
     public static WorldItemStackMarker Create(
         WorldItemStackRuntime runtime,
@@ -1793,6 +3247,7 @@ public sealed class WorldItemStackMarker : MonoBehaviour, IGridOccupant
         Vector2Int position)
     {
         GameObject markerObject = new GameObject($"ItemPile_{position.x}_{position.y}");
+        DungeonRuntimeHierarchy.Parent(markerObject, DungeonRuntimeHierarchy.Items);
         WorldItemStackMarker marker = markerObject.AddComponent<WorldItemStackMarker>();
         marker.Initialize(runtime, grid, position);
         return marker;
@@ -1831,7 +3286,7 @@ public sealed class WorldItemStackMarker : MonoBehaviour, IGridOccupant
             return;
         }
 
-        Camera camera = Camera.main;
+        Camera camera = runtime.MainCamera;
         if (camera == null || !TryGetPointerPosition(out Vector3 screenPosition))
         {
             SetTooltipVisible(false);

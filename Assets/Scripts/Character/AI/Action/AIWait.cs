@@ -76,6 +76,10 @@ public class AIWait : AIActionSet
             out string failureReason);
         if (ranIdleBehavior)
         {
+            string phaseDetail = CharacterMoodImpulseUtility.ShouldPreferAutonomousIdle(actor, out string moodReason)
+                ? moodReason
+                : "다음 행동을 찾으며 움직이는 중";
+            actor?.Brain?.SetActionPhase(behaviorName, detail: phaseDetail);
             return;
         }
 
@@ -93,6 +97,7 @@ public class AIWait : AIActionSet
             out behaviorName,
             out failureReason))
         {
+            actor?.Brain?.SetActionPhase("갈 곳 찾는 중", detail: "이동 가능한 칸을 다시 확인하는 중");
             return;
         }
 

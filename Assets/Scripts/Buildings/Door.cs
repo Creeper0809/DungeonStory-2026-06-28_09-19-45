@@ -62,6 +62,7 @@ public class Door : BuildableObject
     protected virtual bool ChangesCharacterLayerDuringTraversal => true;
 
     private readonly HashSet<CharacterActor> traversalActors = new HashSet<CharacterActor>();
+    private readonly HashSet<WildlifeActor> traversalWildlife = new HashSet<WildlifeActor>();
 
     private void OnEnable()
     {
@@ -120,6 +121,12 @@ public class Door : BuildableObject
         {
             KeepCharacterBehindWall(actor);
         }
+
+        WildlifeActor wildlife = ResolveTraversalWildlife(collision);
+        if (wildlife != null)
+        {
+            KeepWildlifeBehindWall(wildlife);
+        }
     }
 
     private void OnTriggerStay2D(Collider2D collision)
@@ -128,6 +135,12 @@ public class Door : BuildableObject
         if (actor != null)
         {
             KeepCharacterBehindWall(actor);
+        }
+
+        WildlifeActor wildlife = ResolveTraversalWildlife(collision);
+        if (wildlife != null)
+        {
+            KeepWildlifeBehindWall(wildlife);
         }
     }
 
@@ -183,13 +196,18 @@ public class Door : BuildableObject
     private void OnTriggerExit2D(Collider2D collision)
     {
         CharacterActor actor = ResolveTraversalActor(collision);
-        if (actor == null)
+        if (actor != null)
         {
-            return;
+            traversalActors.Remove(actor);
+            actor.ChangeLayer(DungeonDoorVisualLayout.DefaultCharacterSortingLayerName);
         }
 
-        traversalActors.Remove(actor);
-        actor.ChangeLayer(DungeonDoorVisualLayout.DefaultCharacterSortingLayerName);
+        WildlifeActor wildlife = ResolveTraversalWildlife(collision);
+        if (wildlife != null)
+        {
+            traversalWildlife.Remove(wildlife);
+            wildlife.ChangeLayer(DungeonDoorVisualLayout.DefaultCharacterSortingLayerName);
+        }
     }
 
     private CharacterActor ResolveTraversalActor(Collider2D collision)
@@ -205,6 +223,19 @@ public class Door : BuildableObject
         return actor != null && actor.CompareTag("Character") ? actor : null;
     }
 
+    private WildlifeActor ResolveTraversalWildlife(Collider2D collision)
+    {
+        if (BuildingData == null
+            || !ChangesCharacterLayerDuringTraversal
+            || collision == null)
+        {
+            return null;
+        }
+
+        WildlifeActor wildlife = collision.GetComponentInParent<WildlifeActor>();
+        return wildlife != null && wildlife.CanEnterDungeon ? wildlife : null;
+    }
+
     private void KeepCharacterBehindWall(CharacterActor actor)
     {
         if (actor == null)
@@ -214,6 +245,17 @@ public class Door : BuildableObject
 
         traversalActors.Add(actor);
         actor.ChangeLayer(DungeonDoorVisualLayout.TraversalSortingLayerName);
+    }
+
+    private void KeepWildlifeBehindWall(WildlifeActor wildlife)
+    {
+        if (wildlife == null)
+        {
+            return;
+        }
+
+        traversalWildlife.Add(wildlife);
+        wildlife.ChangeLayer(DungeonDoorVisualLayout.TraversalSortingLayerName);
     }
 
     private void RestoreTrackedCharacterLayers()
@@ -227,5 +269,15 @@ public class Door : BuildableObject
         }
 
         traversalActors.Clear();
+
+        foreach (WildlifeActor wildlife in traversalWildlife)
+        {
+            if (wildlife != null)
+            {
+                wildlife.ChangeLayer(DungeonDoorVisualLayout.DefaultCharacterSortingLayerName);
+            }
+        }
+
+        traversalWildlife.Clear();
     }
 }

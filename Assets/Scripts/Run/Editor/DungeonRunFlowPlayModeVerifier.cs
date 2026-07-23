@@ -18,6 +18,7 @@ public static class DungeonRunFlowPlayModeVerifier
     public const string RequestPath = "Temp/run-flow-verification.request";
     public const string ReportPath = "Temp/run-flow-verification-report.txt";
     public const string ScreenshotPath = "Temp/run-flow-verification.png";
+    private const string GameplayScenePath = "Assets/Scenes/GameplayScene.unity";
     private static bool runnerCreated;
 
     static DungeonRunFlowPlayModeVerifier()
@@ -41,10 +42,10 @@ public static class DungeonRunFlowPlayModeVerifier
         {
             if (!string.Equals(
                     SceneManager.GetActiveScene().path,
-                    "Assets/Scenes/SampleScene.unity",
+                    GameplayScenePath,
                     StringComparison.OrdinalIgnoreCase))
             {
-                EditorSceneManager.OpenScene("Assets/Scenes/SampleScene.unity", OpenSceneMode.Single);
+                EditorSceneManager.OpenScene(GameplayScenePath, OpenSceneMode.Single);
             }
 
             EditorApplication.EnterPlaymode();

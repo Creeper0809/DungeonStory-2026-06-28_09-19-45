@@ -20,6 +20,8 @@ public sealed class CharacterCarryInventorySaveData
 [DisallowMultipleComponent]
 public sealed class CharacterCarryInventory : MonoBehaviour
 {
+    private static readonly HashSet<CharacterCarryInventory> ActiveInventories =
+        new HashSet<CharacterCarryInventory>();
     [SerializeField] private List<CharacterCarriedItemSaveData> carriedItems =
         new List<CharacterCarriedItemSaveData>();
 
@@ -31,6 +33,37 @@ public sealed class CharacterCarryInventory : MonoBehaviour
     private void Awake()
     {
         actor = GetComponent<CharacterActor>();
+    }
+
+    private void OnEnable()
+    {
+        ActiveInventories.Add(this);
+    }
+
+    private void OnDisable()
+    {
+        ActiveInventories.Remove(this);
+    }
+
+    public static CharacterCarryInventory FindByCharacterId(string characterId)
+    {
+        if (string.IsNullOrWhiteSpace(characterId))
+        {
+            return null;
+        }
+
+        return ActiveInventories.FirstOrDefault(inventory =>
+        {
+            if (inventory == null)
+            {
+                return false;
+            }
+
+            return string.Equals(
+                inventory.actor?.Identity?.PersistentId,
+                characterId,
+                StringComparison.Ordinal);
+        });
     }
 
     public static CharacterCarryInventory Ensure(CharacterActor actor)
@@ -51,7 +84,6 @@ public sealed class CharacterCarryInventory : MonoBehaviour
 
     public float GetBaseCarryLimit()
     {
-        actor ??= GetComponent<CharacterActor>();
         CharacterStats stats = actor != null ? actor.Stats : null;
         int strength = stats != null ? stats.GetCharacterStat(CharacterStatType.Strength) : 5;
         int endurance = stats != null ? stats.GetCharacterStat(CharacterStatType.Endurance) : 5;
@@ -99,6 +131,14 @@ public sealed class CharacterCarryInventory : MonoBehaviour
         return Mathf.Lerp(1f, 0.45f, Mathf.Clamp01(t));
     }
 
+    public float GetLoadRatio(
+        IDungeonItemCatalogProvider catalogProvider = null,
+        IItemHaulingSettingsProvider settingsProvider = null)
+    {
+        float maxAllowed = Mathf.Max(0.01f, GetMaxAllowedWeight(settingsProvider));
+        return Mathf.Clamp01(GetCurrentWeight(catalogProvider) / maxAllowed);
+    }
+
     public int GetMaxAcceptableQuantity(
         string itemId,
         int requestedQuantity,
@@ -125,9 +165,29 @@ public sealed class CharacterCarryInventory : MonoBehaviour
         IItemHaulingSettingsProvider settingsProvider,
         out string failureReason)
     {
+        return TryAddPartialStack(
+            sourceStackId,
+            itemId,
+            quantity,
+            catalogProvider,
+            settingsProvider,
+            out _,
+            out failureReason)
+            && string.IsNullOrWhiteSpace(failureReason);
+    }
+
+    public bool TryAddPartialStack(
+        string sourceStackId,
+        string itemId,
+        int quantity,
+        IDungeonItemCatalogProvider catalogProvider,
+        IItemHaulingSettingsProvider settingsProvider,
+        out int acceptedQuantity,
+        out string failureReason)
+    {
         failureReason = string.Empty;
-        int accepted = GetMaxAcceptableQuantity(itemId, quantity, catalogProvider, settingsProvider);
-        if (accepted <= 0)
+        acceptedQuantity = GetMaxAcceptableQuantity(itemId, quantity, catalogProvider, settingsProvider);
+        if (acceptedQuantity <= 0)
         {
             failureReason = "carry limit";
             return false;
@@ -142,15 +202,96 @@ public sealed class CharacterCarryInventory : MonoBehaviour
             {
                 sourceStackId = sourceStackId ?? string.Empty,
                 itemId = itemId ?? string.Empty,
-                quantity = accepted
+                quantity = acceptedQuantity
             });
         }
         else
         {
-            existing.quantity += accepted;
+            existing.quantity += acceptedQuantity;
         }
 
-        return accepted == quantity;
+        if (acceptedQuantity < quantity)
+        {
+            failureReason = "carry limit";
+        }
+
+        return acceptedQuantity > 0;
+    }
+
+    public int CountItem(string itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return 0;
+        }
+
+        return carriedItems
+            .Where(item => item != null
+                && item.quantity > 0
+                && string.Equals(item.itemId, itemId, StringComparison.Ordinal))
+            .Sum(item => item.quantity);
+    }
+
+    public bool TryConsumeItem(string itemId, int quantity)
+    {
+        int remaining = Mathf.Max(0, quantity);
+        if (remaining <= 0 || CountItem(itemId) < remaining)
+        {
+            return false;
+        }
+
+        for (int index = carriedItems.Count - 1; index >= 0 && remaining > 0; index--)
+        {
+            CharacterCarriedItemSaveData item = carriedItems[index];
+            if (item == null
+                || item.quantity <= 0
+                || !string.Equals(item.itemId, itemId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            int consumed = Mathf.Min(remaining, item.quantity);
+            item.quantity -= consumed;
+            remaining -= consumed;
+            if (item.quantity <= 0)
+            {
+                carriedItems.RemoveAt(index);
+            }
+        }
+
+        return remaining == 0;
+    }
+
+    public bool TryConsumeSourceStack(string sourceStackId, string itemId, int quantity = 1)
+    {
+        int remaining = Mathf.Max(0, quantity);
+        if (remaining <= 0 || string.IsNullOrWhiteSpace(sourceStackId))
+        {
+            return false;
+        }
+
+        for (int index = carriedItems.Count - 1; index >= 0 && remaining > 0; index--)
+        {
+            CharacterCarriedItemSaveData item = carriedItems[index];
+            if (item == null
+                || item.quantity <= 0
+                || !string.Equals(item.sourceStackId, sourceStackId, StringComparison.Ordinal)
+                || (!string.IsNullOrWhiteSpace(itemId)
+                    && !string.Equals(item.itemId, itemId, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            int consumed = Mathf.Min(remaining, item.quantity);
+            item.quantity -= consumed;
+            remaining -= consumed;
+            if (item.quantity <= 0)
+            {
+                carriedItems.RemoveAt(index);
+            }
+        }
+
+        return remaining == 0;
     }
 
     public List<CharacterCarriedItemSaveData> RemoveAllItems()

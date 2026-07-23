@@ -664,7 +664,9 @@ public static class DungeonGameSaveDebugScenarios
             Require(report.RestoredIntruderCount == 1
                 && invasionDirector.ActiveIntruders.Count == 1
                 && restoredIntruder != null
-                && restoredIntruder.State == InvasionIntruderState.Entering
+                && restoredIntruder.State == InvasionIntruderState.Rallying
+                && restoredIntruder.RallySecondsRemaining > 0f
+                && !restoredIntruder.HasBreachedDungeonInterior
                 && restoredIntruder.Pattern.id == InvasionIntruderPatternIds.Plunderer
                 && restoredIntruder.FacilityDamageCount == 1
                 && Mathf.Approximately(restoredIntruder.IntruderActor.CurrentHealth, savedIntruderHealth)

@@ -190,11 +190,14 @@ public static class FacilityDebugScenarios
     {
         IReadOnlyList<StockDeliveryOffer> offers = StockSupplyService.CreateDailyDeliveryOffers(1, DefaultStockCostMultiplier);
 
-        return offers.Count == 4
+        return offers.Count >= 7
             && offers.Any((offer) => offer.category == StockCategory.Food && offer.amount > 0 && offer.cost > 0)
             && offers.Any((offer) => offer.category == StockCategory.General && offer.amount > 0 && offer.cost > 0)
             && offers.Any((offer) => offer.category == StockCategory.Weapon && offer.amount > 0 && offer.cost > 0)
-            && offers.Any((offer) => offer.category == StockCategory.Mana && offer.amount > 0 && offer.cost > 0);
+            && offers.Any((offer) => offer.category == StockCategory.Mana && offer.amount > 0 && offer.cost > 0)
+            && offers.Any((offer) => offer.category == StockCategory.Water && offer.amount > 0 && offer.cost > 0)
+            && offers.Any((offer) => offer.category == StockCategory.Medicine && offer.amount > 0 && offer.cost > 0)
+            && offers.Any((offer) => offer.category == StockCategory.Fuel && offer.amount > 0 && offer.cost > 0);
     }
 
     private static bool VerifyPurchaseDeliveryUsesMoneyAndWarehouseCapacity()

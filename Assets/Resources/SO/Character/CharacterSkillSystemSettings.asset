@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: CharacterSkillSystemSettings
   m_EditorClassIdentifier: Assembly-CSharp::CharacterSkillSystemSettingsSO
   maxLevel: 50
-  initialStatTotal: 45
+  initialStatTotal: 55
   initialStatMin: 1
   initialStatMax: 10
   levelGrowthStatCap: 30

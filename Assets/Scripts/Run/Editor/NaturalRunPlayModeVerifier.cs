@@ -5,10 +5,12 @@ using System.IO;
 using System.Linq;
 using TMPro;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using VContainer;
 
@@ -23,6 +25,7 @@ public static class NaturalRunPlayModeVerifier
     public const string FortressReportPath = "Temp/natural-run-fortress-report.txt";
     public const string ArcaneReportPath = "Temp/natural-run-arcane-report.txt";
     public const string WeakReportPath = "Temp/natural-run-weak-report.txt";
+    public const string GameplayScenePath = "Assets/Scenes/GameplayScene.unity";
 
     private static bool runnerCreated;
 
@@ -75,6 +78,14 @@ public static class NaturalRunPlayModeVerifier
     {
         if (File.Exists(RequestPath) && !EditorApplication.isPlayingOrWillChangePlaymode)
         {
+            if (!string.Equals(
+                    SceneManager.GetActiveScene().path,
+                    NaturalRunPlayModeVerifier.GameplayScenePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                EditorSceneManager.OpenScene(GameplayScenePath, OpenSceneMode.Single);
+            }
+
             EditorApplication.EnterPlaymode();
         }
     }
@@ -333,7 +344,7 @@ public sealed class NaturalRunVerificationRunner :
             DungeonRuntimeLifetimeScope scope = FindScope();
             Check(scope != null, "DI_SCOPE", "active game container resolved");
             Check(UnityEngine.SceneManagement.SceneManager.GetActiveScene().path.EndsWith(
-                    "Assets/Scenes/SampleScene.unity",
+                    NaturalRunPlayModeVerifier.GameplayScenePath,
                     StringComparison.Ordinal),
                 "SCENE", UnityEngine.SceneManagement.SceneManager.GetActiveScene().path);
             if (scope == null)
@@ -777,7 +788,7 @@ public sealed class NaturalRunVerificationRunner :
                 desiredOwner != null ? $"owner option {strategy.SpeciesTag}" : "owner option");
             yield return new WaitForSecondsRealtime(0.25f);
             if (ownerManager.CurrentOwnerActor == null
-                && FindButton("StartPartyConfirm") != null)
+                && FindButton("PreparationStartRunButton") != null)
             {
                 string fastCommit = StartPartyPreparationPlayModeVerifier.RunFastCommitForDebug(
                     strategy != null && strategy.IsTargeted ? strategy.SpeciesTag : null);

@@ -107,7 +107,7 @@ public static class CharacterProgressionDebugScenarios
         int initialTotal = Enum.GetValues(typeof(CharacterStatType))
             .Cast<CharacterStatType>()
             .Sum(initial.Get);
-        Require(initialTotal == 45, $"Initial stat total was {initialTotal}, not 45.");
+        Require(initialTotal == 55, $"Initial stat total was {initialTotal}, not 55.");
         Require(Enum.GetValues(typeof(CharacterStatType))
                 .Cast<CharacterStatType>()
                 .All(stat => initial.Get(stat) >= 1 && initial.Get(stat) <= 10),
@@ -1152,8 +1152,8 @@ public static class CharacterPopulationDebugScenarios
             "A visitor profile was missing initialized growth or three traits.");
         Require(acquired.All(profile => Enum.GetValues(typeof(CharacterStatType))
                 .Cast<CharacterStatType>()
-                .Sum(profile.growth.initialBaseStats.Get) == 45),
-            "A visitor profile did not receive exactly 45 initial stat points.");
+                .Sum(profile.growth.initialBaseStats.Get) == 55),
+            "A visitor profile did not receive exactly 55 initial stat points.");
 
         WorldCharacterProfile returning = first;
         returning.isVisiting = false;

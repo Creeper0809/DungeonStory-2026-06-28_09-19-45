@@ -93,13 +93,30 @@ public sealed class FacilityCandidateCacheStore : IFacilityCandidateCache
         if (!cache.CandidatesByRole.TryGetValue(role, out IReadOnlyList<BuildableObject> candidates))
         {
             List<BuildableObject> discovered = new List<BuildableObject>();
-            foreach (IGridOccupant occupant in grid.FindAllOccupants(null))
+            IReadOnlyList<BuildableObject> registeredBuildings = CharacterAiWorldRegistry.Buildings;
+            if (registeredBuildings.Count > 0)
             {
-                if (occupant is BuildableObject building
+                foreach (BuildableObject building in registeredBuildings)
+                {
+                    if (building != null
+                        && building.Grid == grid
+                        && !building.isDestroy
+                        && building.SupportsFacilityRole(role))
+                    {
+                        discovered.Add(building);
+                    }
+                }
+            }
+            else
+            {
+                foreach (IGridOccupant occupant in grid.FindAllOccupants(null))
+                {
+                    if (occupant is BuildableObject building
                     && !building.isDestroy
                     && building.SupportsFacilityRole(role))
-                {
-                    discovered.Add(building);
+                    {
+                        discovered.Add(building);
+                    }
                 }
             }
 

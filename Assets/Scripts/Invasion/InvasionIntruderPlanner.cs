@@ -51,7 +51,10 @@ public static class InvasionIntruderPlanner
         }
 
         pattern ??= InvasionIntruderPatternCatalog.Default;
-        GridPathSearchResult searchResult = grid.SearchPath(start);
+        if (!GridPathSearchBroker.TryGetSearch(grid, start, () => true, out GridPathSearchResult searchResult))
+        {
+            return new Queue<GridMoveStep>();
+        }
         if (damagedFacilityCount < pattern.maxFacilityDamageCount
             && focus < pattern.facilityDiversionFocus
             && InvasionFacilityDamageResolver.TryFindPriorityTarget(
@@ -66,14 +69,14 @@ public static class InvasionIntruderPlanner
         if (focus >= pattern.directOwnerFocus)
         {
             directPath = true;
-            return grid.GetMovePath(start, (pos) => pos == ownerPosition);
+            return searchResult.GetMovePath((pos) => pos == ownerPosition);
         }
 
         Vector2Int exploreTarget = SelectExploreTarget(grid, searchResult, ownerPosition, focus);
         if (exploreTarget == start)
         {
             directPath = true;
-            return grid.GetMovePath(start, (pos) => pos == ownerPosition);
+            return searchResult.GetMovePath((pos) => pos == ownerPosition);
         }
 
         return searchResult.GetMovePath((pos) => pos == exploreTarget);

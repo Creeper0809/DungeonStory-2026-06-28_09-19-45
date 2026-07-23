@@ -49,6 +49,7 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
     private CharacterSummeryInfo characterSummary;
     private BuildingSummaryInfo buildingSummary;
     private UIBuildingInfo buildingDetail;
+    private WildlifeInfoPanel wildlifeInfo;
     private Vector3 originalActorPosition;
     private Vector2 originalMousePosition;
     private float originalTimeScale;
@@ -105,15 +106,17 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         characterSummary = UnityEngine.Object.FindFirstObjectByType<CharacterSummeryInfo>();
         buildingSummary = UnityEngine.Object.FindFirstObjectByType<BuildingSummaryInfo>();
         buildingDetail = UnityEngine.Object.FindFirstObjectByType<UIBuildingInfo>(FindObjectsInactive.Include);
+        wildlifeInfo = UnityEngine.Object.FindFirstObjectByType<WildlifeInfoPanel>();
         actor = FindActor();
 
         Check(camera != null, "CAMERA", "main camera resolved");
         Check(characterSummary != null, "CHARACTER_SUMMARY", "character summary resolved");
         Check(buildingSummary != null, "BUILDING_SUMMARY", "building summary resolved");
         Check(buildingDetail != null, "BUILDING_DETAIL", "full building detail panel resolved");
+        Check(wildlifeInfo != null, "WILDLIFE_INFO", "wildlife info panel resolved");
         Check(actor != null, "CHARACTER", "active character resolved");
         if (camera == null || characterSummary == null || buildingSummary == null
-            || buildingDetail == null || actor == null)
+            || buildingDetail == null || wildlifeInfo == null)
         {
             CleanupAndFinish();
             yield break;
@@ -133,6 +136,82 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
             yield break;
         }
 
+        building.OnBuildingClicked += OnBuildingClicked;
+        subscribed = true;
+        buildingClickCount = 0;
+        Vector2 clickWorldPosition = buildingCollider.bounds.center;
+        Check(buildingCollider.OverlapPoint(clickWorldPosition), "EXACT_BUILDING_COLLIDER", $"world={clickWorldPosition}");
+        yield return PressMouse(screenPoint);
+        yield return new WaitForSecondsRealtime(0.2f);
+        Check(IsBuildingOnlyOpen() && IsDisplayedBuilding(building),
+            "EXACT_BUILDING_CLICK",
+            $"{DescribeBuildingInfoPanels()}; displayed={GetDisplayedBuildingName()}; expected={building.BuildingData.objectName}; buildingClicks={buildingClickCount}");
+        yield return ReleaseMouse(screenPoint);
+
+        CloseSummaries();
+        yield return new WaitForSecondsRealtime(0.2f);
+        bool foundBareHallway = TryFindBareHallwayScreenPoint(camera, out Vector2 hallwayScreenPoint, out Vector2Int hallwayCell);
+        Check(foundBareHallway, "BARE_HALLWAY_POINT", $"cell={hallwayCell}; screen={hallwayScreenPoint}");
+        if (foundBareHallway)
+        {
+            yield return PressMouse(hallwayScreenPoint);
+            yield return ReleaseMouse(hallwayScreenPoint);
+            Check(IsNoWorldInfoOpen(), "BARE_HALLWAY_NO_INFO", DescribeBuildingInfoPanels());
+
+            WildlifeActor wildlife = UnityEngine.Object.FindObjectsByType<WildlifeActor>(
+                    FindObjectsInactive.Exclude,
+                    FindObjectsSortMode.None)
+                .FirstOrDefault(candidate => candidate != null
+                    && candidate.IsAlive
+                    && candidate.GetComponentsInChildren<Collider2D>(true)
+                        .Any(collider => collider != null && collider.enabled));
+            Collider2D wildlifeCollider = wildlife != null
+                ? wildlife.GetComponentsInChildren<Collider2D>(true)
+                    .FirstOrDefault(collider => collider != null && collider.enabled)
+                : null;
+            Check(wildlife != null && wildlifeCollider != null,
+                "WILDLIFE_CLICK_TARGET",
+                "living wildlife with collider resolved");
+            if (wildlife != null && wildlifeCollider != null)
+            {
+                Vector3 originalWildlifePosition = wildlife.transform.position;
+                Vector3 wildlifeClickWorld = camera.ScreenToWorldPoint(new Vector3(
+                    hallwayScreenPoint.x,
+                    hallwayScreenPoint.y,
+                    -camera.transform.position.z));
+                wildlife.transform.position += wildlifeClickWorld - (Vector3)wildlifeCollider.bounds.center;
+                Physics2D.SyncTransforms();
+
+                Check(wildlifeCollider.OverlapPoint(wildlifeClickWorld),
+                    "WILDLIFE_CLICK_COLLIDER",
+                    $"world={wildlifeClickWorld}");
+                yield return PressMouse(hallwayScreenPoint);
+                yield return ReleaseMouse(hallwayScreenPoint);
+                Check(wildlifeInfo.IsShowingWildlife && wildlifeInfo.CurrentWildlife == wildlife,
+                    "WILDLIFE_FIRST_CLICK",
+                    "first click opens the selected wildlife");
+
+                yield return PressMouse(hallwayScreenPoint);
+                yield return ReleaseMouse(hallwayScreenPoint);
+                Check(wildlifeInfo.IsShowingWildlife && wildlifeInfo.CurrentWildlife == wildlife,
+                    "WILDLIFE_CONSECUTIVE_CLICK",
+                    "second consecutive click keeps the same wildlife detail open");
+
+                wildlife.transform.position = originalWildlifePosition;
+                Physics2D.SyncTransforms();
+                wildlifeInfo.OnClose();
+            }
+        }
+
+        if (actor == null)
+        {
+            CleanupAndFinish();
+            yield break;
+        }
+
+        CloseSummaries();
+        yield return new WaitForSecondsRealtime(0.2f);
+
         Collider2D actorCollider = actor.GetComponentsInChildren<Collider2D>(true)
             .FirstOrDefault(item => item != null && item.enabled);
         Check(actorCollider != null, "CHARACTER_COLLIDER", "character collider resolved");
@@ -144,7 +223,6 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
 
         originalActorPosition = actor.transform.position;
         stateCaptured = true;
-        Vector2 clickWorldPosition = buildingCollider.bounds.center;
         actor.transform.position += (Vector3)(clickWorldPosition - (Vector2)actorCollider.bounds.center);
         Physics2D.SyncTransforms();
 
@@ -158,9 +236,7 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         Check(!IsScreenPointOverUi(screenPoint), "OVERLAP_WORLD_POINT_CLEAR", "overlap click point starts outside UI");
 
         yield return null;
-
-        building.OnBuildingClicked += OnBuildingClicked;
-        subscribed = true;
+        buildingClickCount = 0;
 
         yield return PressMouse((Vector2)screenPoint);
 
@@ -196,8 +272,6 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         yield return null;
         Check(IsCharacterOnlyOpen(), "BUILDING_TO_CHARACTER_EVENT_UI", "character event closes the active full building detail immediately");
 
-        CloseSummaries();
-        yield return new WaitForSecondsRealtime(0.2f);
         RestoreWorldState();
         yield return null;
         CleanupAndFinish();
@@ -369,6 +443,64 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
         return !characterOpen && (detailOpen ^ buildingOpen);
     }
 
+    private bool IsNoWorldInfoOpen()
+    {
+        bool characterOpen = characterSummary != null
+            && characterSummary.UI != null
+            && characterSummary.UI.activeInHierarchy;
+        bool buildingOpen = buildingSummary != null
+            && buildingSummary.UI != null
+            && buildingSummary.UI.activeInHierarchy;
+        bool wildlifeOpen = wildlifeInfo != null && wildlifeInfo.IsShowingWildlife;
+        return !characterOpen && !buildingOpen && !wildlifeOpen && !IsDetailedBuildingOpen();
+    }
+
+    private bool TryFindBareHallwayScreenPoint(
+        Camera camera,
+        out Vector2 screenPoint,
+        out Vector2Int gridPosition)
+    {
+        screenPoint = default;
+        gridPosition = default;
+        GridSystemManager manager = UnityEngine.Object.FindFirstObjectByType<GridSystemManager>();
+        Grid grid = manager != null ? manager.grid : null;
+        if (grid == null || camera == null)
+        {
+            return false;
+        }
+
+        foreach (GridCell cell in grid.GetCells())
+        {
+            if (cell == null
+                || cell.AreaType != GridCellAreaType.DungeonInterior
+                || cell.GetOccupant(GridLayer.Hallway) is not Hallway
+                || cell.GetAllOccupants().Count != 1)
+            {
+                continue;
+            }
+
+            Vector3 worldPoint = grid.GetWorldPos(cell.Position) + Vector3.up * 0.5f;
+            Vector3 candidateScreenPoint = camera.WorldToScreenPoint(worldPoint);
+            bool onScreen = candidateScreenPoint.z > 0f
+                && candidateScreenPoint.x > 1f
+                && candidateScreenPoint.x < Screen.width - 1f
+                && candidateScreenPoint.y > 1f
+                && candidateScreenPoint.y < Screen.height - 1f;
+            if (!onScreen
+                || IsScreenPointOverUi(candidateScreenPoint)
+                || Physics2D.OverlapPointAll(worldPoint).Length > 0)
+            {
+                continue;
+            }
+
+            screenPoint = candidateScreenPoint;
+            gridPosition = cell.Position;
+            return true;
+        }
+
+        return false;
+    }
+
     private string DescribeBuildingInfoPanels()
     {
         bool characterOpen = characterSummary != null
@@ -424,7 +556,11 @@ public sealed class CharacterClickPriorityVerificationRunner : MonoBehaviour
     {
         characterSummary?.OnClose();
         buildingSummary?.OnClose();
-        buildingDetail?.CloseDispaly();
+        if (buildingDetail != null && buildingDetail.gameObject.activeInHierarchy)
+        {
+            buildingDetail.CloseDispaly();
+        }
+        wildlifeInfo?.OnClose();
     }
 
     private IEnumerator PressMouse(Vector2 screenPoint)

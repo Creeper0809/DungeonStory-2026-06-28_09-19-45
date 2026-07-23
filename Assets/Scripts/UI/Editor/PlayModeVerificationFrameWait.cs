@@ -81,56 +81,37 @@ public static class StartPartyPlayModeTestDriver
 {
     public static IEnumerator CompleteIfVisible(float timeoutSeconds = 120f)
     {
-        if (FindButton("StartPartyConfirm", requireInteractable: false) == null)
+        bool usesPreparationScene = FindButton("PreparationStartRunButton", requireInteractable: false) != null;
+        bool usesGameplayFallback = FindButton("StartPartyConfirm", requireInteractable: false) != null;
+        if (!usesPreparationScene && !usesGameplayFallback)
         {
             yield break;
-        }
-
-        for (int memberIndex = 0; memberIndex < 3; memberIndex++)
-        {
-            Click(FindButton($"PreparationTab_{memberIndex}_Skill", requireInteractable: true));
-            yield return null;
-
-            float deadline = Time.realtimeSinceStartup + Mathf.Max(1f, timeoutSeconds);
-            Button candidate = null;
-            while (Time.realtimeSinceStartup < deadline)
-            {
-                candidate = FindButton($"StartSkillCandidate_{memberIndex}_0", requireInteractable: true);
-                if (candidate != null)
-                {
-                    break;
-                }
-
-                yield return new WaitForSecondsRealtime(0.25f);
-            }
-
-            if (candidate == null)
-            {
-                Debug.LogError($"Start-party candidate {memberIndex} did not become ready within {timeoutSeconds:0.#} seconds.");
-                yield break;
-            }
-
-            Click(candidate);
-            yield return null;
-            candidate = FindButton($"StartSkillCandidate_{memberIndex}_0", requireInteractable: true);
-            if (candidate == null)
-            {
-                Debug.LogError($"Start-party candidate {memberIndex} disappeared before confirmation.");
-                yield break;
-            }
-
-            Click(candidate);
-            yield return null;
         }
 
         float confirmDeadline = Time.realtimeSinceStartup + Mathf.Max(1f, timeoutSeconds);
         Button confirm = null;
         while (Time.realtimeSinceStartup < confirmDeadline)
         {
-            confirm = FindButton("StartPartyConfirm", requireInteractable: true);
+            confirm = FindStartButton(requireInteractable: true);
             if (confirm != null)
             {
                 break;
+            }
+
+            if (usesGameplayFallback)
+            {
+                Button candidate = FindFirstLegacySkillCandidate();
+                if (candidate != null)
+                {
+                    string candidateName = candidate.name;
+                    Click(candidate);
+                    yield return null;
+                    candidate = FindButton(candidateName, requireInteractable: true);
+                    if (candidate != null)
+                    {
+                        Click(candidate);
+                    }
+                }
             }
 
             yield return new WaitForSecondsRealtime(0.25f);
@@ -138,12 +119,30 @@ public static class StartPartyPlayModeTestDriver
 
         if (confirm == null)
         {
-            Debug.LogError("Start party did not become ready after all three active selections and passive preparation.");
+            Debug.LogError("Start party did not become ready after generated active and passive preparation.");
             yield break;
         }
 
         Click(confirm);
         yield return new WaitForSecondsRealtime(0.5f);
+    }
+
+    private static Button FindStartButton(bool requireInteractable)
+    {
+        return FindButton("PreparationStartRunButton", requireInteractable)
+            ?? FindButton("StartPartyConfirm", requireInteractable);
+    }
+
+    private static Button FindFirstLegacySkillCandidate()
+    {
+        return Resources.FindObjectsOfTypeAll<Button>()
+            .Where(button => button != null
+                && button.gameObject.scene.IsValid()
+                && button.gameObject.activeInHierarchy
+                && button.interactable
+                && button.name.StartsWith("StartSkillCandidate_", StringComparison.Ordinal))
+            .OrderBy(button => button.name, StringComparer.Ordinal)
+            .FirstOrDefault();
     }
 
     public static Button FindButton(string objectName, bool requireInteractable)

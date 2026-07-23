@@ -131,6 +131,11 @@ public sealed class CharacterDialogueRuntime : MonoBehaviour
 
     private void OnBubbleResult(LocalLlmResult result)
     {
+        if (this == null || !isActiveAndEnabled)
+        {
+            return;
+        }
+
         if (result.IsSuccess)
         {
             if (!LlmJsonResponseParser.TryParse(result.Content, out BubbleLineJsonDto dto, out string parseError))

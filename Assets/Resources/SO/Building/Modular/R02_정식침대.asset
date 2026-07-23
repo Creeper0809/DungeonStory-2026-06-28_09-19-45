@@ -44,11 +44,13 @@ MonoBehaviour:
     items:
     - rid: 7302562995605602436
     - rid: 7302562995605602437
-    - rid: 7302562995605602438
     - rid: 7302562995605602439
     - rid: 7302562995605602440
     - rid: 7302562995605602441
-    - rid: 7302563076257874038
+    - rid: 7302563106683093094
+    - rid: 7302563106683093095
+    - rid: 7302563106683093096
+    - rid: 7302563133342875892
   width: 2
   height: 1
   layer: 1
@@ -76,17 +78,6 @@ MonoBehaviour:
         maintenance: 4
         unlockPhase: 2
         demolitionRefundRate: 0.5
-    - rid: 7302562995605602438
-      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
-      data:
-        abilityId: BuildingFacilityAbility
-        settings:
-          roles: 4
-          capacity: 1
-          useDuration: 1.5
-          requiredWorkers: 1
-          supportedWorkTypes: 132
-          disabledWhenDamaged: 1
     - rid: 7302562995605602439
       type: {class: BuildingRoomRequirementAbility, ns: , asm: Assembly-CSharp}
       data:
@@ -117,7 +108,32 @@ MonoBehaviour:
           hunger: 0
           excretion: 0
           hygiene: 0
-    - rid: 7302563076257874038
+    - rid: 7302563106683093094
+      type: {class: BuildingMedicalAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingMedicalAbility
+        workSeconds: 1.2
+        severityReduction: 0.38
+        requiresMedicine: 1
+    - rid: 7302563106683093095
+      type: {class: BuildingTemperatureAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingTemperatureAbility
+        roomTemperatureOffset: 1
+        coldProtection: 5
+        heatProtection: 3
+    - rid: 7302563106683093096
+      type: {class: BuildingFacilityAbility, ns: , asm: Assembly-CSharp}
+      data:
+        abilityId: BuildingFacilityAbility
+        settings:
+          roles: 4
+          capacity: 1
+          useDuration: 1.5
+          requiredWorkers: 1
+          supportedWorkTypes: 32900
+          disabledWhenDamaged: 1
+    - rid: 7302563133342875892
       type: {class: BuildingExpeditionRecoveryAbility, ns: , asm: Assembly-CSharp}
       data:
         abilityId: BuildingExpeditionRecoveryAbility

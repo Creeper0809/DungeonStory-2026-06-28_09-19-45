@@ -6075,9 +6075,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 655820d1dce4b434aa77b8da1b2fd7ec, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  defaultGridWidth: 36
+  defaultGridWidth: 60
   defaultGridHeight: 3
   gridOriginPos: {x: 0, y: 0, z: 100}
+  configureDefaultPhysicalWorldAreas: 1
+  dungeonInteriorStartX: 4
+  dungeonInteriorColumnCount: 27
+  dropZoneWidth: 3
+  entranceGridPosition: {x: 4, y: 0}
 --- !u!114 &435964649
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6869,7 +6874,12 @@ MonoBehaviour:
   speed: 8
   edgeThreshold: 7
   enableEdgeScroll: 0
+  enableZoom: 1
   movementPadding: {x: 4, y: 1}
+  zoomBounds: {x: 3.25, y: 10.5}
+  wheelZoomStep: 0.85
+  keyboardZoomSpeed: 4.5
+  blockWheelZoomOverUi: 1
   maxBound: {x: 1, y: 9}
   minBound: {x: -32, y: 0}
 --- !u!1 &524865088

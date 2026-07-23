@@ -21,7 +21,7 @@ public enum DungeonCameraControlScheme
 [Serializable]
 public sealed class DungeonUserSettingsData
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public int version = CurrentVersion;
     public DungeonWindowMode windowMode = DungeonWindowMode.Borderless;
@@ -39,6 +39,7 @@ public sealed class DungeonUserSettingsData
     public float maxCarryMultiplier = 1.5f;
     public bool highContrast;
     public bool reducedMotion;
+    public bool developerMode;
 
     public DungeonUserSettingsData Clone()
     {

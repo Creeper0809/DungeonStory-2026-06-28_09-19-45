@@ -24,6 +24,7 @@ public enum CharacterSkillRarity
 public enum CharacterSkillKind
 {
     SpeciesActive,
+    OwnerFixed,
     Active,
     Passive,
     Ultimate

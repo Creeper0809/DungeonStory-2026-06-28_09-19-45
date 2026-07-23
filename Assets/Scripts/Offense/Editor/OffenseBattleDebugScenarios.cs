@@ -23,6 +23,8 @@ public static class OffenseBattleDebugScenarios
         Run("exact battle persistence", VerifyExactPersistence, errors);
         Run("fixed difficulty multipliers", VerifyDifficultyMultipliers, errors);
         Run("formation constraints", VerifyFormationConstraints, errors);
+        Run("body injury and persistence", VerifyBodyInjuryAndPersistence, errors);
+        Run("heavy suppression skips turn", VerifyHeavySuppressionSkipsTurn, errors);
         Run("expedition equipment reservation", VerifyEquipmentReservation, errors);
         Run("expedition equipment craft queue persistence", VerifyEquipmentCraftQueuePersistence, errors);
         Run("building equipment crafting work", VerifyBuildingEquipmentCraftingWork, errors);
@@ -43,7 +45,8 @@ public static class OffenseBattleDebugScenarios
         OffenseBattleSession session = Session(ally, enemy);
 
         float damage = session.CalculateBasicDamage(ally, enemy);
-        Require(Mathf.Approximately(damage, 20f), $"Expected 20 damage, got {damage}.");
+        Require(damage >= 10f && damage <= 15f,
+            $"Expected a normal unarmed damage estimate, got {damage}.");
         Require(session.CurrentActor == ally, "Higher initiative ally did not act first.");
 
         OffenseBattleCombatant tieB = Combatant(
@@ -121,7 +124,15 @@ public static class OffenseBattleDebugScenarios
         OffenseBattleCombatant enemy = Combatant(
             "enemy:guard-test", "Enemy", OffenseBattleTeam.Enemies,
             120f, 10f, 6f, 5f, 5f, 4f);
-        OffenseBattleSession guardSession = Session(ally, enemy);
+        OffenseBattleSession guardSession = new OffenseBattleSession(
+            Guid.NewGuid().ToString("N"),
+            "expedition:guard-test",
+            "target:guard-test",
+            "Guard Test",
+            DungeonDifficulty.Normal,
+            new[] { ally, enemy },
+            new FixedCombatResolutionService(
+                Hit(CombatBodyPart.Torso, damage: 12f, bleeding: 0f, suppression: 0f)));
         Require(guardSession.TryExecuteCommand(
             new OffenseBattleCommand(1, ally.PersistentId, OffenseBattleActionType.Guard, ally.PersistentId),
             out _), "Guard command was rejected.");
@@ -130,9 +141,8 @@ public static class OffenseBattleDebugScenarios
             new OffenseBattleCommand(2, enemy.PersistentId, OffenseBattleActionType.BasicAttack, ally.PersistentId),
             out _), "Enemy attack was rejected.");
         float guardedDamage = before - ally.CurrentHealth;
-        float rawDamage = guardSession.CalculateBasicDamage(enemy, ally);
-        Require(Mathf.Approximately(guardedDamage, rawDamage * 0.5f),
-            $"Guard reduced {rawDamage} to {guardedDamage}, expected 50%.");
+        Require(Mathf.Approximately(guardedDamage, 6f),
+            $"Guard reduced a fixed 12 damage hit to {guardedDamage}, expected 6.");
 
         OffenseBattleCombatant abilityAlly = Combatant(
             "ally:ability", "Orc", OffenseBattleTeam.Allies,
@@ -312,6 +322,141 @@ public static class OffenseBattleDebugScenarios
                 OffenseBattleActionType.BasicAttack,
                 rearEnemy.PersistentId),
             out _), "Basic attack bypassed a living front target.");
+        return true;
+    }
+
+    private static bool VerifyBodyInjuryAndPersistence()
+    {
+        OffenseBattleCombatant ally = Combatant(
+            "ally:body-test",
+            "Attacker",
+            OffenseBattleTeam.Allies,
+            100f,
+            8f,
+            6f,
+            5f,
+            20f,
+            5f);
+        OffenseBattleCombatant enemy = Combatant(
+            "enemy:body-test",
+            "Defender",
+            OffenseBattleTeam.Enemies,
+            100f,
+            5f,
+            5f,
+            5f,
+            5f,
+            4f);
+        FixedCombatResolutionService resolver = new FixedCombatResolutionService(
+            Hit(CombatBodyPart.LeftArm, damage: 11f, bleeding: 2f, suppression: 8f));
+        OffenseBattleSession session = new OffenseBattleSession(
+            Guid.NewGuid().ToString("N"),
+            "expedition:body-test",
+            "target:body-test",
+            "Body Test",
+            DungeonDifficulty.Normal,
+            new[] { ally, enemy },
+            resolver);
+        Require(session.TryExecuteCommand(
+            new OffenseBattleCommand(
+                1,
+                ally.PersistentId,
+                OffenseBattleActionType.BasicAttack,
+                enemy.PersistentId),
+            out _), "Body-part attack was rejected.");
+
+        CharacterBodyPartHealthState injuredArm = enemy.BodyParts.Single(
+            part => part.bodyPart == CombatBodyPart.LeftArm);
+        Require(Mathf.Approximately(injuredArm.currentHealth, 11f),
+            $"Left arm health was {injuredArm.currentHealth}, expected 11.");
+        Require(enemy.Manipulation < 1f && enemy.Manipulation > 0.7f,
+            "Arm injury did not reduce manipulation.");
+        Require(enemy.BloodLoss > 0f,
+            "Bleeding hit did not increase blood loss.");
+
+        OffenseBattlePersistenceState state = session.CapturePersistentState();
+        OffenseBattleCombatant restoredAlly = Combatant(
+            ally.PersistentId,
+            ally.DisplayName,
+            ally.Team,
+            100f,
+            8f,
+            6f,
+            5f,
+            20f,
+            5f);
+        OffenseBattleCombatant restoredEnemy = Combatant(
+            enemy.PersistentId,
+            enemy.DisplayName,
+            enemy.Team,
+            100f,
+            5f,
+            5f,
+            5f,
+            5f,
+            4f);
+        OffenseBattleSession restored = OffenseBattleSession.Restore(
+            state,
+            new[] { restoredAlly, restoredEnemy },
+            resolver);
+        CharacterBodyPartHealthState restoredArm = restoredEnemy.BodyParts.Single(
+            part => part.bodyPart == CombatBodyPart.LeftArm);
+        Require(Mathf.Approximately(restoredArm.currentHealth, injuredArm.currentHealth),
+            "Body-part health changed during battle restore.");
+        Require(Mathf.Approximately(restoredEnemy.BloodLoss, enemy.BloodLoss),
+            "Blood loss changed during battle restore.");
+        Require(Mathf.Approximately(restoredEnemy.Manipulation, enemy.Manipulation),
+            "Limb penalties changed during battle restore.");
+        return true;
+    }
+
+    private static bool VerifyHeavySuppressionSkipsTurn()
+    {
+        OffenseBattleCombatant ally = Combatant(
+            "ally:suppression-test",
+            "Suppressor",
+            OffenseBattleTeam.Allies,
+            100f,
+            8f,
+            6f,
+            5f,
+            20f,
+            5f);
+        OffenseBattleCombatant enemy = Combatant(
+            "enemy:suppression-test",
+            "Pinned Target",
+            OffenseBattleTeam.Enemies,
+            100f,
+            5f,
+            5f,
+            5f,
+            5f,
+            4f);
+        OffenseBattleSession session = new OffenseBattleSession(
+            Guid.NewGuid().ToString("N"),
+            "expedition:suppression-test",
+            "target:suppression-test",
+            "Suppression Test",
+            DungeonDifficulty.Normal,
+            new[] { ally, enemy },
+            new FixedCombatResolutionService(
+                Hit(CombatBodyPart.Torso, damage: 1f, bleeding: 0f, suppression: 80f)));
+
+        Require(session.TryExecuteCommand(
+            new OffenseBattleCommand(
+                1,
+                ally.PersistentId,
+                OffenseBattleActionType.BasicAttack,
+                enemy.PersistentId),
+            out _), "Suppressive attack was rejected.");
+        Require(enemy.PinnedThisTurn,
+            "Suppression 75 or higher did not pin the target.");
+        Require(enemy.TurnsStarted == 1,
+            "Pinned target did not begin exactly one skipped turn.");
+        Require(session.CurrentActor == ally,
+            "Pinned target retained the current turn instead of being skipped.");
+        Require(session.Log.Any(entry => entry.Contains("제압", StringComparison.Ordinal)),
+            "Pinned turn did not leave a readable combat log.");
         return true;
     }
 
@@ -503,6 +648,78 @@ public static class OffenseBattleDebugScenarios
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static CombatAttackResult Hit(
+        CombatBodyPart bodyPart,
+        float damage,
+        float bleeding,
+        float suppression)
+    {
+        return new CombatAttackResult(
+            executed: true,
+            hit: true,
+            coverBlocked: false,
+            evaded: false,
+            bodyPart: bodyPart,
+            rawDamage: damage,
+            appliedDamage: damage,
+            bleeding: bleeding,
+            suppression: suppression,
+            armorDurabilityDamage: 0f,
+            armorInstanceId: string.Empty,
+            failureReason: string.Empty);
+    }
+
+    private sealed class FixedCombatResolutionService : ICombatResolutionService
+    {
+        private readonly CombatAttackResult result;
+
+        public FixedCombatResolutionService(CombatAttackResult result)
+        {
+            this.result = result;
+        }
+
+        public CombatAttackResult Resolve(CombatAttackRequest request)
+        {
+            return result;
+        }
+
+        public CombatAttackPreview Preview(CombatAttackRequest request)
+        {
+            return new CombatAttackPreview(
+                result.Executed,
+                result.FailureReason,
+                CombatRangeRules.GetBand(request.Distance),
+                result.Hit ? 1f : 0f,
+                result.CoverBlocked ? 1f : 0f,
+                result.ShieldBlocked ? 1f : 0f,
+                result.Evaded ? 1f : 0f,
+                result.AppliedDamage,
+                result.AppliedDamage);
+        }
+
+        public float CalculateAttackInterval(
+            CombatStatSnapshot attacker,
+            CombatWeaponSnapshot weapon,
+            CombatFireMode mode)
+        {
+            return 1f;
+        }
+
+        public float CalculateReloadTime(
+            CombatStatSnapshot actor,
+            CombatWeaponSnapshot weapon)
+        {
+            return 1f;
+        }
+
+        public float CalculateWeaponSwitchTime(
+            CombatStatSnapshot actor,
+            float weaponWeight)
+        {
+            return 1f;
+        }
     }
 
     private sealed class TestEquipmentCatalogProvider : IExpeditionEquipmentCatalogProvider

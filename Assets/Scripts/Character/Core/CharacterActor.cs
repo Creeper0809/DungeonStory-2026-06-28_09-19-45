@@ -20,6 +20,7 @@ using VContainer;
 [RequireComponent(typeof(CustomerPersonaRuntime))]
 [RequireComponent(typeof(CharacterDialogueRuntime))]
 [RequireComponent(typeof(CharacterSocialMemory))]
+[RequireComponent(typeof(CharacterAiMemoryRuntime))]
 [RequireComponent(typeof(BehaviorTree))]
 public class CharacterActor : SerializedMonoBehaviour, IInfoable
 {
@@ -61,12 +62,16 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     private CharacterSocialMemory socialMemory;
     [SerializeField]
     [ReadOnly]
+    private CharacterAiMemoryRuntime aiMemory;
+    [SerializeField]
+    [ReadOnly]
     private BehaviorTree behaviorTree;
     private IGridSystemProvider gridSystemProvider;
     private ICharacterAiSchedulingService aiSchedulingService;
     private IWorldInfoClickSelector worldInfoClickSelector;
     private ICharacterSocialMemoryFactory socialMemoryFactory;
     private ICharacterFeedbackBubbleFactory feedbackBubbleFactory;
+    private IMainCameraProvider mainCameraProvider;
     private bool registeredWithAiScheduler;
     private bool persistentRestorePrepared;
 
@@ -88,6 +93,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     public CustomerPersonaRuntime PersonaRuntime => personaRuntime;
     public CharacterDialogueRuntime DialogueRuntime => dialogueRuntime;
     public CharacterSocialMemory SocialMemory => socialMemory;
+    public CharacterAiMemoryRuntime AiMemory => aiMemory;
     public BehaviorTree BehaviorTree => behaviorTree;
     public CharacterRuntimeProfile profile => progression != null
         ? progression.GetEffectiveRuntimeProfile()
@@ -127,6 +133,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     public string SpeciesTag => identity != null ? identity.SpeciesTag : string.Empty;
     public Transform VisualRoot => visual != null ? visual.VisualRoot : null;
     public SpriteRenderer VisualRenderer => visual != null ? visual.VisualRenderer : null;
+    internal IMainCameraProvider MainCameraProvider => mainCameraProvider;
     public event Action<CharacterActor, string> OnDied;
 
     [Inject]
@@ -135,7 +142,8 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         ICharacterAiSchedulingService aiSchedulingService,
         IWorldInfoClickSelector worldInfoClickSelector,
         ICharacterSocialMemoryFactory socialMemoryFactory,
-        ICharacterFeedbackBubbleFactory feedbackBubbleFactory)
+        ICharacterFeedbackBubbleFactory feedbackBubbleFactory,
+        IMainCameraProvider mainCameraProvider)
     {
         this.gridSystemProvider = gridSystemProvider
             ?? throw new ArgumentNullException(nameof(gridSystemProvider));
@@ -147,6 +155,8 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
             ?? throw new ArgumentNullException(nameof(socialMemoryFactory));
         this.feedbackBubbleFactory = feedbackBubbleFactory
             ?? throw new ArgumentNullException(nameof(feedbackBubbleFactory));
+        this.mainCameraProvider = mainCameraProvider
+            ?? throw new ArgumentNullException(nameof(mainCameraProvider));
         EnsureSocialMemory();
         EnsureFeedbackBubbleIfInjected();
         RegisterWithAiSchedulerIfReady();
@@ -242,6 +252,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     private void Awake()
     {
         EnsureRuntimeState();
+        OrganizeRuntimeHierarchy();
         abilityCache?.CacheAbility();
     }
 
@@ -280,6 +291,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
 
     private void OnEnable()
     {
+        CharacterAiWorldRegistry.RegisterCharacter(this);
         RegisterWithAiSchedulerIfReady();
     }
 
@@ -287,6 +299,17 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
     {
         visual?.RestoreTraversalVisibility();
         UnregisterFromAiScheduler();
+        CharacterAiWorldRegistry.UnregisterCharacter(this);
+    }
+
+    private void OrganizeRuntimeHierarchy()
+    {
+        if (!Application.isPlaying || transform.parent != null)
+        {
+            return;
+        }
+
+        DungeonRuntimeHierarchy.Parent(gameObject, DungeonRuntimeHierarchy.Characters);
     }
 
     public void Initialize(CharacterSO data)
@@ -383,6 +406,7 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         }
         CharacterCarryInventory.Ensure(this);
         AbilityHaul.Ensure(this);
+        AbilityHunt.Ensure(this);
         abilityCache = GetComponent<CharacterAbilityCache>();
         characterStats = GetComponent<CharacterStats>();
         visual = GetComponent<CharacterVisual>();
@@ -391,6 +415,11 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         blackboard = GetComponent<CharacterBlackboard>();
         personaRuntime = GetComponent<CustomerPersonaRuntime>();
         dialogueRuntime = GetComponent<CharacterDialogueRuntime>();
+        aiMemory = GetComponent<CharacterAiMemoryRuntime>();
+        if (aiMemory == null && Application.isPlaying)
+        {
+            aiMemory = gameObject.AddComponent<CharacterAiMemoryRuntime>();
+        }
         EnsureSocialMemory();
 
         behaviorTree = GetComponent<BehaviorTree>();
@@ -412,9 +441,11 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         blackboard.Bind(this);
         personaRuntime.Bind(this);
         socialMemory.Bind(this);
+        aiMemory.Bind(this);
 
         visual.Bind();
         characterLog.Bind();
+        EnsureWorldNameplate();
         EnsureFeedbackBubbleIfInjected();
     }
 
@@ -749,7 +780,8 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         && blackboard != null
         && personaRuntime != null
         && dialogueRuntime != null
-        && socialMemory != null;
+        && socialMemory != null
+        && aiMemory != null;
 
     private void EnsureFeedbackBubbleIfInjected()
     {
@@ -759,6 +791,16 @@ public class CharacterActor : SerializedMonoBehaviour, IInfoable
         }
 
         feedbackBubbleFactory.GetOrAdd(this);
+    }
+
+    private void EnsureWorldNameplate()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        WorldCharacterNameplate.Ensure(this);
     }
 
     private void EnsureSocialMemory()

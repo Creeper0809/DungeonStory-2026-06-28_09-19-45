@@ -265,6 +265,14 @@ public static class DefenseFacilityDebugScenarios
             && work.TrySetPriorityWorkTarget(spike, FacilityWorkType.Repair, world.Grid.SearchPath(worker.GetNowXY()), out _)
             && work.AssignedWorkType == FacilityWorkType.Repair;
         bool repaired = ExecuteRepairForTest(work, spike) && !spike.IsDamaged;
+        if (!(disabled && repairCandidate && repaired))
+        {
+            Debug.LogError(
+                "Defense repair detail: "
+                + $"disabled={disabled}; repairCandidate={repairCandidate}; "
+                + $"hasWork={work != null}; assigned={(work != null ? work.AssignedWorkType.ToString() : "<none>")}; "
+                + $"repaired={repaired}; damaged={spike.IsDamaged}");
+        }
 
         return disabled && repairCandidate && repaired;
     }
@@ -378,9 +386,52 @@ public static class DefenseFacilityDebugScenarios
             return false;
         }
 
-        routine.MoveNext();
-        routine.MoveNext();
+        work.isWorking = true;
+        int ticks = DriveRoutine(routine, () => !target.IsDamaged, 4096);
+
+        if (target.IsDamaged)
+        {
+            Debug.LogError(
+                "Defense repair routine detail: "
+                + $"ticks={ticks}; isWorking={work.isWorking}; "
+                + $"assigned={work.AssignedWorkType}; target={target.name}");
+        }
+
         return !target.IsDamaged;
+    }
+
+    private static int DriveRoutine(IEnumerator routine, Func<bool> stopCondition, int maxTicks)
+    {
+        if (routine == null)
+        {
+            return 0;
+        }
+
+        Stack<IEnumerator> stack = new Stack<IEnumerator>();
+        stack.Push(routine);
+        int ticks = 0;
+        while (stack.Count > 0 && ticks < maxTicks)
+        {
+            if (stopCondition != null && stopCondition())
+            {
+                break;
+            }
+
+            IEnumerator current = stack.Peek();
+            if (!current.MoveNext())
+            {
+                stack.Pop();
+                continue;
+            }
+
+            ticks++;
+            if (current.Current is IEnumerator nested)
+            {
+                stack.Push(nested);
+            }
+        }
+
+        return ticks;
     }
 
     private sealed class DefenseScenarioWorld : IDisposable
@@ -479,6 +530,7 @@ public static class DefenseFacilityDebugScenarios
             data.characterType = CharacterType.NPC;
             data.characterName = "Defense Repair Worker";
             data.speciesTag = "Orc";
+            data.baseStats = CharacterStatBlock.CreateDefault(10);
             GameObject obj = CreateCharacterObject("Defense Scenario Worker");
             AbilityWork work = obj.AddComponent<AbilityWork>();
             work.ConstructAbilityWork(

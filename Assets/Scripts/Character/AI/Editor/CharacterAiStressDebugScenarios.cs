@@ -130,9 +130,15 @@ public static class CharacterAiStressDebugScenarios
         Stopwatch stopwatch = Stopwatch.StartNew();
         int maxDecisions = 0;
         int maxPathSearches = 0;
+        int maxBrokerPathSearches = 0;
+        int maxBrokerPathCacheHits = 0;
+        int maxBrokerPathBudgetDeferrals = 0;
         int maxBehaviorTreeTicks = 0;
         int totalDecisions = 0;
         int totalPathSearches = 0;
+        int totalBrokerPathSearches = 0;
+        int totalBrokerPathCacheHits = 0;
+        int totalBrokerPathBudgetDeferrals = 0;
         int totalBehaviorTreeTicks = 0;
 
         for (int frame = 0; frame < SimulationFrames; frame++)
@@ -140,9 +146,15 @@ public static class CharacterAiStressDebugScenarios
             world.Scheduler.RunManualTick(1f / 60f);
             maxDecisions = Mathf.Max(maxDecisions, world.Scheduler.LastProcessedDecisionCount);
             maxPathSearches = Mathf.Max(maxPathSearches, world.Scheduler.LastPathSearchCount);
+            maxBrokerPathSearches = Mathf.Max(maxBrokerPathSearches, world.Scheduler.LastBrokerPathSearchCount);
+            maxBrokerPathCacheHits = Mathf.Max(maxBrokerPathCacheHits, world.Scheduler.LastBrokerPathCacheHitCount);
+            maxBrokerPathBudgetDeferrals = Mathf.Max(maxBrokerPathBudgetDeferrals, world.Scheduler.LastBrokerPathBudgetDeferralCount);
             maxBehaviorTreeTicks = Mathf.Max(maxBehaviorTreeTicks, world.Scheduler.LastBehaviorTreeTickCount);
             totalDecisions += world.Scheduler.LastProcessedDecisionCount;
             totalPathSearches += world.Scheduler.LastPathSearchCount;
+            totalBrokerPathSearches += world.Scheduler.LastBrokerPathSearchCount;
+            totalBrokerPathCacheHits += world.Scheduler.LastBrokerPathCacheHitCount;
+            totalBrokerPathBudgetDeferrals += world.Scheduler.LastBrokerPathBudgetDeferralCount;
             totalBehaviorTreeTicks += world.Scheduler.LastBehaviorTreeTickCount;
         }
 
@@ -198,6 +210,9 @@ public static class CharacterAiStressDebugScenarios
             $"totalDecisions={totalDecisions}, maxDecisions/frame={maxDecisions}, " +
             $"totalBtTicks={totalBehaviorTreeTicks}, maxBtTicks/frame={maxBehaviorTreeTicks}, " +
             $"totalPathSearches={totalPathSearches}, maxPathSearches/frame={maxPathSearches}, " +
+            $"brokerPathSearches={totalBrokerPathSearches}, brokerCacheHits={totalBrokerPathCacheHits}, " +
+            $"brokerBudgetDeferrals={totalBrokerPathBudgetDeferrals}, maxBrokerPathSearches/frame={maxBrokerPathSearches}, " +
+            $"maxBrokerCacheHits/frame={maxBrokerPathCacheHits}, maxBrokerBudgetDeferrals/frame={maxBrokerPathBudgetDeferrals}, " +
             $"branches={branches}, samples={samples}, elapsedMs={stopwatch.Elapsed.TotalMilliseconds:0.0}";
 
         if (logSuccess || !valid)
@@ -233,8 +248,14 @@ public static class CharacterAiStressDebugScenarios
         private int samples;
         private int totalDecisions;
         private int totalPathSearches;
+        private int totalBrokerPathSearches;
+        private int totalBrokerPathCacheHits;
+        private int totalBrokerPathBudgetDeferrals;
         private int maxDecisions;
         private int maxPathSearches;
+        private int maxBrokerPathSearches;
+        private int maxBrokerPathCacheHits;
+        private int maxBrokerPathBudgetDeferrals;
         private int framesOver16Ms;
         private int framesOver33Ms;
         private int mainThreadSamples;
@@ -452,8 +473,14 @@ public static class CharacterAiStressDebugScenarios
                 {
                     totalDecisions += warmupScheduler.LastProcessedDecisionCount;
                     totalPathSearches += warmupScheduler.LastPathSearchCount;
+                    totalBrokerPathSearches += warmupScheduler.LastBrokerPathSearchCount;
+                    totalBrokerPathCacheHits += warmupScheduler.LastBrokerPathCacheHitCount;
+                    totalBrokerPathBudgetDeferrals += warmupScheduler.LastBrokerPathBudgetDeferralCount;
                     maxDecisions = Mathf.Max(maxDecisions, warmupScheduler.LastProcessedDecisionCount);
                     maxPathSearches = Mathf.Max(maxPathSearches, warmupScheduler.LastPathSearchCount);
+                    maxBrokerPathSearches = Mathf.Max(maxBrokerPathSearches, warmupScheduler.LastBrokerPathSearchCount);
+                    maxBrokerPathCacheHits = Mathf.Max(maxBrokerPathCacheHits, warmupScheduler.LastBrokerPathCacheHitCount);
+                    maxBrokerPathBudgetDeferrals = Mathf.Max(maxBrokerPathBudgetDeferrals, warmupScheduler.LastBrokerPathBudgetDeferralCount);
                 }
 
                 warmupSamples++;
@@ -515,8 +542,14 @@ public static class CharacterAiStressDebugScenarios
             {
                 totalDecisions += scheduler.LastProcessedDecisionCount;
                 totalPathSearches += scheduler.LastPathSearchCount;
+                totalBrokerPathSearches += scheduler.LastBrokerPathSearchCount;
+                totalBrokerPathCacheHits += scheduler.LastBrokerPathCacheHitCount;
+                totalBrokerPathBudgetDeferrals += scheduler.LastBrokerPathBudgetDeferralCount;
                 maxDecisions = Mathf.Max(maxDecisions, scheduler.LastProcessedDecisionCount);
                 maxPathSearches = Mathf.Max(maxPathSearches, scheduler.LastPathSearchCount);
+                maxBrokerPathSearches = Mathf.Max(maxBrokerPathSearches, scheduler.LastBrokerPathSearchCount);
+                maxBrokerPathCacheHits = Mathf.Max(maxBrokerPathCacheHits, scheduler.LastBrokerPathCacheHitCount);
+                maxBrokerPathBudgetDeferrals = Mathf.Max(maxBrokerPathBudgetDeferrals, scheduler.LastBrokerPathBudgetDeferralCount);
             }
 
             if (samples >= sampleFrames)
@@ -574,6 +607,9 @@ public static class CharacterAiStressDebugScenarios
                 $"avgSchedulerMs={avgSchedulerMs:0.000}, p95SchedulerMs={Percentile(schedulerTimesMs, 0.95):0.000}, maxSchedulerMs={maxSchedulerMs:0.000}, " +
                 $"totalDecisions={totalDecisions}, maxDecisions/frame={maxDecisions}, " +
                 $"totalPathSearches={totalPathSearches}, maxPathSearches/frame={maxPathSearches}, " +
+                $"brokerPathSearches={totalBrokerPathSearches}, brokerCacheHits={totalBrokerPathCacheHits}, " +
+                $"brokerBudgetDeferrals={totalBrokerPathBudgetDeferrals}, maxBrokerPathSearches/frame={maxBrokerPathSearches}, " +
+                $"maxBrokerCacheHits/frame={maxBrokerPathCacheHits}, maxBrokerBudgetDeferrals/frame={maxBrokerPathBudgetDeferrals}, " +
                 $"avgGcAllocKB/frame={avgGcAllocKb:0.0}, maxGcAllocKB/frame={maxGcAllocKb:0.0}, " +
                 $"monoUsedDeltaMB={monoDeltaMb:0.00}, gen0Collections={GC.CollectionCount(0) - startGen0Collections}";
 
@@ -713,6 +749,12 @@ public static class CharacterAiStressDebugScenarios
                 $"  \"maxDecisionsPerFrame\": {maxDecisions},\n" +
                 $"  \"totalPathSearches\": {totalPathSearches},\n" +
                 $"  \"maxPathSearchesPerFrame\": {maxPathSearches},\n" +
+                $"  \"brokerPathSearches\": {totalBrokerPathSearches},\n" +
+                $"  \"brokerCacheHits\": {totalBrokerPathCacheHits},\n" +
+                $"  \"brokerBudgetDeferrals\": {totalBrokerPathBudgetDeferrals},\n" +
+                $"  \"maxBrokerPathSearchesPerFrame\": {maxBrokerPathSearches},\n" +
+                $"  \"maxBrokerCacheHitsPerFrame\": {maxBrokerPathCacheHits},\n" +
+                $"  \"maxBrokerBudgetDeferralsPerFrame\": {maxBrokerPathBudgetDeferrals},\n" +
                 $"  \"avgGcAllocKbPerFrame\": {avgGcAllocKb:0.###},\n" +
                 $"  \"maxGcAllocKbPerFrame\": {maxGcAllocKb:0.###},\n" +
                 $"  \"monoUsedDeltaMb\": {monoDeltaMb:0.###},\n" +

@@ -45,9 +45,11 @@ public class AILookAround : AIActionSet
         {
             if (move.StartIdleWander(waitDuration, 1, 6))
             {
+                actor.Brain?.SetActionPhase("주변 둘러보기", detail: "가까운 곳을 돌아보는 중");
                 return;
             }
 
+            actor.Brain?.SetActionPhase("갈 곳 찾는 중", detail: "둘러볼 수 있는 칸을 다시 확인하는 중");
             move.StartWait(waitDuration);
             return;
         }

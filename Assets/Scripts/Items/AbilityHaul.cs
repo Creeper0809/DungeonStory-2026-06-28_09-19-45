@@ -7,9 +7,14 @@ public sealed class AbilityHaul : MonoBehaviour
     private CharacterActor actor;
     private AbilityMove move;
     private Coroutine haulingRoutine;
-    private WorldItemHaulJob activeJob;
+    private WorldItemHaulPlan activePlan;
+    private WorldItemHaulPlanUnloadReason unloadReason;
 
     public bool IsHauling => haulingRoutine != null;
+    public string CurrentPlanSummary => activePlan != null && activePlan.IsValid
+        ? activePlan.Summary
+        : "운반 계획 없음";
+    public string CurrentUnloadReason => ToDisplayText(unloadReason);
 
     private void Awake()
     {
@@ -53,9 +58,9 @@ public sealed class AbilityHaul : MonoBehaviour
         }
 
         StopHauling("restart");
-        if (!WorldItemStackRuntime.Active.TryReserveBestHaulJob(
+        if (!WorldItemStackRuntime.Active.TryReserveBestHaulPlan(
                 actor,
-                out WorldItemHaulJob reservedJob,
+                out WorldItemHaulPlan reservedPlan,
                 out string reason))
         {
             actor.Brain?.SetActionPhase("운반 대기", null, reason);
@@ -63,8 +68,9 @@ public sealed class AbilityHaul : MonoBehaviour
             return;
         }
 
-        activeJob = reservedJob;
-        haulingRoutine = StartCoroutine(HaulRoutine(activeJob));
+        activePlan = reservedPlan;
+        unloadReason = WorldItemHaulPlanUnloadReason.None;
+        haulingRoutine = StartCoroutine(HaulRoutine(activePlan));
     }
 
     public void StopHauling(string reason)
@@ -75,19 +81,15 @@ public sealed class AbilityHaul : MonoBehaviour
             haulingRoutine = null;
         }
 
-        if (activeJob.IsValid && actor != null && WorldItemStackRuntime.Active != null)
-        {
-            string actorId = actor.Identity != null ? actor.Identity.PersistentId : string.Empty;
-            WorldItemStackRuntime.Active.ReleaseReservation(activeJob.StackId, actorId);
-        }
-
-        activeJob = default;
+        ReleaseActivePlanReservations();
+        activePlan = null;
+        unloadReason = WorldItemHaulPlanUnloadReason.Interrupted;
     }
 
-    private IEnumerator HaulRoutine(WorldItemHaulJob job)
+    private IEnumerator HaulRoutine(WorldItemHaulPlan plan)
     {
         CharacterCarryInventory carry = CharacterCarryInventory.Ensure(actor);
-        if (carry == null || WorldItemStackRuntime.Active == null)
+        if (carry == null || WorldItemStackRuntime.Active == null || plan == null || !plan.IsValid)
         {
             EndAiAction();
             yield break;
@@ -96,84 +98,152 @@ public sealed class AbilityHaul : MonoBehaviour
         move.CancelActiveMovement();
         if (!TryGetGrid(out Grid grid))
         {
-            actor.Brain?.SetActionPhase("운반 실패", null, "no grid");
+            actor.Brain?.SetActionPhase("운반 실패", null, "그리드 없음");
             EndAiAction();
             yield break;
         }
 
         AIAction expectedAction = actor.Brain != null ? actor.Brain.bestAction : null;
-        actor.Brain?.SetActionPhase("물건 가지러 가는 중", null, job.ItemPosition.ToString());
-        Queue<GridMoveStep> pickupPath = grid.GetMovePath(actor.GetNowXY(), pos => pos == job.PickupStandPosition);
-        yield return move.MoveByPath(pickupPath, expectedAction);
-        if (IsActionCancelled(expectedAction)
-            || (move.LastGridMoveWasBlocked && !IsActorAt(job.PickupStandPosition)))
+        int pickedStackCount = 0;
+        foreach (WorldItemHaulPlanLeg pickup in plan.PickupLegs)
         {
-            EndAiAction();
+            if (!pickup.IsValid)
+            {
+                continue;
+            }
+
+            actor.Brain?.SetActionPhase(
+                "물건 가지러 이동",
+                null,
+                $"{pickup.ItemPosition} · {pickedStackCount + 1}/{plan.PickupLegs.Count}");
+            Queue<GridMoveStep> pickupPath = GetMovePath(grid, pickup.PickupStandPosition);
+            yield return move.MoveByPath(pickupPath, expectedAction);
+            if (IsActionCancelled(expectedAction)
+                || (move.LastGridMoveWasBlocked && !IsActorAt(pickup.PickupStandPosition)))
+            {
+                unloadReason = WorldItemHaulPlanUnloadReason.Interrupted;
+                break;
+            }
+
+            actor.Brain?.SetActionPhase(
+                "물건 줍는 중",
+                null,
+                $"{pickup.Reservation.Quantity}개");
+            if (!WorldItemStackRuntime.Active.TryPickupReservedStackQuantity(
+                    actor,
+                    carry,
+                    pickup.Reservation,
+                    out int pickedUp,
+                    out string pickupReason))
+            {
+                actor.Brain?.SetActionPhase("운반 건너뜀", null, pickupReason);
+                WorldItemStackRuntime.Active.ReleaseReservation(
+                    pickup.Reservation.StackId,
+                    actor.Identity != null ? actor.Identity.PersistentId : string.Empty);
+                continue;
+            }
+
+            pickedStackCount++;
+            yield return new WaitForSeconds(0.05f);
+            if (pickedUp < pickup.Reservation.Quantity
+                || carry.GetLoadRatio(
+                    WorldItemStackRuntime.Active.CatalogProvider,
+                    WorldItemStackRuntime.Active.HaulingSettingsProvider) >= 0.98f)
+            {
+                unloadReason = WorldItemHaulPlanUnloadReason.LoadLimitReached;
+                break;
+            }
+        }
+
+        ReleaseActivePlanReservations();
+        if (!carry.HasItems || pickedStackCount == 0)
+        {
+            unloadReason = WorldItemHaulPlanUnloadReason.NoPickupCandidate;
+            actor.Brain?.SetActionPhase("운반 실패", null, "집을 물건 없음");
+            FinishHauling();
             yield break;
         }
 
-        actor.Brain?.SetActionPhase("물건 줍는 중", null, job.ItemPosition.ToString());
-        if (!WorldItemStackRuntime.Active.TryPickupReservedStack(actor, carry, job, out string pickupReason))
+        foreach (WorldItemHaulPlanLeg delivery in plan.DeliveryLegs)
         {
-            actor.Brain?.SetActionPhase("운반 실패", null, pickupReason);
-            EndAiAction();
-            yield break;
+            if (!delivery.IsValid)
+            {
+                continue;
+            }
+
+            actor.Brain?.SetActionPhase(
+                delivery.DestinationKind == WorldItemHaulDestinationKind.FacilityBuffer
+                    ? "목적지로 이동"
+                    : "창고로 이동",
+                null,
+                delivery.DeliveryPosition.ToString());
+            Queue<GridMoveStep> deliveryPath = GetMovePath(grid, delivery.DeliveryPosition);
+            yield return move.MoveByPath(deliveryPath, expectedAction);
+            if (move.LastGridMoveWasBlocked && !IsActorAt(delivery.DeliveryPosition))
+            {
+                unloadReason = WorldItemHaulPlanUnloadReason.JobChanged;
+                break;
+            }
+
+            actor.Brain?.SetActionPhase("물품 내려놓는 중", null, delivery.DeliveryPosition.ToString());
+            string depositReason;
+            bool deposited;
+            if (delivery.DestinationKind == WorldItemHaulDestinationKind.FacilityBuffer)
+            {
+                deposited = WorldItemStackRuntime.Active.TryDepositCarriedItemsToFacility(
+                    actor,
+                    carry,
+                    delivery.DropPosition,
+                    delivery.DestinationId,
+                    out depositReason);
+            }
+            else
+            {
+                deposited = WorldItemStackRuntime.Active.TryDepositCarriedItems(
+                    actor,
+                    carry,
+                    delivery.Warehouse,
+                    out depositReason);
+            }
+
+            if (!deposited)
+            {
+                actor.AddLog("운반 정리 실패: " + (string.IsNullOrWhiteSpace(depositReason) ? "입고 실패" : depositReason));
+            }
+            else
+            {
+                actor.AddLog($"바닥 물건 {pickedStackCount}묶음을 정리했다.");
+                unloadReason = WorldItemHaulPlanUnloadReason.Completed;
+            }
+
+            break;
         }
 
-        yield return new WaitForSeconds(0.1f);
-        actor.Brain?.SetActionPhase("창고로 옮기는 중", null, job.DeliveryPosition.ToString());
-        Queue<GridMoveStep> deliveryPath = grid.GetMovePath(actor.GetNowXY(), pos => pos == job.DeliveryPosition);
-        yield return move.MoveByPath(deliveryPath, expectedAction);
-        if (IsActionCancelled(expectedAction)
-            || (move.LastGridMoveWasBlocked && !IsActorAt(job.DeliveryPosition)))
+        FinishHauling();
+    }
+
+    private Queue<GridMoveStep> GetMovePath(Grid grid, Vector2Int target)
+    {
+        if (grid == null || actor == null)
         {
-            EndAiAction();
-            yield break;
+            return null;
         }
 
-        actor.Brain?.SetActionPhase("창고 입고", null, job.DeliveryPosition.ToString());
-        string depositReason;
-        bool deposited;
-        if (job.DestinationKind == WorldItemHaulDestinationKind.FacilityBuffer)
-        {
-            deposited = WorldItemStackRuntime.Active.TryDepositCarriedItemsToFacility(
-                actor,
-                carry,
-                job.DropPosition,
-                job.DestinationId,
-                out depositReason);
-        }
-        else
-        {
-            deposited = WorldItemStackRuntime.Active.TryDepositCarriedItems(
-                actor,
-                carry,
-                job.Warehouse,
-                out depositReason);
-        }
-
-        if (!deposited && string.IsNullOrWhiteSpace(depositReason))
-        {
-            depositReason = "deposit failed";
-        }
-
-        if (!string.IsNullOrWhiteSpace(depositReason))
-        {
-            actor.AddLog("운반 정리: " + depositReason);
-        }
-        else
-        {
-            actor.AddLog("바닥 물건을 창고에 정리했다.");
-        }
-
-        haulingRoutine = null;
-        activeJob = default;
-        EndAiAction();
+        Vector2Int start = actor.GetNowXY();
+        return GridPathSearchBroker.GetMovePath(
+            grid,
+            start,
+            pos => pos == target,
+            () => true);
     }
 
     private bool TryGetGrid(out Grid grid)
     {
-        grid = null;
+        if (CharacterAiWorldRegistry.TryGetGrid(out grid))
+        {
+            return true;
+        }
+
         GridSystemManager manager = FindFirstObjectByType<GridSystemManager>();
         if (manager != null && manager.grid != null)
         {
@@ -181,6 +251,7 @@ public sealed class AbilityHaul : MonoBehaviour
             return true;
         }
 
+        grid = null;
         return false;
     }
 
@@ -195,6 +266,27 @@ public sealed class AbilityHaul : MonoBehaviour
         return actor != null && actor.GetNowXY() == gridPosition;
     }
 
+    private void FinishHauling()
+    {
+        activePlan = null;
+        haulingRoutine = null;
+        EndAiAction();
+    }
+
+    private void ReleaseActivePlanReservations()
+    {
+        if (activePlan == null || actor == null || WorldItemStackRuntime.Active == null)
+        {
+            return;
+        }
+
+        string actorId = actor.Identity != null ? actor.Identity.PersistentId : string.Empty;
+        foreach (WorldItemReservedStackQuantity reservation in activePlan.ReservedStackQuantities)
+        {
+            WorldItemStackRuntime.Active.ReleaseReservation(reservation.StackId, actorId);
+        }
+    }
+
     private void EndAiAction()
     {
         if (actor != null && actor.Brain != null)
@@ -202,13 +294,25 @@ public sealed class AbilityHaul : MonoBehaviour
             actor.Brain.isBestActionEnd = true;
             actor.Brain.RequestImmediateReplan(clearFailures: true);
         }
-
-        haulingRoutine = null;
     }
 
     private void CacheReferences()
     {
         actor = actor != null ? actor : GetComponent<CharacterActor>();
         move = move != null ? move : GetComponent<AbilityMove>();
+    }
+
+    private static string ToDisplayText(WorldItemHaulPlanUnloadReason reason)
+    {
+        return reason switch
+        {
+            WorldItemHaulPlanUnloadReason.LoadLimitReached => "적재 한도 도달",
+            WorldItemHaulPlanUnloadReason.NoPickupCandidate => "집을 후보 없음",
+            WorldItemHaulPlanUnloadReason.JobChanged => "경로 또는 목적지 변경",
+            WorldItemHaulPlanUnloadReason.Idle => "대기 전 적재물 정리",
+            WorldItemHaulPlanUnloadReason.Interrupted => "운반 중단",
+            WorldItemHaulPlanUnloadReason.Completed => "배송 완료",
+            _ => "진행 중"
+        };
     }
 }

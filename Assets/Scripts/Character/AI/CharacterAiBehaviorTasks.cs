@@ -60,6 +60,180 @@ namespace BehaviorDesigner.Runtime.Tasks.DungeonStory
     }
 
     [TaskCategory("DungeonStory/Character AI")]
+    public sealed class HasDeprivationBreakdown : Conditional
+    {
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            return CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline)
+                && decisionPipeline.HasDeprivationBreakdown(actor)
+                ? TaskStatus.Success
+                : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
+    public sealed class RunDeprivationBreakdown : Action
+    {
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            if (!CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline))
+            {
+                return TaskStatus.Failure;
+            }
+
+            return decisionPipeline.RunDeprivationBreakdown(actor).Handled
+                ? TaskStatus.Success
+                : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
+    public sealed class HasLockedAction : Conditional
+    {
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            return CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline)
+                && decisionPipeline.HasLockedAction(actor)
+                ? TaskStatus.Success
+                : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
+    public sealed class CanInterruptCurrentAction : Conditional
+    {
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            return CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline)
+                && decisionPipeline.CanInterruptCurrentAction(actor)
+                ? TaskStatus.Success
+                : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
+    public sealed class RunLockedAction : Action
+    {
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            if (!CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline))
+            {
+                return TaskStatus.Failure;
+            }
+
+            CharacterAiDecisionTickResult result =
+                decisionPipeline.RunLockedAction(actor);
+            return result.Handled ? TaskStatus.Success : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
+    public sealed class RunEmergencyDecision : Action
+    {
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            if (!CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline))
+            {
+                return TaskStatus.Failure;
+            }
+
+            CharacterAiDecisionTickResult result =
+                decisionPipeline.RunEmergencyDecision(actor);
+            return result.Handled ? TaskStatus.Success : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
+    public sealed class RunRoutineUtilityDecision : Action
+    {
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            if (!CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline))
+            {
+                return TaskStatus.Failure;
+            }
+
+            CharacterAiDecisionTickResult result =
+                decisionPipeline.RunRoutineUtilityDecision(actor);
+            return result.Handled ? TaskStatus.Success : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
+    public sealed class RecordBtDecisionTrace : Action
+    {
+        public CharacterAiBranch branch = CharacterAiBranch.None;
+        public string status = "enter";
+        private CharacterActor actor;
+
+        public override void OnAwake()
+        {
+            actor = GetComponent<CharacterActor>();
+        }
+
+        public override TaskStatus OnUpdate()
+        {
+            if (!CharacterAiBehaviorTaskServices.TryGetDecisionPipeline(actor, out ICharacterAiDecisionPipeline decisionPipeline))
+            {
+                return TaskStatus.Failure;
+            }
+
+            CharacterAiDecisionTickResult result =
+                decisionPipeline.RecordBtDecisionTrace(actor, branch, FriendlyName, status);
+            return result.Handled ? TaskStatus.Success : TaskStatus.Failure;
+        }
+    }
+
+    [TaskCategory("DungeonStory/Character AI")]
     public sealed class HasMacroGoalType : Conditional
     {
         public CharacterMacroGoalType goalType;

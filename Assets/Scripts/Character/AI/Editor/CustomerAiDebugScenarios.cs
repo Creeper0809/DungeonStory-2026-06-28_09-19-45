@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -32,6 +33,10 @@ public static class CustomerAiDebugScenarios
         RunScenario("뱀파이어는 마나/연구 선호", VerifyVampireSelectsManaOrResearch, errors);
         RunScenario("이용 불가 시설 제외", VerifyUnavailableFacilitiesAreExcluded, errors);
         RunScenario("Unstaffed shop allows self-service checkout", VerifyUnstaffedShopAllowsSelfServiceCheckout, errors);
+        RunScenario("Checkout patience stages scale by personality and queue", VerifyCheckoutPatienceStages, errors);
+        RunScenario("Abandoned checkout preserves another shopping attempt", VerifyAbandonedCheckoutPreservesVisit, errors);
+        RunScenario("Abandoned checkout creates personal facility memory", VerifyCheckoutComplaintCreatesFacilityMemory, errors);
+        RunScenario("Staffed checkout coroutine reaches abandonment and releases queue", VerifyCheckoutWaitCoroutineAbandons, errors);
         RunScenario("Completed visit exits without optional look around", VerifyCompletedVisitExitsImmediately, errors);
         RunScenario("돈 부족 상점만 있으면 방문 종료", VerifyUnaffordableShopEndsVisitCycle, errors);
         RunScenario("방문자 필수 AI 행동 자동 보강", VerifyVisitorActionsAreCompletedFromPartialPrefab, errors);
@@ -478,6 +483,115 @@ public static class CustomerAiDebugScenarios
             && workerImprovesPrice
             && workerReducesCrime
             && customerContextRaisesCrime;
+    }
+
+    private static bool VerifyCheckoutPatienceStages()
+    {
+        CustomerCheckoutPatienceProfile impatient = CustomerCheckoutPatienceRules.Create(0.5f, 1f, 1);
+        CustomerCheckoutPatienceProfile average = CustomerCheckoutPatienceRules.Create(1f, 1f, 1);
+        CustomerCheckoutPatienceProfile patient = CustomerCheckoutPatienceRules.Create(1.8f, 1f, 1);
+        CustomerCheckoutPatienceProfile crowded = CustomerCheckoutPatienceRules.Create(1f, 1f, 4);
+
+        return impatient.AbandonSeconds < average.AbandonSeconds
+            && average.AbandonSeconds < patient.AbandonSeconds
+            && crowded.AbandonSeconds < average.AbandonSeconds
+            && CustomerCheckoutPatienceRules.GetStage(average, average.RestlessSeconds - 0.01f)
+                == CustomerCheckoutWaitStage.Waiting
+            && CustomerCheckoutPatienceRules.GetStage(average, average.RestlessSeconds)
+                == CustomerCheckoutWaitStage.Restless
+            && CustomerCheckoutPatienceRules.GetStage(average, average.RequestServiceSeconds)
+                == CustomerCheckoutWaitStage.RequestingService
+            && CustomerCheckoutPatienceRules.GetStage(average, average.AbandonSeconds)
+                == CustomerCheckoutWaitStage.Abandoned
+            && impatient.AbandonMoodPenalty < patient.AbandonMoodPenalty
+            && impatient.AbandonSentiment < patient.AbandonSentiment;
+    }
+
+    private static bool VerifyAbandonedCheckoutPreservesVisit()
+    {
+        using CustomerAiScenarioWorld world = new CustomerAiScenarioWorld();
+        BuildableObject shop = world.Place("P1_GeneralStore", new Vector2Int(4, 0));
+        BuildableObject alternative = world.Place("P1_WeaponShop", new Vector2Int(12, 0));
+        CharacterActor customer = world.CreateCustomer("Slime", Vector2Int.zero, 90f, 90f, 10f, 20f);
+        AbilityShopping shopping = customer.GetAbility<AbilityShopping>();
+        shopping.RestorePersistentState(2, 0, 100);
+
+        shopping.BeginVisitInteraction(shop);
+        shopping.SetVisitOutcome(shop, ShoppingVisitOutcome.Abandoned);
+        shopping.RegisterAvoidedVisit(shop);
+
+        return shopping.LastVisitOutcome == ShoppingVisitOutcome.Abandoned
+            && shopping.HasVisited(shop)
+            && !shopping.HasVisited(alternative)
+            && shopping.visitCount == 2
+            && shopping.IsThereVisitableBuilding()
+            && shopping.FindShop() == alternative;
+    }
+
+    private static bool VerifyCheckoutComplaintCreatesFacilityMemory()
+    {
+        using CustomerAiScenarioWorld world = new CustomerAiScenarioWorld();
+        BuildableObject shop = world.Place("P1_GeneralStore", new Vector2Int(4, 0));
+        CharacterActor customer = world.CreateCustomer("Slime", Vector2Int.zero, 90f, 90f, 10f, 20f);
+        CharacterSocialMemory memory = customer.SocialMemory;
+        float before = memory != null ? memory.GetFacilitySentiment(shop) : 0f;
+
+        memory?.RememberFacilityExperience(
+            shop,
+            -0.75f,
+            "계산이 너무 늦어 구매를 포기했다.",
+            600f);
+
+        float after = memory != null ? memory.GetFacilitySentiment(shop) : 0f;
+        return memory != null
+            && after < before
+            && memory.RecentRumors.Any(rumor => rumor != null
+                && rumor.type == SocialRumorType.Complaint
+                && rumor.targetType == SocialRumorTargetType.Facility
+                && rumor.targetFacilityId == shop.id);
+    }
+
+    private static bool VerifyCheckoutWaitCoroutineAbandons()
+    {
+        using CustomerAiScenarioWorld world = new CustomerAiScenarioWorld();
+        Shop shop = world.Place("P1_GeneralStore", new Vector2Int(4, 0), requireStaffedService: true) as Shop;
+        CharacterActor customer = world.CreateCustomer("Slime", Vector2Int.zero, 90f, 90f, 10f, 70f);
+        AbilityShopping shopping = customer.GetAbility<AbilityShopping>();
+        if (shop == null || shopping == null || shop.HasServingWorker)
+        {
+            return false;
+        }
+
+        customer.Identity.Data.aiPersonality.patience = 0.25f;
+        shopping.BeginVisitInteraction(shop);
+        float moodBefore = customer.Mood.Value;
+
+        Type sessionType = typeof(Shop).GetNestedType(
+            "CheckoutWaitSession",
+            BindingFlags.NonPublic);
+        MethodInfo waitMethod = typeof(Shop).GetMethod(
+            "WaitForServingWorkerWithPatience",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        if (sessionType == null || waitMethod == null)
+        {
+            return false;
+        }
+
+        object session = Activator.CreateInstance(sessionType);
+        IEnumerator routine = waitMethod.Invoke(shop, new[] { customer, session }) as IEnumerator;
+        int steps = 0;
+        while (routine != null && routine.MoveNext() && steps++ < 200)
+        {
+        }
+
+        bool abandoned = (bool)(sessionType.GetProperty("Abandoned")?.GetValue(session) ?? false);
+        return routine != null
+            && steps < 200
+            && abandoned
+            && shopping.LastVisitOutcome == ShoppingVisitOutcome.Abandoned
+            && shop.WaitingCheckoutCount == 0
+            && customer.Mood.Value < moodBefore
+            && customer.SocialMemory.GetFacilitySentiment(shop) < 0f;
     }
 
     private static bool VerifyUnaffordableShopEndsVisitCycle()
@@ -987,7 +1101,7 @@ public static class CustomerAiDebugScenarios
         }
     }
 
-    private sealed class CustomerAiScenarioWorld : IDisposable
+    internal sealed class CustomerAiScenarioWorld : IDisposable
     {
         private static readonly FieldInfo GridSystemInstanceField =
             typeof(GridSystemManager).GetField("instance", BindingFlags.Static | BindingFlags.NonPublic);
@@ -1035,13 +1149,24 @@ public static class CustomerAiDebugScenarios
 
         public Grid Grid { get; }
 
-        public BuildableObject Place(string assetName, Vector2Int position)
+        public BuildableObject Place(
+            string assetName,
+            Vector2Int position,
+            bool requireStaffedService = false)
         {
             BuildingSO buildingData = AssetDatabase.LoadAssetAtPath<BuildingSO>(
                 $"Assets/Resources/SO/Building/P1/{assetName}.asset");
             if (buildingData == null)
             {
                 throw new InvalidOperationException($"{assetName} asset not found.");
+            }
+
+            if (requireStaffedService && !buildingData.RequiresStaffedService())
+            {
+                buildingData = Object.Instantiate(buildingData);
+                buildingData.name = $"{assetName} Staffed Checkout Test";
+                buildingData.AbilityModules.Add(new BuildingStaffedServiceAbility());
+                scriptableObjects.Add(buildingData);
             }
 
             GridBuildingFactory factory = new GridBuildingFactory();
@@ -1219,12 +1344,27 @@ public static class CustomerAiDebugScenarios
             FacilityCandidateCache.Clear();
             foreach (GameObject obj in objects.Where((obj) => obj != null))
             {
-                Object.DestroyImmediate(obj);
+                if (Application.isPlaying)
+                {
+                    obj.SetActive(false);
+                    Object.Destroy(obj);
+                }
+                else
+                {
+                    Object.DestroyImmediate(obj);
+                }
             }
 
             foreach (ScriptableObject obj in scriptableObjects.Where((obj) => obj != null))
             {
-                Object.DestroyImmediate(obj);
+                if (Application.isPlaying)
+                {
+                    Object.Destroy(obj);
+                }
+                else
+                {
+                    Object.DestroyImmediate(obj);
+                }
             }
         }
 

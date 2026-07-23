@@ -270,6 +270,84 @@ public sealed class CharacterSocialMemory : SerializedMonoBehaviour
         return count > 0 ? Mathf.Clamp(sum / count, -1f, 1f) : 0f;
     }
 
+    public void RememberFacilityExperience(
+        BuildableObject building,
+        float sentiment,
+        string summary,
+        float durationSeconds = 600f)
+    {
+        if (building == null || Mathf.Abs(sentiment) < 0.01f)
+        {
+            return;
+        }
+
+        SocialRumor experience = new SocialRumor
+        {
+            type = sentiment < 0f ? SocialRumorType.Complaint : SocialRumorType.Praise,
+            targetType = SocialRumorTargetType.Facility,
+            sourceActorId = actor != null && actor.Identity != null
+                ? actor.Identity.PersistentId
+                : string.Empty,
+            sourceActorName = SocialRumorUtility.GetActorLabel(actor),
+            targetFacilityId = building.id,
+            targetFacilityTag = SocialRumorUtility.GetFacilityTag(building),
+            sentiment = Mathf.Clamp(sentiment, -1f, 1f),
+            spreadChance = 0f,
+            trustImpact = 0f,
+            validUntil = durationSeconds > 0f ? Time.time + durationSeconds : 0f,
+            summary = summary?.Trim() ?? string.Empty,
+            source = "direct-experience"
+        };
+
+        RememberRumor(experience);
+        foreach (string key in SocialRumorUtility.GetFacilityKeys(experience))
+        {
+            Blend(facilitySentimentByKey, key, experience.sentiment, newRumorBlend);
+        }
+
+        SyncDebugLists();
+    }
+
+    public void RememberCharacterExperience(
+        CharacterActor target,
+        float sentiment,
+        string summary,
+        float durationSeconds = 600f)
+    {
+        if (target == null || target == actor || Mathf.Abs(sentiment) < 0.01f)
+        {
+            return;
+        }
+
+        SocialRumor experience = new SocialRumor
+        {
+            type = sentiment < 0f ? SocialRumorType.Warning : SocialRumorType.Praise,
+            targetType = SocialRumorTargetType.Character,
+            sourceActorId = actor != null && actor.Identity != null
+                ? actor.Identity.PersistentId
+                : string.Empty,
+            sourceActorName = SocialRumorUtility.GetActorLabel(actor),
+            targetCharacterId = target.Identity != null
+                ? target.Identity.PersistentId
+                : string.Empty,
+            targetCharacterName = SocialRumorUtility.GetActorLabel(target),
+            sentiment = Mathf.Clamp(sentiment, -1f, 1f),
+            spreadChance = 0f,
+            trustImpact = 0f,
+            validUntil = durationSeconds > 0f ? Time.time + durationSeconds : 0f,
+            summary = summary?.Trim() ?? string.Empty,
+            source = "direct-character-experience"
+        };
+
+        RememberRumor(experience);
+        foreach (string key in SocialRumorUtility.GetCharacterKeys(experience))
+        {
+            Blend(characterSentimentByKey, key, experience.sentiment, newRumorBlend);
+        }
+
+        SyncDebugLists();
+    }
+
     public float GetRelationshipSentiment(CharacterActor target)
     {
         if (target == null)
@@ -328,7 +406,7 @@ public sealed class CharacterSocialMemory : SerializedMonoBehaviour
         if (snapshot != null)
         {
             recentRumors.AddRange(snapshot.recentRumors?
-                .Where(item => item != null && item.remainingSeconds > 0f)
+                .Where(item => item != null && item.remainingSeconds >= 0f)
                 .Select(item => item.Restore())
                 .Where(rumor => rumor != null) ?? Enumerable.Empty<SocialRumor>());
             RestoreValues(snapshot.facilitySentiments, facilitySentimentByKey);

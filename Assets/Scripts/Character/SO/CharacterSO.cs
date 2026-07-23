@@ -20,6 +20,7 @@ public class CharacterSO : ScriptableObject
     public CharacterAiPersonality aiPersonality = new CharacterAiPersonality();
     [TextArea] public string ownerSummary;
     public FacilityWorkType ownerPreferredWorkTypes;
+    [SerializeField] private CharacterSkillInstance[] ownerFixedSkills = Array.Empty<CharacterSkillInstance>();
 
     public Sprite characterSprite;
 
@@ -38,6 +39,8 @@ public class CharacterSO : ScriptableObject
         ? species.speciesTag
         : speciesTag;
     public bool IsOwnerCandidate => role == CharacterRole.Owner;
+    public IReadOnlyList<CharacterSkillInstance> OwnerFixedSkills =>
+        ownerFixedSkills ?? Array.Empty<CharacterSkillInstance>();
     public float moveSpeed
     {
         get

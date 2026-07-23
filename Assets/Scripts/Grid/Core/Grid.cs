@@ -11,7 +11,11 @@ public enum GridLayer
     WallFixture = 3,
     CeilingFixture = 4,
     FloorOverlay = 5,
-    Item = 6
+    Item = 6,
+    Wildlife = 7,
+    Construction = 8,
+    Filth = 9,
+    DownedCharacter = 10
 }
 
 public enum GridCellAreaType
@@ -56,14 +60,28 @@ public static class GridCellAreaRules
         {
             return layer == GridLayer.Hallway
                 || layer == GridLayer.Character
+                || layer == GridLayer.Wildlife
                 || layer == GridLayer.Item
-                || layer == GridLayer.Building;
+                || layer == GridLayer.Construction
+                || layer == GridLayer.Building
+                || layer == GridLayer.WallFixture
+                || layer == GridLayer.CeilingFixture
+                || layer == GridLayer.FloorOverlay
+                || layer == GridLayer.Filth
+                || layer == GridLayer.DownedCharacter;
         }
 
         return layer == GridLayer.Hallway
             || layer == GridLayer.Building
+            || layer == GridLayer.WallFixture
+            || layer == GridLayer.CeilingFixture
+            || layer == GridLayer.FloorOverlay
             || layer == GridLayer.Character
-            || layer == GridLayer.Item;
+            || layer == GridLayer.Wildlife
+            || layer == GridLayer.Item
+            || layer == GridLayer.Construction
+            || layer == GridLayer.Filth
+            || layer == GridLayer.DownedCharacter;
     }
 
     public static bool CanBuildInArea(GridCellAreaType areaType, BuildingSO buildingData)
@@ -173,6 +191,7 @@ public class GridPathSearchResult
 
     private readonly Dictionary<Vector2Int, GridMoveStep> parentStep;
     private readonly List<Vector2Int> searchOrder;
+    private readonly HashSet<Vector2Int> reachablePositionSet;
     private readonly List<IGridOccupant> visitableOccupants;
     private readonly HashSet<IGridOccupant> visitableOccupantSet;
     private readonly Dictionary<IGridOccupant, Vector2Int> visitableOccupantPositions =
@@ -193,6 +212,7 @@ public class GridPathSearchResult
         this.gridVersion = gridVersion;
         this.parentStep = parentStep;
         this.searchOrder = searchOrder;
+        reachablePositionSet = new HashSet<Vector2Int>(searchOrder);
         this.visitableOccupants = visitableOccupants;
         visitableOccupantSet = new HashSet<IGridOccupant>(visitableOccupants);
     }
@@ -248,6 +268,11 @@ public class GridPathSearchResult
     public List<Vector2Int> GetReachablePositions()
     {
         return new List<Vector2Int>(searchOrder);
+    }
+
+    public bool ContainsPosition(Vector2Int position)
+    {
+        return reachablePositionSet.Contains(position);
     }
 
     public bool TryGetMovePathToRandomReachablePosition(
@@ -490,6 +515,8 @@ public class Grid
     public int width { get; private set; }
     public int height { get; private set; }
     public int version { get; private set; }
+    public Vector3 OriginPosition => originPos;
+    public int CellWorldHeight => cellWorldHeight;
 
     private readonly GridCell[,] gridArray;
     private readonly int[,] searchMarks;

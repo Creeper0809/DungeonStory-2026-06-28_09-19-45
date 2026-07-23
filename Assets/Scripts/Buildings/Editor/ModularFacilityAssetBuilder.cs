@@ -21,7 +21,28 @@ public static class ModularFacilityAssetBuilder
         "weapon:dexterity-needle",
         "armor:toughness-plate",
         "armor:move-cloak",
-        "armor:endurance-mail"
+        "armor:endurance-mail",
+        "weapon:dagger",
+        "weapon:longsword",
+        "weapon:spear",
+        "weapon:mace",
+        "weapon:shortbow",
+        "weapon:longbow",
+        "weapon:crossbow",
+        "weapon:javelin",
+        "weapon:throwing-axe",
+        "armor:cloth-hood",
+        "armor:gambeson",
+        "armor:leather-cap",
+        "armor:leather",
+        "armor:mail-coif",
+        "armor:mail-shirt",
+        "armor:iron-helmet",
+        "armor:breastplate",
+        "shield:wood",
+        "shield:iron",
+        "craft:ammo:arrow",
+        "craft:ammo:bolt"
     };
 
     private static readonly string[] LegacyRoomAssetPaths =
@@ -61,6 +82,12 @@ public static class ModularFacilityAssetBuilder
         PatchExpeditionEquipmentAssets();
     }
 
+    [MenuItem("DungeonStory/Content/Patch Survival Facility Abilities")]
+    public static void PatchSurvivalFacilityAbilitiesFromMenu()
+    {
+        PatchSurvivalFacilityAbilities();
+    }
+
     public static void PatchExpeditionEquipmentAssets()
     {
         EnsureFolder("Assets/Resources/Config");
@@ -69,6 +96,59 @@ public static class ModularFacilityAssetBuilder
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         Debug.Log("Expedition equipment catalog and facility abilities patched.");
+    }
+
+    public static void PatchSurvivalFacilityAbilities()
+    {
+        foreach (string path in AssetDatabase.FindAssets("t:BuildingSO", new[] { "Assets/Resources/SO/Building" })
+                     .Select(AssetDatabase.GUIDToAssetPath))
+        {
+            BuildingSO building = AssetDatabase.LoadAssetAtPath<BuildingSO>(path);
+            if (building == null)
+            {
+                continue;
+            }
+
+            string code = building.GetFacilityCode();
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                code = Path.GetFileNameWithoutExtension(path);
+            }
+
+            bool changed = false;
+            changed |= ReplaceAbility(building, CreateWaterSourceAbility(code));
+            changed |= ReplaceAbility(building, CreateCookingAbility(code));
+            changed |= ReplaceAbility(building, CreatePreservationAbility(code));
+            changed |= ReplaceAbility(building, CreateMedicalAbility(code));
+            changed |= ReplaceAbility(building, CreateFuelConsumerAbility(code));
+            changed |= ReplaceAbility(building, CreateTemperatureAbility(code));
+            changed |= ReplaceAbility(building, CreateVentilationAbility(code));
+
+            FacilityWorkType fallbackTypes = SurvivalFacilityUtility.AddFallbackWorkTypes(
+                building,
+                FacilityWorkType.None);
+            if (fallbackTypes != FacilityWorkType.None)
+            {
+                FacilityData facility = building.Facility ?? new FacilityData();
+                facility.supportedWorkTypes |= fallbackTypes;
+                facility.requiredWorkers = Mathf.Max(1, facility.requiredWorkers);
+                building.Facility = facility;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                continue;
+            }
+
+            building.AbilityModules.EnsureStableIds();
+            building.ValidateAbilitiesOrThrow();
+            EditorUtility.SetDirty(building);
+        }
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        Debug.Log("Survival facility abilities patched.");
     }
 
     public static void BuildAll()
@@ -296,9 +376,10 @@ public static class ModularFacilityAssetBuilder
     private static BuildingAbilityCollection CreateAbilities(FacilityPartSpec spec)
     {
         BuildingAbilityCollection abilities = new BuildingAbilityCollection();
+        bool hasSurvivalWork = GetSurvivalWorkTypes(spec.Code) != FacilityWorkType.None;
         AddAbility(abilities, new BuildingFacilityPartAbility { code = spec.Code });
         AddAbility(abilities, EnsureEconomyAbility(spec));
-        AddAbility(abilities, spec.Core
+        AddAbility(abilities, spec.Core || hasSurvivalWork
             ? new BuildingFacilityAbility { settings = CreateFacilityData(spec) }
             : null);
         AddAbility(abilities, EnsureInternalStockAbility(spec));
@@ -326,6 +407,13 @@ public static class ModularFacilityAssetBuilder
         AddAbility(abilities, EnsureSecurityAbility(spec));
         AddAbility(abilities, EnsureEquipmentCraftingAbility(spec));
         AddAbility(abilities, EnsureExpeditionRecoveryAbility(spec));
+        AddAbility(abilities, CreateWaterSourceAbility(spec.Code));
+        AddAbility(abilities, CreateCookingAbility(spec.Code));
+        AddAbility(abilities, CreatePreservationAbility(spec.Code));
+        AddAbility(abilities, CreateMedicalAbility(spec.Code));
+        AddAbility(abilities, CreateFuelConsumerAbility(spec.Code));
+        AddAbility(abilities, CreateTemperatureAbility(spec.Code));
+        AddAbility(abilities, CreateVentilationAbility(spec.Code));
 
         return abilities;
     }
@@ -336,6 +424,29 @@ public static class ModularFacilityAssetBuilder
         {
             abilities.Add(ability);
         }
+    }
+
+    private static bool ReplaceAbility(BuildingSO building, BuildingAbility ability)
+    {
+        if (building == null || ability == null)
+        {
+            return false;
+        }
+
+        _ = ability switch
+        {
+            BuildingWaterSourceAbility => building.AbilityModules.Remove<BuildingWaterSourceAbility>(),
+            BuildingCookingAbility => building.AbilityModules.Remove<BuildingCookingAbility>(),
+            BuildingPreservationAbility => building.AbilityModules.Remove<BuildingPreservationAbility>(),
+            BuildingMedicalAbility => building.AbilityModules.Remove<BuildingMedicalAbility>(),
+            BuildingFuelConsumerAbility => building.AbilityModules.Remove<BuildingFuelConsumerAbility>(),
+            BuildingTemperatureAbility => building.AbilityModules.Remove<BuildingTemperatureAbility>(),
+            BuildingVentilationAbility => building.AbilityModules.Remove<BuildingVentilationAbility>(),
+            _ => 0
+        };
+
+        building.AbilityModules.Add(ability);
+        return true;
     }
 
     private static BuildingEconomyAbility EnsureEconomyAbility(FacilityPartSpec spec)
@@ -563,17 +674,113 @@ public static class ModularFacilityAssetBuilder
         };
     }
 
+    private static BuildingWaterSourceAbility CreateWaterSourceAbility(string code)
+    {
+        return code switch
+        {
+            "H03" => new BuildingWaterSourceAbility { waterPerWork = 4, workSeconds = 0.9f },
+            "H04" => new BuildingWaterSourceAbility { waterPerWork = 6, workSeconds = 1.2f },
+            "L03" => new BuildingWaterSourceAbility { waterPerWork = 3, workSeconds = 1.1f, blockedByFreezingWeather = false },
+            _ => null
+        };
+    }
+
+    private static BuildingCookingAbility CreateCookingAbility(string code)
+    {
+        return code switch
+        {
+            "D01" => new BuildingCookingAbility { inputFood = 1, cookedMeals = 2, workSeconds = 1.1f, requiresFuel = true },
+            "D02" => new BuildingCookingAbility { inputFood = 1, cookedMeals = 3, workSeconds = 1.3f, requiresFuel = true },
+            "D03" => new BuildingCookingAbility { inputFood = 1, cookedMeals = 1, workSeconds = 1f, requiresFuel = false },
+            _ => null
+        };
+    }
+
+    private static BuildingPreservationAbility CreatePreservationAbility(string code)
+    {
+        return code switch
+        {
+            "D10" => new BuildingPreservationAbility { freshnessMultiplier = 3f, preservedMealsPerCook = 1 },
+            "L05" => new BuildingPreservationAbility { freshnessMultiplier = 5f, preservedMealsPerCook = 2 },
+            _ => null
+        };
+    }
+
+    private static BuildingMedicalAbility CreateMedicalAbility(string code)
+    {
+        return code switch
+        {
+            "R01" => new BuildingMedicalAbility { workSeconds = 1.4f, severityReduction = 0.22f, requiresMedicine = true },
+            "R02" => new BuildingMedicalAbility { workSeconds = 1.2f, severityReduction = 0.38f, requiresMedicine = true },
+            "R03" => new BuildingMedicalAbility { workSeconds = 1.3f, severityReduction = 0.3f, requiresMedicine = true },
+            "H04" => new BuildingMedicalAbility { workSeconds = 1.1f, severityReduction = 0.28f, requiresMedicine = false },
+            _ => null
+        };
+    }
+
+    private static BuildingFuelConsumerAbility CreateFuelConsumerAbility(string code)
+    {
+        return code switch
+        {
+            "D01" => new BuildingFuelConsumerAbility { fuelPerRefuel = 1, workSeconds = 0.8f, warmth = 8f, lightSafety = 6f },
+            "D02" => new BuildingFuelConsumerAbility { fuelPerRefuel = 1, workSeconds = 0.9f, warmth = 10f, lightSafety = 7f },
+            "E01" => new BuildingFuelConsumerAbility { fuelPerRefuel = 1, workSeconds = 0.6f, warmth = 2f, lightSafety = 14f },
+            "E02" => new BuildingFuelConsumerAbility { fuelPerRefuel = 1, workSeconds = 0.8f, warmth = 14f, lightSafety = 10f },
+            "E03" => new BuildingFuelConsumerAbility { fuelPerRefuel = 1, workSeconds = 0.8f, warmth = 3f, lightSafety = 18f },
+            "E07" => new BuildingFuelConsumerAbility { fuelPerRefuel = 1, workSeconds = 0.5f, warmth = 1f, lightSafety = 8f },
+            _ => null
+        };
+    }
+
+    private static BuildingTemperatureAbility CreateTemperatureAbility(string code)
+    {
+        return code switch
+        {
+            "D01" => new BuildingTemperatureAbility { roomTemperatureOffset = 4f, coldProtection = 6f, heatProtection = 1f },
+            "D02" => new BuildingTemperatureAbility { roomTemperatureOffset = 5f, coldProtection = 8f, heatProtection = 1f },
+            "E02" => new BuildingTemperatureAbility { roomTemperatureOffset = 6f, coldProtection = 12f, heatProtection = 0f },
+            "R02" => new BuildingTemperatureAbility { roomTemperatureOffset = 1f, coldProtection = 5f, heatProtection = 3f },
+            "R03" => new BuildingTemperatureAbility { roomTemperatureOffset = 1f, coldProtection = 4f, heatProtection = 2f },
+            _ => null
+        };
+    }
+
+    private static BuildingVentilationAbility CreateVentilationAbility(string code)
+    {
+        return code switch
+        {
+            "H03" => new BuildingVentilationAbility { hygieneRiskReduction = 10f, smokeRiskReduction = 4f },
+            "H04" => new BuildingVentilationAbility { hygieneRiskReduction = 16f, smokeRiskReduction = 6f },
+            "H06" => new BuildingVentilationAbility { hygieneRiskReduction = 12f, smokeRiskReduction = 4f },
+            "H07" => new BuildingVentilationAbility { hygieneRiskReduction = 18f, smokeRiskReduction = 8f },
+            "E09" => new BuildingVentilationAbility { hygieneRiskReduction = 3f, smokeRiskReduction = 3f },
+            _ => null
+        };
+    }
+
     private static FacilityData CreateFacilityData(FacilityPartSpec spec)
     {
+        FacilityWorkType workTypes = spec.WorkTypes | GetSurvivalWorkTypes(spec.Code);
+
         return new FacilityData
         {
             roles = spec.Roles,
             capacity = spec.Core ? Mathf.Max(1, spec.Capacity) : 0,
             useDuration = spec.Core ? Mathf.Max(0.5f, spec.UseDuration) : 0f,
-            requiredWorkers = spec.WorkTypes == FacilityWorkType.None ? 0 : 1,
-            supportedWorkTypes = spec.WorkTypes,
+            requiredWorkers = workTypes == FacilityWorkType.None ? 0 : 1,
+            supportedWorkTypes = workTypes,
             disabledWhenDamaged = true
         };
+    }
+
+    private static FacilityWorkType GetSurvivalWorkTypes(string code)
+    {
+        FacilityWorkType result = FacilityWorkType.None;
+        if (CreateWaterSourceAbility(code) != null) result |= FacilityWorkType.DrawWater;
+        if (CreateCookingAbility(code) != null) result |= FacilityWorkType.Cook;
+        if (CreateMedicalAbility(code) != null) result |= FacilityWorkType.Treat;
+        if (CreateFuelConsumerAbility(code) != null) result |= FacilityWorkType.Refuel;
+        return result;
     }
 
     private static FacilityEvolutionContributionData CreateEvolutionData(FacilityPartSpec spec)

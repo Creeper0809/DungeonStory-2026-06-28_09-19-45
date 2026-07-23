@@ -10,6 +10,7 @@ public interface IPlayerInputReader
     Vector3 MousePosition { get; }
     float ScreenWidth { get; }
     float ScreenHeight { get; }
+    float ScrollDeltaY { get; }
     bool GetKey(KeyCode keyCode);
     bool GetKeyDown(KeyCode keyCode);
     bool GetMouseButton(int button);
@@ -54,6 +55,36 @@ public sealed class UnityPlayerInputReader : IPlayerInputReader
     }
     public float ScreenWidth => Screen.width;
     public float ScreenHeight => Screen.height;
+    public float ScrollDeltaY
+    {
+        get
+        {
+            if (DungeonAutomationInputState.TryConsumeScrollDeltaY(out float automationScroll))
+            {
+                return automationScroll;
+            }
+
+            if (Mouse.current != null)
+            {
+                Vector2 scroll = Mouse.current.scroll.ReadValue();
+                if (!float.IsNaN(scroll.y)
+                    && !float.IsInfinity(scroll.y)
+                    && !Mathf.Approximately(scroll.y, 0f))
+                {
+                    return scroll.y;
+                }
+            }
+
+            try
+            {
+                return Input.mouseScrollDelta.y;
+            }
+            catch (InvalidOperationException)
+            {
+                return 0f;
+            }
+        }
+    }
 
     public bool GetKey(KeyCode keyCode)
     {
@@ -161,6 +192,14 @@ public sealed class UnityPlayerInputReader : IPlayerInputReader
             KeyCode.DownArrow => Key.DownArrow,
             KeyCode.LeftArrow => Key.LeftArrow,
             KeyCode.RightArrow => Key.RightArrow,
+            KeyCode.Equals => Key.Equals,
+            KeyCode.Minus => Key.Minus,
+            KeyCode.KeypadPlus => Key.NumpadPlus,
+            KeyCode.KeypadMinus => Key.NumpadMinus,
+            KeyCode.PageUp => Key.PageUp,
+            KeyCode.PageDown => Key.PageDown,
+            KeyCode.LeftShift => Key.LeftShift,
+            KeyCode.RightShift => Key.RightShift,
             KeyCode.Escape => Key.Escape,
             _ => Key.None
         };
@@ -181,18 +220,10 @@ public sealed class EventSystemUiPointerBlocker : IUiPointerBlocker
 
     public bool IsPointerOverUi()
     {
-        EventSystem eventSystem = EventSystem.current;
-        if (eventSystem == null || !eventSystem.isActiveAndEnabled)
+        if (!TryRaycastUi())
         {
             return false;
         }
-
-        PointerEventData pointerEventData = new PointerEventData(eventSystem)
-        {
-            position = inputReader.MousePosition
-        };
-        raycastResults.Clear();
-        eventSystem.RaycastAll(pointerEventData, raycastResults);
 
         foreach (RaycastResult raycastResult in raycastResults)
         {
@@ -203,6 +234,50 @@ public sealed class EventSystemUiPointerBlocker : IUiPointerBlocker
         }
 
         return false;
+    }
+
+    public bool IsPointerOverScrollableUi()
+    {
+        if (!TryRaycastUi())
+        {
+            return false;
+        }
+
+        foreach (RaycastResult raycastResult in raycastResults)
+        {
+            if (raycastResult.module is not GraphicRaycaster || raycastResult.gameObject == null)
+            {
+                continue;
+            }
+
+            ScrollRect scrollRect = raycastResult.gameObject.GetComponentInParent<ScrollRect>();
+            if (scrollRect != null
+                && scrollRect.isActiveAndEnabled
+                && (scrollRect.horizontal || scrollRect.vertical))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryRaycastUi()
+    {
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null || !eventSystem.isActiveAndEnabled)
+        {
+            raycastResults.Clear();
+            return false;
+        }
+
+        PointerEventData pointerEventData = new PointerEventData(eventSystem)
+        {
+            position = inputReader.MousePosition
+        };
+        raycastResults.Clear();
+        eventSystem.RaycastAll(pointerEventData, raycastResults);
+        return raycastResults.Count > 0;
     }
 }
 

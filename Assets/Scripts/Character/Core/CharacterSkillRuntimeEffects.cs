@@ -84,6 +84,7 @@ public static class CharacterSkillRuntimeEffects
         }
 
         foreach (CharacterSkillInstance passive in progression.PassiveSkills
+            .Concat(progression.OwnerFixedSkills)
             .Where(item => item != null && item.trigger == context.Trigger))
         {
             ExecuteSkill(context, passive);
@@ -190,6 +191,11 @@ public static class CharacterSkillRuntimeEffects
 
             switch (selection.moduleId)
             {
+                case "damage":
+                    context.TargetActor?.ApplyDamage(
+                        Mathf.Max(1f, variant.primaryValue),
+                        $"스킬: {skill.displayName}");
+                    break;
                 case "heal":
                     actor.Stats?.Heal(Mathf.Max(1f, variant.primaryValue));
                     break;
@@ -295,6 +301,7 @@ public static class CharacterSkillRuntimeEffects
 
         float total = 0f;
         IEnumerable<CharacterSkillInstance> passives = progression.PassiveSkills
+            .Concat(progression.OwnerFixedSkills)
             .Where(skill => skill != null && skill.trigger == passiveTrigger);
         foreach (CharacterSkillInstance skill in passives)
         {

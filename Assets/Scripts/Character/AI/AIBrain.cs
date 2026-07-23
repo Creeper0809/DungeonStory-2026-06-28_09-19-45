@@ -47,12 +47,16 @@ public class AIBrain : CharacterAbility
     private string currentActionPhaseDetail = string.Empty;
     private string currentDestinationDebugLabel = string.Empty;
     private float nextActionSwitchAllowedAt;
+    private bool manualCommandActive;
     public bool IsPathSearchDeferred { get; private set; }
+    public bool IsManualCommandActive => manualCommandActive;
     public AIActionFailure LastActionFailure => lastActionFailure;
     public IReadOnlyList<AIActionDebugCandidate> LastCandidateScores =>
         lastCandidateScoresView ??= ReadOnlyView.List(lastCandidateScores);
     public string CurrentActionDebugLabel => currentActionDebugLabel;
     public string CurrentActionPhase => currentActionPhase;
+    public string CurrentActionPhaseDetail => currentActionPhaseDetail;
+    public string CurrentDestinationDebugLabel => currentDestinationDebugLabel;
     public int DebugVersion { get; private set; }
 
     [Inject]
@@ -103,7 +107,13 @@ public class AIBrain : CharacterAbility
     {
         List<AIAction> actions = new List<AIAction>();
         AddRequiredAction(actions, WorkActionPath, CharacterAiBranch.Work);
+        AddRuntimeRescueAction(actions);
         AddRuntimeHaulAction(actions);
+        AddRuntimeHuntAction(actions);
+        AddRequiredAction(actions, EatActionPath, CharacterAiBranch.Eat);
+        AddRequiredAction(actions, RestActionPath, CharacterAiBranch.Rest);
+        AddRequiredAction(actions, ToiletActionPath, CharacterAiBranch.Toilet);
+        AddRequiredAction(actions, HygieneActionPath, CharacterAiBranch.Hygiene);
         AddRequiredAction(actions, WaitActionPath, CharacterAiBranch.Wait);
         availableActions = actions.ToArray();
     }
@@ -122,7 +132,9 @@ public class AIBrain : CharacterAbility
         AddRequiredAction(actions, RestActionPath, CharacterAiBranch.Rest);
         AddRequiredAction(actions, ToiletActionPath, CharacterAiBranch.Toilet);
         AddRequiredAction(actions, HygieneActionPath, CharacterAiBranch.Hygiene);
+        AddRuntimeRescueAction(actions);
         AddRuntimeHaulAction(actions);
+        AddRuntimeHuntAction(actions);
         availableActions = actions.ToArray();
         isBestActionEnd = true;
         ClearPathSearchCache();
@@ -142,6 +154,40 @@ public class AIBrain : CharacterAbility
         actions.Add(new AIAction
         {
             actionset = haul
+        });
+    }
+
+    private void AddRuntimeRescueAction(List<AIAction> actions)
+    {
+        if (actions == null
+            || actions.Any(action => action?.actionset is AIRescue))
+        {
+            return;
+        }
+
+        AIRescue rescue = ScriptableObject.CreateInstance<AIRescue>();
+        rescue.hideFlags = HideFlags.HideAndDontSave;
+        rescue.actionName = "구조";
+        actions.Add(new AIAction
+        {
+            actionset = rescue
+        });
+    }
+
+    private void AddRuntimeHuntAction(List<AIAction> actions)
+    {
+        if (actions == null
+            || actions.Any(action => action?.actionset is AIHunt))
+        {
+            return;
+        }
+
+        AIHunt hunt = ScriptableObject.CreateInstance<AIHunt>();
+        hunt.hideFlags = HideFlags.HideAndDontSave;
+        hunt.actionName = "사냥";
+        actions.Add(new AIAction
+        {
+            actionset = hunt
         });
     }
 
@@ -525,13 +571,15 @@ public class AIBrain : CharacterAbility
             pathSearchCache.start != start ||
             pathSearchCache.gridVersion != grid.version)
         {
-            if (!RequireAiSchedulingService().TryConsumePathSearchBudget())
+            if (!GridPathSearchBroker.TryGetSearch(
+                    grid,
+                    start,
+                    () => RequireAiSchedulingService().TryConsumePathSearchBudget(),
+                    out pathSearchCache))
             {
                 IsPathSearchDeferred = true;
                 return null;
             }
-
-            pathSearchCache = grid.SearchPath(start);
         }
         return pathSearchCache;
     }
@@ -586,6 +634,39 @@ public class AIBrain : CharacterAbility
         MarkDebugDirty();
     }
 
+    public void BeginManualMoveCommand(Vector2Int destination)
+    {
+        if (bestAction != null || queuedAction != null)
+        {
+            StopCurrentActionForReplan("플레이어 이동 명령");
+        }
+
+        manualCommandActive = true;
+        isBestActionEnd = false;
+        isExecuted = true;
+        currentActionDebugLabel = "직접 이동";
+        currentActionPhase = "이동 중";
+        currentActionPhaseDetail = $"목표 ({destination.x}, {destination.y})";
+        currentDestinationDebugLabel = currentActionPhaseDetail;
+        actor?.Blackboard?.ForceClearCommitment(
+            CharacterAiInterruptReason.ManualReplan,
+            "플레이어 직접 이동");
+        MarkDebugDirty();
+    }
+
+    public void CompleteManualMoveCommand(Vector2Int destination, bool succeeded)
+    {
+        manualCommandActive = false;
+        isBestActionEnd = true;
+        isExecuted = false;
+        currentActionDebugLabel = succeeded ? "직접 이동 완료" : "직접 이동 실패";
+        currentActionPhase = succeeded ? "도착" : "경로 막힘";
+        currentActionPhaseDetail = $"목표 ({destination.x}, {destination.y})";
+        currentDestinationDebugLabel = string.Empty;
+        ClearPathSearchCache();
+        MarkDebugDirty();
+    }
+
     public void ClearSelectedActionForIdle(string idleLabel)
     {
         bestAction?.ReleaseReservation(actor);
@@ -616,6 +697,19 @@ public class AIBrain : CharacterAbility
         currentActionPhase = "\uC2DC\uC791";
         currentActionPhaseDetail = string.Empty;
         nextActionSwitchAllowedAt = Time.time + GetMinimumPersistenceSeconds(bestAction.actionset);
+        actor?.AiMemory?.RecordDecision(
+            bestAction.actionset.Branch,
+            CharacterAiUtilityText.GetIntention(bestAction.actionset.Branch),
+            $"{GetActionLabel(bestAction.actionset)} 시작",
+            0.05f);
+        if (bestAction.destination != null)
+        {
+            actor?.AiMemory?.RecordFacility(
+                bestAction.destination,
+                bestAction.actionset.Branch,
+                $"{GetDestinationLabel(bestAction.destination)} 선택",
+                0.1f);
+        }
         MarkDebugDirty();
     }
 
@@ -682,6 +776,13 @@ public class AIBrain : CharacterAbility
 
         if (CharacterMoodImpulseUtility.ShouldInterruptCurrentAction(actor, bestAction, out stopReason))
         {
+            if (actor.Blackboard != null
+                && !actor.Blackboard.CanBreakCommitment(CharacterAiInterruptReason.MoodImpulseChanged))
+            {
+                stopReason = "의도 유지 중이라 기분 충동을 잠시 보류";
+                return false;
+            }
+
             return true;
         }
 
@@ -691,6 +792,14 @@ public class AIBrain : CharacterAbility
             {
                 stopReason = "Current action requested interruption.";
             }
+
+            if (actor.Blackboard != null
+                && !actor.Blackboard.CanBreakCommitment(CharacterAiInterruptReason.CurrentActionStopped))
+            {
+                stopReason = "의도 유지 중이라 행동 전환 보류";
+                return false;
+            }
+
             return true;
         }
 
@@ -730,6 +839,13 @@ public class AIBrain : CharacterAbility
         if (bestAction.RunningSeconds >= GetMinimumPersistenceSeconds(runningActionSet)
             && CharacterMoodImpulseUtility.ShouldInterruptCurrentAction(actor, bestAction, out string moodReason))
         {
+            if (actor.Blackboard != null
+                && !actor.Blackboard.CanBreakCommitment(CharacterAiInterruptReason.MoodImpulseChanged))
+            {
+                status = "의도 유지 중";
+                return true;
+            }
+
             status = moodReason;
             return false;
         }
@@ -740,6 +856,13 @@ public class AIBrain : CharacterAbility
             status = string.IsNullOrWhiteSpace(interruptReason)
                 ? "Current action requested interruption."
                 : interruptReason;
+            if (actor.Blackboard != null
+                && !actor.Blackboard.CanBreakCommitment(CharacterAiInterruptReason.CurrentActionStopped))
+            {
+                status = "의도 유지 중";
+                return true;
+            }
+
             return false;
         }
 
@@ -772,6 +895,11 @@ public class AIBrain : CharacterAbility
         isBestActionEnd = true;
         IsPathSearchDeferred = false;
         currentActionDebugLabel = "Replanning";
+        actor?.AiMemory?.RecordDecision(
+            CharacterAiBranch.InterruptCheck,
+            CharacterAiUtilityText.GetIntention(actionToStop?.actionset?.Branch ?? CharacterAiBranch.None),
+            string.IsNullOrWhiteSpace(reason) ? "행동을 중단하고 다시 판단" : reason,
+            -0.15f);
         MarkDebugDirty();
 
         if (!string.IsNullOrWhiteSpace(reason))
@@ -995,6 +1123,11 @@ public class AIBrain : CharacterAbility
         actionFailureCooldownUntil[actionSet] = Time.time + Mathf.Max(0.1f, actionFailureCooldown);
         lastFailedActionSet = actionSet;
         lastActionFailure = failure.HasFailure ? failure : AIActionFailure.Create(AIActionFailureKind.Unknown);
+        actor?.AiMemory?.RecordDecision(
+            CharacterAiBranch.InterruptCheck,
+            CharacterAiUtilityText.GetIntention(actionSet.Branch),
+            lastActionFailure.ToString(),
+            -0.25f);
         actor?.Blackboard?.ReportActionFailure(actionSet, lastActionFailure);
         actor?.AddActivity(CharacterActivityEvent.InternalAi(
             CharacterActivityOutcomes.Failed,
@@ -1152,6 +1285,8 @@ public class AIBrain : CharacterAbility
         string reason = string.IsNullOrWhiteSpace(failedActionLabel)
             ? failureLabel
             : $"{failedActionLabel}: {failureLabel}";
+        string haulLabel = GetHaulDebugLabel();
+        string constructionLabel = GetConstructionSafetyDebugLabel();
 
         IEnumerable<AIActionDebugCandidate> candidates = lastCandidateScores
             .OrderByDescending((candidate) => candidate.Score)
@@ -1171,10 +1306,49 @@ public class AIBrain : CharacterAbility
             + reservationLabel
             + switchLabel
             + $"\n\uAE30\uBD84: {moodLabel}"
-            + $"\n\uC774\uC720: {reason}";
+            + $"\n\uC774\uC720: {reason}"
+            + haulLabel
+            + constructionLabel;
         return string.IsNullOrWhiteSpace(candidateText)
             ? baseText
             : $"{baseText}\n\uD6C4\uBCF4: {candidateText}";
+    }
+
+    private string GetHaulDebugLabel()
+    {
+        AbilityHaul haul = actor != null ? actor.GetComponent<AbilityHaul>() : null;
+        if (haul == null)
+        {
+            return string.Empty;
+        }
+
+        CharacterCarryInventory carry = actor.GetComponent<CharacterCarryInventory>();
+        float currentWeight = carry != null
+            ? carry.GetCurrentWeight(WorldItemStackRuntime.Active?.CatalogProvider)
+            : 0f;
+        float maxWeight = carry != null
+            ? carry.GetMaxAllowedWeight(WorldItemStackRuntime.Active?.HaulingSettingsProvider)
+            : 0f;
+        return $"\n운반 계획: {haul.CurrentPlanSummary}"
+            + $"\n적재: {currentWeight:0.#}/{maxWeight:0.#}kg"
+            + $"\n정리 사유: {haul.CurrentUnloadReason}";
+    }
+
+    private string GetConstructionSafetyDebugLabel()
+    {
+        ConstructionSite site = bestAction != null
+            ? bestAction.destination as ConstructionSite
+            : null;
+        if (site == null)
+        {
+            return string.Empty;
+        }
+
+        ConstructionSafetyResult safety = site.LastSafetyResult.Message.Length > 0
+            ? site.LastSafetyResult
+            : site.GetConstructionSafetyState(actor);
+        string prefix = safety.IsForcedWarning ? "강제 공사" : safety.IsSafe ? "공사 안전" : "공사 대기";
+        return $"\n{prefix}: {safety.Message}";
     }
 
     private static string GetDestinationLabel(BuildableObject destination)

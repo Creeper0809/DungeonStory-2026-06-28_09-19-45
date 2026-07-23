@@ -18,6 +18,34 @@ public struct InvasionSpawnedEvent
     }
 }
 
+public struct InvasionDungeonBreachedEvent
+{
+    public InvasionIntruderRuntime intruderRuntime;
+    public CharacterActor intruderActor;
+    public InvasionThreatSnapshot threatSnapshot;
+
+    public InvasionDungeonBreachedEvent(
+        InvasionIntruderRuntime intruderRuntime,
+        CharacterActor intruderActor,
+        InvasionThreatSnapshot threatSnapshot)
+    {
+        this.intruderRuntime = intruderRuntime;
+        this.intruderActor = intruderActor;
+        this.threatSnapshot = threatSnapshot;
+    }
+
+    public static void Trigger(
+        InvasionIntruderRuntime intruderRuntime,
+        CharacterActor intruderActor,
+        InvasionThreatSnapshot threatSnapshot)
+    {
+        EventObserver.TriggerEvent(new InvasionDungeonBreachedEvent(
+            intruderRuntime,
+            intruderActor,
+            threatSnapshot));
+    }
+}
+
 public struct InvasionFacilityDamagedEvent
 {
     public CharacterActor intruderActor;

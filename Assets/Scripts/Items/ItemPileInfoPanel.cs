@@ -211,12 +211,50 @@ public sealed class ItemPileInfoPanel : UIPopUp, UtilEventListener<InfoFeedEvent
             + $"단가 {stack.UnitPrice}\n"
             + $"총 가치 {stack.TotalValue}\n"
             + $"상태 {FormatState(stack)}\n"
+            + FormatSurvivalStatusLine(stack)
+            + FormatCorpseMetadata(stack)
             + $"위치 ({stack.Position.x}, {stack.Position.y})\n"
             + $"예약자 {FormatEmpty(stack.ReservedByPersistentId)}\n"
             + $"목적지 {FormatEmpty(stack.DestinationId)}\n"
             + $"운반 {(!stack.Forbidden && stack.State == WorldItemStackState.Loose ? "가능" : "불가")}";
 
         CreateDetailActionRow(stack);
+        CreateEmergencyButcheryAction(stack);
+    }
+
+    private static string FormatCorpseMetadata(WorldItemStackSnapshot stack)
+    {
+        if (stack == null || !string.Equals(stack.ItemId, DarkSurvivalItemDefinitions.HumanoidCorpseItemId, StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        string sourceName = string.IsNullOrWhiteSpace(stack.SourceDisplayName) ? "신원 불명" : stack.SourceDisplayName;
+        string species = string.IsNullOrWhiteSpace(stack.SourceSpeciesTag) ? "종족 불명" : stack.SourceSpeciesTag;
+        string deathReason = string.IsNullOrWhiteSpace(stack.SourceDeathReason) ? "사인 불명" : stack.SourceDeathReason;
+        return $"원래 이름 {sourceName}\n종족 {species}\n사망 원인 {deathReason}\n"
+            + $"비상 도축 {(stack.EmergencyButcheryAllowed ? "허용" : "금지")}\n";
+    }
+
+    private void CreateEmergencyButcheryAction(WorldItemStackSnapshot stack)
+    {
+        if (stack == null || !string.Equals(stack.ItemId, DarkSurvivalItemDefinitions.HumanoidCorpseItemId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string label = stack.EmergencyButcheryAllowed ? "비상 도축 해제" : "비상 도축 허용";
+        Button button = CreateButton("EmergencyButcheryAction", contentRoot, label, () =>
+        {
+            itemStackRuntime.SetEmergencyButcheryAllowed(stack.StackId, !stack.EmergencyButcheryAllowed);
+            RenderDetail(stack.StackId);
+        });
+        RectTransform rect = button.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 0f);
+        rect.anchorMax = new Vector2(1f, 0f);
+        rect.pivot = new Vector2(0.5f, 0f);
+        rect.offsetMin = new Vector2(0f, 52f);
+        rect.offsetMax = new Vector2(0f, 96f);
     }
 
     private void CreateStackRow(WorldItemStackSnapshot stack, float top)
@@ -403,6 +441,24 @@ public sealed class ItemPileInfoPanel : UIPopUp, UtilEventListener<InfoFeedEvent
             WorldItemStackState.ExpeditionPacked => "원정 포장",
             _ => stack.State.ToString()
         };
+    }
+
+    private static string FormatSurvivalStatusLine(WorldItemStackSnapshot stack)
+    {
+        if (stack == null
+            || SurvivalFoodRuntime.Active == null
+            || !SurvivalFoodRuntime.Active.TryGetItemStatus(
+                stack.StackId,
+                stack.ItemId,
+                out SurvivalItemStatus status))
+        {
+            return string.Empty;
+        }
+
+        string preservation = status.Preserved ? "보존됨" : "일반";
+        string contamination = status.Contaminated ? "오염됨" : "오염 없음";
+        int freshnessPercent = Mathf.RoundToInt(status.Freshness01 * 100f);
+        return $"신선도 {freshnessPercent}% · {status.Label} · {preservation} · {contamination}\n";
     }
 
     private static string FormatEmpty(string value)

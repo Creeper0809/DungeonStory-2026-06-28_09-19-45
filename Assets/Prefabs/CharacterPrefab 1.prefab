@@ -120,6 +120,7 @@ GameObject:
   - component: {fileID: 7322711153434796532}
   - component: {fileID: 1215785365045945190}
   - component: {fileID: 4008056805840517810}
+  - component: {fileID: 8356524742867750567}
   m_Layer: 0
   m_Name: CharacterPrefab 1
   m_TagString: Character
@@ -291,7 +292,7 @@ MonoBehaviour:
   assignedShop: {fileID: 0}
   isWorking: 0
   workPriorities:
-    schemaVersion: 1
+    schemaVersion: 2
     priorities:
     - workTypeId: work:operate
       priority: 1
@@ -309,6 +310,26 @@ MonoBehaviour:
       priority: 2
     - workTypeId: work:rest
       priority: 3
+    - workTypeId: work:construct
+      priority: 2
+    - workTypeId: work:reception
+      priority: 2
+    - workTypeId: work:craft
+      priority: 2
+    - workTypeId: work:haul
+      priority: 2
+    - workTypeId: work:hunt
+      priority: 2
+    - workTypeId: work:butcher
+      priority: 2
+    - workTypeId: work:draw-water
+      priority: 2
+    - workTypeId: work:cook
+      priority: 2
+    - workTypeId: work:treat
+      priority: 2
+    - workTypeId: work:refuel
+      priority: 2
     legacyOperate: 1
     legacyRestock: 2
     legacyRepair: 2
@@ -323,6 +344,7 @@ MonoBehaviour:
   restRecoveryOnWait: 15
   offDutySleepThreshold: 25
   returnToWorkSleepThreshold: 55
+  hungerWorkInterruptThreshold: 35
   offDutyMoodThreshold: 25
   returnToWorkMoodThreshold: 45
   minimumOffDutySeconds: 8
@@ -587,6 +609,7 @@ MonoBehaviour:
   personaRuntime: {fileID: 0}
   dialogueRuntime: {fileID: 0}
   socialMemory: {fileID: 0}
+  aiMemory: {fileID: 0}
   behaviorTree: {fileID: 0}
 --- !u!114 &4240505355425386822
 MonoBehaviour:
@@ -709,6 +732,16 @@ MonoBehaviour:
   committedAction: {fileID: 0}
   committedDestination: {fileID: 0}
   minCommitUntil: 0
+  softLockIntent:
+    branch: 0
+    intention: 0
+    label: 
+    targetGridId: -1
+    startedAt: 0
+    minUntil: 0
+    expiresAt: 0
+    interruptible: 1
+    lastBreakReason: 
   activeMacroGoal:
     type: 0
     reason: 
@@ -727,6 +760,9 @@ MonoBehaviour:
   lastJobGiverUtilitySummary: 
   selectedJobGiverUtilitySummary: 
   lastRoutineGroupPrioritySummary: 
+  lastUtilityBreakdownSummary: 
+  lastDecisionContextSummary: 
+  topUtilityBreakdowns: []
   recentDecisionTrace: []
   lastCommitBreakReason: 
   lastFailureReason: 
@@ -936,3 +972,17 @@ MonoBehaviour:
     skillGenerationRevision: 0
   narrativeLedger:
     facts: []
+--- !u!114 &8356524742867750567
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1384156311545915614}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fcb5dff113b596b41abc64d9f21b3c77, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterAiMemoryRuntime
+  actor: {fileID: 0}
+  recentEntries: []

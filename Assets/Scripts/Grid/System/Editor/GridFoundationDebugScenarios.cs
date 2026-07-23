@@ -40,6 +40,7 @@ public static class GridFoundationDebugScenarios
         RunScenario("placement overlay uses cell installability", VerifyPlacementOverlayCellAvailability, errors);
         RunScenario("door replaces one structural wall cell", VerifyDoorReplacesOneStructuralWallCell, errors);
         RunScenario("spawner entry crosses dungeon door center", VerifySpawnerEntryCrossesDungeonDoorCenter, errors);
+        RunScenario("world click grid fallback only accepts exact wall structures", VerifyWorldClickGridFallbackOnlyAcceptsExactWallStructures, errors);
 
         if (errors.Count > 0)
         {
@@ -512,6 +513,31 @@ public static class GridFoundationDebugScenarios
 
         DestroyBuildables(grid);
         return valid;
+    }
+
+    private static bool VerifyWorldClickGridFallbackOnlyAcceptsExactWallStructures()
+    {
+        BuildingSO hallway = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/Hallway.asset");
+        BuildingSO wall = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/Wall.asset");
+        BuildingSO interiorDoor = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/InteriorDoor.asset");
+        BuildingSO dungeonDoor = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/Door.asset");
+        BuildingSO facility = AssetDatabase.LoadAssetAtPath<BuildingSO>(
+            "Assets/Resources/SO/Building/P1/P1_ResearchLab.asset");
+
+        return hallway != null
+            && wall != null
+            && interiorDoor != null
+            && dungeonDoor != null
+            && facility != null
+            && !WorldInfoClickSelectionService.IsExactGridStructureDefinition(hallway)
+            && WorldInfoClickSelectionService.IsExactGridStructureDefinition(wall)
+            && WorldInfoClickSelectionService.IsExactGridStructureDefinition(interiorDoor)
+            && !WorldInfoClickSelectionService.IsExactGridStructureDefinition(dungeonDoor)
+            && !WorldInfoClickSelectionService.IsExactGridStructureDefinition(facility);
     }
 
     private static void InjectBuildingDependencies(BuildableObject building)

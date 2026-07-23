@@ -30,6 +30,7 @@ public sealed class CharacterAiScheduler : MonoBehaviour
     [SerializeField, Min(0.01f)] private float visibleDecisionInterval = 0.35f;
     [SerializeField, Min(0.01f)] private float offscreenDecisionInterval = 1.5f;
     [SerializeField, Min(0.01f)] private float retryDelay = 0.05f;
+    [SerializeField, Range(0f, 0.35f)] private float decisionIntervalJitterRatio = 0.16f;
     [SerializeField, Min(0f)] private float viewportMargin = 0.15f;
     [SerializeField, Range(1, 8)] private int offscreenMovementFrameStride = 3;
 
@@ -52,6 +53,9 @@ public sealed class CharacterAiScheduler : MonoBehaviour
     public int LastProcessedDecisionCount { get; private set; }
     public int LastBehaviorTreeTickCount { get; private set; }
     public int LastPathSearchCount { get; private set; }
+    public int LastBrokerPathSearchCount { get; private set; }
+    public int LastBrokerPathCacheHitCount { get; private set; }
+    public int LastBrokerPathBudgetDeferralCount { get; private set; }
     public double LastProcessingMilliseconds { get; private set; }
     public ExternalBehaviorTree CharacterAiExternalBehavior => characterAiExternalBehavior;
     public bool IsDrivingAi => enabled && driveCharacterUpdates;
@@ -196,8 +200,26 @@ public sealed class CharacterAiScheduler : MonoBehaviour
         EnsureAdaptiveBudgetsInitialized();
     }
 
+    public float GetNextDecisionDelayForDebug(CharacterActor actor)
+    {
+        if (actor == null || !nextDecisionTime.TryGetValue(actor, out float dueTime))
+        {
+            return 0f;
+        }
+
+        return Mathf.Max(0f, dueTime - Time.time);
+    }
+
     private void ProcessAiBudget(float now)
     {
+        if (DungeonDebugRuntimeRules.IsEnabled(DungeonDebugCheat.PauseHumanoidAi))
+        {
+            LastProcessedDecisionCount = 0;
+            LastBehaviorTreeTickCount = 0;
+            LastPathSearchCount = 0;
+            return;
+        }
+
         using (ProcessAiBudgetMarker.Auto())
         {
             long startTimestamp = Stopwatch.GetTimestamp();
@@ -210,6 +232,7 @@ public sealed class CharacterAiScheduler : MonoBehaviour
                 if (actors.Count == 0)
                 {
                     LastPathSearchCount = 0;
+                    CaptureBrokerCounters();
                     return;
                 }
 
@@ -265,6 +288,7 @@ public sealed class CharacterAiScheduler : MonoBehaviour
                 RefreshBehaviorDesignerVisualsForEditor();
 #endif
                 LastPathSearchCount = pathSearchesThisFrame;
+                CaptureBrokerCounters();
             }
             finally
             {
@@ -449,14 +473,31 @@ public sealed class CharacterAiScheduler : MonoBehaviour
 
     private float GetDecisionInterval(CharacterActor actor)
     {
+        float interval;
         if (actor != null && actor.IsOwner)
         {
-            return ownerDecisionInterval;
+            interval = ownerDecisionInterval;
+        }
+        else
+        {
+            interval = IsHighDetailCharacter(actor)
+                ? visibleDecisionInterval
+                : offscreenDecisionInterval;
         }
 
-        return IsHighDetailCharacter(actor)
-            ? visibleDecisionInterval
-            : offscreenDecisionInterval;
+        return interval * ResolveActorIntervalJitter(actor);
+    }
+
+    private float ResolveActorIntervalJitter(CharacterActor actor)
+    {
+        if (actor == null || decisionIntervalJitterRatio <= 0f)
+        {
+            return 1f;
+        }
+
+        float raw = Mathf.Abs(Mathf.Sin(actor.GetInstanceID() * 12.9898f) * 43758.5453f);
+        float fraction = raw - Mathf.Floor(raw);
+        return Mathf.Lerp(1f - decisionIntervalJitterRatio, 1f + decisionIntervalJitterRatio, fraction);
     }
 
     private bool IsHighDetailCharacter(CharacterActor actor)
@@ -500,9 +541,20 @@ public sealed class CharacterAiScheduler : MonoBehaviour
     private void BeginPathBudgetWindow()
     {
         EnsureAdaptiveBudgetsInitialized();
+        GridPathSearchBroker.Clear();
         pathBudgetFrame = Time.frameCount;
         pathSearchesThisFrame = 0;
         LastPathSearchCount = 0;
+        LastBrokerPathSearchCount = 0;
+        LastBrokerPathCacheHitCount = 0;
+        LastBrokerPathBudgetDeferralCount = 0;
+    }
+
+    private void CaptureBrokerCounters()
+    {
+        LastBrokerPathSearchCount = GridPathSearchBroker.SearchesThisFrame;
+        LastBrokerPathCacheHitCount = GridPathSearchBroker.CacheHitsThisFrame;
+        LastBrokerPathBudgetDeferralCount = GridPathSearchBroker.BudgetDeferralsThisFrame;
     }
 
     private void ResetPathBudgetIfNeeded()

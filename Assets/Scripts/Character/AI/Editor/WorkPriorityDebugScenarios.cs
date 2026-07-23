@@ -76,11 +76,13 @@ public static class WorkPriorityDebugScenarios
     private static bool VerifyPriorityDefaults()
     {
         WorkPriorityProfile priorities = WorkPriorityProfile.CreateDefault();
-        return WorkTaskCatalog.TaskTypes.Length == 9
+        return WorkTypeCatalog.TryGet(FacilityWorkType.Construct, out _)
+            && priorities.GetPriority(FacilityWorkType.Construct) == WorkPriorityLevel.Priority2
             && priorities.GetPriority(FacilityWorkType.Operate) == WorkPriorityLevel.Priority1
             && priorities.GetPriority(FacilityWorkType.Restock) == WorkPriorityLevel.Priority2
             && priorities.GetPriority(FacilityWorkType.Research) == WorkPriorityLevel.Priority2
             && priorities.GetPriority(FacilityWorkType.Craft) == WorkPriorityLevel.Priority2
+            && priorities.GetPriority(FacilityWorkType.Reception) == WorkPriorityLevel.Priority2
             && priorities.GetPriority(FacilityWorkType.Rest) == WorkPriorityLevel.Priority3
             && WorkPriorityLevel.Priority1.Next() == WorkPriorityLevel.Priority2
             && WorkPriorityLevel.Priority3.Next() == WorkPriorityLevel.Off

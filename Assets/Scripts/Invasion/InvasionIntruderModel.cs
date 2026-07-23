@@ -7,12 +7,15 @@ using UnityEngine;
 public class InvasionIntruderSettings
 {
     public string patternId = InvasionIntruderPatternIds.Hunter;
+    [Min(0f)] public float rallyDurationSeconds = 12f;
     [Min(0.1f)] public float secondsToFullFocus = 30f;
     [Min(0.1f)] public float repathIntervalSeconds = 1.5f;
     [Min(0f)] public float facilityDamageIntervalSeconds = 5f;
     [Min(0f)] public float finalCombatDamage = 45f;
     [Min(0f)] public float finalCombatWindupSeconds = 0.7f;
     [Min(0.01f)] public float healthMultiplier = 1f;
+    [Min(0.01f)] public float meleeDamageMultiplier = 1f;
+    [Min(0.01f)] public float attackSpeedMultiplier = 1f;
 }
 
 public static class InvasionOwnerDamageTuning
@@ -53,8 +56,12 @@ public enum InvasionIntruderState
     MovingToOwner,
     MovingToFacility,
     DamagingFacility,
+    InterceptPlanned,
+    Engaged,
+    FrontBroken,
     FinalCombat,
-    Finished
+    Finished,
+    Rallying
 }
 
 public sealed class InvasionIntruderPersistenceState
@@ -72,8 +79,12 @@ public sealed class InvasionIntruderPersistenceState
         float baseMood,
         IReadOnlyDictionary<CharacterCondition, float> conditions,
         InvasionIntruderSettings settings,
-        IEnumerable<DefenseStatusSnapshot> defenseStatuses)
+        IEnumerable<DefenseStatusSnapshot> defenseStatuses,
+        string runtimeId = "",
+        float rallyRemainingSeconds = 0f,
+        bool hasBreachedDungeonInterior = false)
     {
+        RuntimeId = runtimeId?.Trim() ?? string.Empty;
         DataId = dataId;
         WorldPosition = worldPosition;
         GridPosition = gridPosition;
@@ -88,9 +99,12 @@ public sealed class InvasionIntruderPersistenceState
             conditions ?? new Dictionary<CharacterCondition, float>());
         Settings = CloneSettings(settings);
         DefenseStatuses = Array.AsReadOnly((defenseStatuses ?? Array.Empty<DefenseStatusSnapshot>()).ToArray());
+        RallyRemainingSeconds = Mathf.Max(0f, rallyRemainingSeconds);
+        HasBreachedDungeonInterior = hasBreachedDungeonInterior;
     }
 
     public int DataId { get; }
+    public string RuntimeId { get; }
     public Vector3 WorldPosition { get; }
     public Vector2Int GridPosition { get; }
     public InvasionIntruderState State { get; }
@@ -103,6 +117,8 @@ public sealed class InvasionIntruderPersistenceState
     public IReadOnlyDictionary<CharacterCondition, float> Conditions { get; }
     public InvasionIntruderSettings Settings { get; }
     public IReadOnlyList<DefenseStatusSnapshot> DefenseStatuses { get; }
+    public float RallyRemainingSeconds { get; }
+    public bool HasBreachedDungeonInterior { get; }
 
     public static InvasionIntruderSettings CloneSettings(InvasionIntruderSettings source)
     {
@@ -110,12 +126,15 @@ public sealed class InvasionIntruderPersistenceState
         return new InvasionIntruderSettings
         {
             patternId = source.patternId,
+            rallyDurationSeconds = Mathf.Max(0f, source.rallyDurationSeconds),
             secondsToFullFocus = source.secondsToFullFocus,
             repathIntervalSeconds = source.repathIntervalSeconds,
             facilityDamageIntervalSeconds = source.facilityDamageIntervalSeconds,
             finalCombatDamage = source.finalCombatDamage,
             finalCombatWindupSeconds = source.finalCombatWindupSeconds,
-            healthMultiplier = Mathf.Max(0.01f, source.healthMultiplier)
+            healthMultiplier = Mathf.Max(0.01f, source.healthMultiplier),
+            meleeDamageMultiplier = Mathf.Max(0.01f, source.meleeDamageMultiplier),
+            attackSpeedMultiplier = Mathf.Max(0.01f, source.attackSpeedMultiplier)
         };
     }
 }

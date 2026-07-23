@@ -14,6 +14,8 @@ public static class CharacterStatIds
     public const string Dexterity = "stat:dexterity";
     public const string Cleaning = "stat:cleaning";
     public const string Endurance = "stat:endurance";
+    public const string Shooting = "stat:shooting";
+    public const string Evasion = "stat:evasion";
 }
 
 public sealed class CharacterStatDefinition
@@ -142,15 +144,17 @@ public static class CharacterStatCatalog
 
     private static void RegisterBuiltIns()
     {
-        RegisterBuiltIn(CharacterStatIds.Attack, "공격", 10, CharacterStatType.Attack);
-        RegisterBuiltIn(CharacterStatIds.Sales, "판매", 20, CharacterStatType.Sales);
-        RegisterBuiltIn(CharacterStatIds.Research, "연구", 30, CharacterStatType.Research);
-        RegisterBuiltIn(CharacterStatIds.MoveSpeed, "이동", 40, CharacterStatType.MoveSpeed);
-        RegisterBuiltIn(CharacterStatIds.Strength, "근력", 50, CharacterStatType.Strength);
-        RegisterBuiltIn(CharacterStatIds.Toughness, "맷집", 60, CharacterStatType.Toughness);
-        RegisterBuiltIn(CharacterStatIds.Dexterity, "민첩", 70, CharacterStatType.Dexterity);
-        RegisterBuiltIn(CharacterStatIds.Cleaning, "청소", 80, CharacterStatType.Cleaning);
-        RegisterBuiltIn(CharacterStatIds.Endurance, "지구력", 90, CharacterStatType.Endurance);
+        RegisterBuiltIn(CharacterStatIds.Attack, "근접", 10, CharacterStatType.Attack);
+        RegisterBuiltIn(CharacterStatIds.Shooting, "사격", 20, CharacterStatType.Shooting);
+        RegisterBuiltIn(CharacterStatIds.Evasion, "회피", 30, CharacterStatType.Evasion);
+        RegisterBuiltIn(CharacterStatIds.Sales, "판매", 40, CharacterStatType.Sales);
+        RegisterBuiltIn(CharacterStatIds.Research, "연구", 50, CharacterStatType.Research);
+        RegisterBuiltIn(CharacterStatIds.MoveSpeed, "이동", 60, CharacterStatType.MoveSpeed);
+        RegisterBuiltIn(CharacterStatIds.Strength, "힘", 70, CharacterStatType.Strength);
+        RegisterBuiltIn(CharacterStatIds.Toughness, "강인함", 80, CharacterStatType.Toughness);
+        RegisterBuiltIn(CharacterStatIds.Dexterity, "민첩", 90, CharacterStatType.Dexterity);
+        RegisterBuiltIn(CharacterStatIds.Cleaning, "청소", 100, CharacterStatType.Cleaning);
+        RegisterBuiltIn(CharacterStatIds.Endurance, "지구력", 110, CharacterStatType.Endurance);
     }
 
     private static void RegisterBuiltIn(

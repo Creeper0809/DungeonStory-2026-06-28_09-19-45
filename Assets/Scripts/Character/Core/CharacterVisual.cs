@@ -67,6 +67,13 @@ public class CharacterVisual : SerializedMonoBehaviour
         }
 
         SpriteRenderer rootRenderer = GetComponent<SpriteRenderer>();
+        if (visualRoot == transform && rootRenderer == null)
+        {
+            // Some legacy prefabs serialized the actor root as the visual root even though
+            // their renderer lives on a child. Visual-only motion must never move the grid actor.
+            visualRoot = null;
+        }
+
         if ((visualRoot == null || visualRoot == transform) && rootRenderer != null)
         {
             visualRoot = CreateVisualRoot();
@@ -245,7 +252,7 @@ public class CharacterVisual : SerializedMonoBehaviour
         traversalRendererStates = CaptureRendererVisibility();
         traversalCanvasStates = CaptureCanvasVisibility();
         isTraversalHidden = true;
-        traversalVisibilityRestoreDeadline = Time.realtimeSinceStartup + Mathf.Max(0f, failSafeSeconds);
+        traversalVisibilityRestoreDeadline = Time.time + Mathf.Max(0f, failSafeSeconds);
         SetTraversalVisible(false);
 
         if (isActiveAndEnabled && failSafeSeconds > 0f)
@@ -262,7 +269,7 @@ public class CharacterVisual : SerializedMonoBehaviour
 
     private IEnumerator RestoreTraversalVisibilityAfter(float seconds)
     {
-        yield return new WaitForSecondsRealtime(seconds);
+        yield return new WaitForSeconds(seconds);
         traversalVisibilityRestoreRoutine = null;
         RestoreTraversalVisibilityNow();
     }
@@ -320,7 +327,7 @@ public class CharacterVisual : SerializedMonoBehaviour
         if (isTraversalHidden)
         {
             if (traversalVisibilityRestoreDeadline >= 0f
-                && Time.realtimeSinceStartup >= traversalVisibilityRestoreDeadline)
+                && Time.time >= traversalVisibilityRestoreDeadline)
             {
                 RestoreTraversalVisibility();
             }

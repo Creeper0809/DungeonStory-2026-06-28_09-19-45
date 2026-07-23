@@ -129,10 +129,14 @@ public class CharacterStats : SerializedMonoBehaviour
             float excretionMultiplier = actor != null && actor.PersonaRuntime != null
                 ? actor.PersonaRuntime.GetConditionCurveMultiplier(CharacterCondition.EXCRETION)
                 : 1f;
+            float thirstMultiplier = actor != null && actor.PersonaRuntime != null
+                ? actor.PersonaRuntime.GetConditionCurveMultiplier(CharacterCondition.THIRST)
+                : 1f;
             float hygieneMultiplier = actor != null && actor.PersonaRuntime != null
                 ? actor.PersonaRuntime.GetConditionCurveMultiplier(CharacterCondition.HYGIENE)
                 : 1f;
             ChangesStat(CharacterCondition.HUNGER, -5f * hungerMultiplier);
+            ChangesStat(CharacterCondition.THIRST, -6f * thirstMultiplier);
             ChangesStat(CharacterCondition.EXCRETION, -3f * excretionMultiplier);
             ChangesStat(CharacterCondition.HYGIENE, -1.5f * hygieneMultiplier);
             yield return new WaitForSeconds(5f);
@@ -141,6 +145,11 @@ public class CharacterStats : SerializedMonoBehaviour
 
     public void ChangesStat(CharacterCondition condition, float value)
     {
+        if (DungeonDebugRuntimeRules.ShouldFreezeNeed(condition, value))
+        {
+            return;
+        }
+
         EnsureStats();
         if (condition == CharacterCondition.MOOD)
         {
@@ -262,11 +271,14 @@ public class CharacterStats : SerializedMonoBehaviour
             1f + ((GetCharacterStat(CharacterStatType.MoveSpeed) - 5) * 0.08f),
             0.5f,
             1.8f);
+        float injuryMultiplier = GetInjuryEfficiencyMultiplier();
+        float bodyMultiplier = CharacterPhysicalCapacityQuery.Active?.GetMoveMultiplier(actor) ?? 1f;
         return baseSpeed
             * statMultiplier
             * (GetEffectiveProfile()?.GetMoveModifierOnly() ?? 1f)
             * GetFatigueEfficiencyMultiplier()
-            * GetInjuryEfficiencyMultiplier();
+            * Mathf.Min(injuryMultiplier, bodyMultiplier)
+            * (CharacterDeprivationRuntime.Active?.GetMoveSpeedMultiplier(actor) ?? 1f);
     }
 
     public float GetConsumptionMultiplier()
@@ -296,12 +308,15 @@ public class CharacterStats : SerializedMonoBehaviour
             1f + ((GetCharacterStat(workStat) - 5) * 0.06f),
             0.5f,
             2f);
+        float injuryMultiplier = GetInjuryEfficiencyMultiplier();
+        float bodyMultiplier = CharacterPhysicalCapacityQuery.Active?.GetWorkMultiplier(actor, workTypes) ?? 1f;
         return statMultiplier
             * (GetEffectiveProfile()?.GetWorkModifierOnly(workTypes) ?? 1f)
             * GetFatigueEfficiencyMultiplier()
-            * GetInjuryEfficiencyMultiplier()
+            * Mathf.Min(injuryMultiplier, bodyMultiplier)
             * discontentMultiplier
-            * CharacterSkillRuntimeEffects.GetWorkSpeedMultiplier(actor);
+            * CharacterSkillRuntimeEffects.GetWorkSpeedMultiplier(actor)
+            * (CharacterDeprivationRuntime.Active?.GetWorkSpeedMultiplier(actor) ?? 1f);
     }
 
     public float GetWorkPreferenceScore(FacilityWorkType workTypes)
@@ -364,9 +379,14 @@ public class CharacterStats : SerializedMonoBehaviour
 
     private static CharacterStatType GetBestWorkStat(FacilityWorkType workTypes)
     {
+        if ((workTypes & FacilityWorkType.Construct) != 0) return CharacterStatType.Dexterity;
         if ((workTypes & FacilityWorkType.Research) != 0) return CharacterStatType.Research;
         if ((workTypes & FacilityWorkType.Guard) != 0) return CharacterStatType.Attack;
         if ((workTypes & FacilityWorkType.Clean) != 0) return CharacterStatType.Cleaning;
+        if ((workTypes & FacilityWorkType.DrawWater) != 0) return CharacterStatType.Endurance;
+        if ((workTypes & FacilityWorkType.Cook) != 0) return CharacterStatType.Dexterity;
+        if ((workTypes & FacilityWorkType.Treat) != 0) return CharacterStatType.Research;
+        if ((workTypes & FacilityWorkType.Refuel) != 0) return CharacterStatType.Strength;
         if ((workTypes & FacilityWorkType.Restock) != 0) return CharacterStatType.Strength;
         if ((workTypes & FacilityWorkType.Repair) != 0) return CharacterStatType.Dexterity;
         if ((workTypes & FacilityWorkType.Operate) != 0) return CharacterStatType.Sales;
@@ -392,7 +412,7 @@ public class CharacterStats : SerializedMonoBehaviour
 
     public void ApplyDamage(float amount, string reason = "")
     {
-        if (amount <= 0f || IsDead) return;
+        if (amount <= 0f || IsDead || DungeonDebugRuntimeRules.ShouldBlockFriendlyDamage(actor)) return;
 
         currentHealth = Mathf.Max(0f, currentHealth - amount);
         injurySeverity = Mathf.Clamp01(1f - (currentHealth / Mathf.Max(1f, maxHealth)));

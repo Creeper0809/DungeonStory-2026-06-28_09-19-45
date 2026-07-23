@@ -833,6 +833,10 @@ public static class CharacterAiPlanDebugScenarios
                 || branch == CharacterAiBranch.Wait;
             bool metaBranch = branch == CharacterAiBranch.Critical
                 || branch == CharacterAiBranch.MacroGoal
+                || branch == CharacterAiBranch.LockedAction
+                || branch == CharacterAiBranch.InterruptCheck
+                || branch == CharacterAiBranch.Emergency
+                || branch == CharacterAiBranch.RoutineUtility
                 || branch == CharacterAiBranch.ContinueCurrent
                 || branch == CharacterAiBranch.StopCurrent
                 || branch == CharacterAiBranch.Idle;
@@ -868,7 +872,10 @@ public static class CharacterAiPlanDebugScenarios
             string jobGiverSummary = actor.Blackboard != null
                 ? actor.Blackboard.SelectedJobGiverUtilitySummary
                 : string.Empty;
-            if (jobGiverBranch && !string.IsNullOrWhiteSpace(jobGiverSummary))
+            if ((jobGiverBranch
+                    || branch == CharacterAiBranch.Emergency
+                    || branch == CharacterAiBranch.RoutineUtility)
+                && !string.IsNullOrWhiteSpace(jobGiverSummary))
             {
                 jobGiverUtilityReports++;
             }
@@ -887,7 +894,7 @@ public static class CharacterAiPlanDebugScenarios
             && jobGiverBranches + metaBranches == checkedActors
             && normalRoutineTrees == checkedActors
             && routineGroupPriorityReports == checkedActors
-            && jobGiverUtilityReports == jobGiverBranches;
+            && jobGiverUtilityReports >= jobGiverBranches;
         string report = "PLAY_RIMWORLD_STYLE_AI_PROBE "
             + $"actors={checkedActors} "
             + $"ignored={ignoredActors} "
@@ -912,19 +919,18 @@ public static class CharacterAiPlanDebugScenarios
     {
         BehaviorDesigner.Runtime.BehaviorSource source = tree != null ? tree.GetBehaviorSource() : null;
         ParentTask root = source != null ? source.RootTask as ParentTask : null;
-        if (root == null || root.Children == null || root.Children.Count < 5)
+        if (root == null || root.Children == null || root.Children.Count < 7)
         {
             return false;
         }
 
-        return root.Children[4] is PrioritySelector normal
-            && TaskDisplayName(normal) == "Normal Routine"
-            && normal.Children != null
-            && normal.Children.Count == 4
-            && TaskDisplayName(normal.Children[0]) == "Survival Needs"
-            && TaskDisplayName(normal.Children[1]) == "Duty Work"
-            && TaskDisplayName(normal.Children[2]) == "Leisure Visit"
-            && TaskDisplayName(normal.Children[3]) == "Idle Routine";
+        return TaskDisplayName(root.Children[0]) == "Critical"
+            && TaskDisplayName(root.Children[1]) == "Locked Action"
+            && TaskDisplayName(root.Children[2]) == "Interrupt Check"
+            && TaskDisplayName(root.Children[3]) == "Macro Goals"
+            && TaskDisplayName(root.Children[4]) == "Emergency"
+            && TaskDisplayName(root.Children[5]) == "Routine Utility"
+            && TaskDisplayName(root.Children[6]) == "Idle";
     }
 
     private static bool HasRoutineGroupPriorityReport(CharacterActor actor)
@@ -2137,8 +2143,8 @@ public static class CharacterAiPlanDebugScenarios
                 out float dutyPriority);
             bool valid = queue != null
                 && handled
-                && actor.Blackboard.CurrentBranch == CharacterAiBranch.Work
-                && actor.Blackboard.CurrentTask == "Run Work Action"
+                && actor.Blackboard.CurrentBranch == CharacterAiBranch.RoutineUtility
+                && actor.Blackboard.CurrentTask == "Run Routine Utility"
                 && actor.Blackboard.CurrentIntent == "Probe Selected Work"
                 && hasSurvivalPriority
                 && hasDutyPriority
@@ -2148,7 +2154,7 @@ public static class CharacterAiPlanDebugScenarios
                 && selectedWorkActionSet.ScoreRequestCount == 2
                 && selected != null
                 && selected.actionset == selectedWorkActionSet
-                && tree.DungeonStoryBranch == CharacterAiBranch.Work.ToString();
+                && tree.DungeonStoryBranch == CharacterAiBranch.RoutineUtility.ToString();
             if (!valid)
             {
                 Debug.LogError(
@@ -2495,16 +2501,16 @@ public static class CharacterAiPlanDebugScenarios
             AIAction firstAction = actor.Brain.bestAction;
             int scoreRequestsAfterFirstTick = actionSet.ScoreRequestCount;
             bool firstSelectedWork = firstHandled
-                && actor.Blackboard.CurrentBranch == CharacterAiBranch.Work
-                && actor.Blackboard.CurrentTask == "Run Work Action"
+                && actor.Blackboard.CurrentBranch == CharacterAiBranch.RoutineUtility
+                && actor.Blackboard.CurrentTask == "Run Routine Utility"
                 && firstAction != null
                 && firstAction.actionset == actionSet
                 && firstAction.HasStarted;
 
             bool secondHandled = tree.DungeonStoryManualTick(actor);
             bool secondContinued = secondHandled
-                && actor.Blackboard.CurrentBranch == CharacterAiBranch.ContinueCurrent
-                && actor.Blackboard.CurrentTask == "Continue Current Action"
+                && actor.Blackboard.CurrentBranch == CharacterAiBranch.LockedAction
+                && actor.Blackboard.CurrentTask == "Locked Action"
                 && actor.Brain.bestAction == firstAction
                 && actionSet.ScoreRequestCount == scoreRequestsAfterFirstTick;
 
@@ -2573,8 +2579,8 @@ public static class CharacterAiPlanDebugScenarios
             bool secondHandled = tree.DungeonStoryManualTick(actor);
             AbilityWork work = actor.GetComponent<AbilityWork>();
             bool secondStopped = secondHandled
-                && actor.Blackboard.CurrentBranch == CharacterAiBranch.StopCurrent
-                && actor.Blackboard.CurrentTask == "Stop Current Action"
+                && actor.Blackboard.CurrentBranch == CharacterAiBranch.InterruptCheck
+                && actor.Blackboard.CurrentTask == "Interrupt Check"
                 && actor.Brain.bestAction == null
                 && actionSet.ScoreRequestCount == scoreRequestsAfterFirstTick
                 && actionSet.StopCalled
@@ -2646,12 +2652,11 @@ public static class CharacterAiPlanDebugScenarios
             bool handled = tree.DungeonStoryManualTick(actor);
             string trace = actor.Blackboard.LastDecisionTrace;
             bool valid = handled
-                && ContainsTrace(actor, "Tick")
                 && ContainsTrace(actor, "Priority DutyWork")
                 && ContainsTrace(actor, "Utility Work")
                 && ContainsTrace(actor, "Selected Work")
-                && ContainsTrace(actor, "BT Work/Run Work Action")
-                && actor.Blackboard.LastDecisionRouteSummary.Contains("BT=Work/Run Work Action")
+                && ContainsTrace(actor, "BT RoutineUtility/Run Routine Utility")
+                && actor.Blackboard.LastDecisionRouteSummary.Contains("BT=RoutineUtility/Run Routine Utility")
                 && actor.Blackboard.LastDecisionRouteSummary.Contains("Utility=WorkJobGiver");
 
             if (!valid)
@@ -2968,30 +2973,75 @@ public static class CharacterAiPlanDebugScenarios
     {
         if (!HasNodeLayout(root, "Character AI Root", new Vector2(0f, -140f))
             || root.Children == null
-            || root.Children.Count != 5)
+            || root.Children.Count != 7)
         {
             return false;
         }
 
         ParentTask critical = root.Children[0] as ParentTask;
-        ParentTask macro = root.Children[1] as ParentTask;
-        ParentTask continueCurrent = root.Children[2] as ParentTask;
-        ParentTask stopCurrent = root.Children[3] as ParentTask;
-        ParentTask normal = root.Children[4] as ParentTask;
-        if (!HasCriticalBranchLayout(critical)
-            || !HasMacroBranchLayout(macro)
-            || !HasContinueCurrentBranchLayout(continueCurrent)
-            || !HasStopCurrentBranchLayout(stopCurrent)
-            || normal is not PrioritySelector
-            || !HasSelectorChildren(normal, "Normal Routine", new Vector2(980f, 20f), 4))
-        {
-            return false;
-        }
+        ParentTask lockedAction = root.Children[1] as ParentTask;
+        ParentTask interruptCheck = root.Children[2] as ParentTask;
+        ParentTask macro = root.Children[3] as ParentTask;
+        ParentTask emergency = root.Children[4] as ParentTask;
+        ParentTask routineUtility = root.Children[5] as ParentTask;
+        ParentTask idle = root.Children[6] as ParentTask;
+        return HasCriticalBranchLayout(critical)
+            && HasSimpleSequenceBranch(
+                lockedAction,
+                "Locked Action",
+                new Vector2(-560f, 20f),
+                "Has Locked Action?",
+                new Vector2(-660f, 100f),
+                "Run Locked Action",
+                new Vector2(-460f, 100f))
+            && HasSimpleSequenceBranch(
+                interruptCheck,
+                "Interrupt Check",
+                new Vector2(-220f, 20f),
+                "Can Interrupt?",
+                new Vector2(-320f, 100f),
+                "Stop Running Action",
+                new Vector2(-120f, 100f))
+            && HasMacroBranchLayout(macro)
+            && HasSimpleSequenceBranch(
+                emergency,
+                "Emergency",
+                new Vector2(500f, 20f),
+                "Trace Emergency",
+                new Vector2(400f, 100f),
+                "Run Emergency Decision",
+                new Vector2(600f, 100f))
+            && HasSimpleSequenceBranch(
+                routineUtility,
+                "Routine Utility",
+                new Vector2(820f, 20f),
+                "Trace Routine Utility",
+                new Vector2(720f, 100f),
+                "Run Routine Utility",
+                new Vector2(920f, 100f))
+            && HasSimpleSequenceBranch(
+                idle,
+                "Idle",
+                new Vector2(1140f, 20f),
+                "Trace Idle",
+                new Vector2(1040f, 100f),
+                "Run Ambient Idle",
+                new Vector2(1240f, 100f));
+    }
 
-        return HasSurvivalNeedsRoutine(normal.Children[0] as ParentTask)
-            && HasDutyWorkRoutine(normal.Children[1] as ParentTask)
-            && HasLeisureVisitRoutine(normal.Children[2] as ParentTask)
-            && HasIdleRoutine(normal.Children[3] as ParentTask);
+    private static bool HasSimpleSequenceBranch(
+        ParentTask branch,
+        string branchName,
+        Vector2 branchOffset,
+        string firstChildName,
+        Vector2 firstChildOffset,
+        string secondChildName,
+        Vector2 secondChildOffset)
+    {
+        return branch is Sequence
+            && HasSelectorChildren(branch, branchName, branchOffset, 2)
+            && HasNodeLayout(branch.Children[0], firstChildName, firstChildOffset)
+            && HasNodeLayout(branch.Children[1], secondChildName, secondChildOffset);
     }
 
     private static bool HasSurvivalNeedsRoutine(ParentTask branch)
@@ -3030,16 +3080,16 @@ public static class CharacterAiPlanDebugScenarios
 
     private static bool HasMacroBranchLayout(ParentTask branch)
     {
-        return HasSelectorChildren(branch, "Macro Goals", new Vector2(-160f, 20f), 9)
-            && HasMacroTaskBranch(branch.Children[0] as ParentTask, "Continue Macro", "Has Continue?", "Clear Continue Macro", new Vector2(-380f, 120f))
-            && HasMacroTaskBranch(branch.Children[1] as ParentTask, "Avoid Facility Macro", "Has AvoidFacility?", "Run Avoid Facility", new Vector2(-380f, 220f))
-            && HasMacroTaskBranch(branch.Children[2] as ParentTask, "Complain Macro", "Has Complain?", "Run Complain", new Vector2(-380f, 320f))
-            && HasMacroTaskBranch(branch.Children[3] as ParentTask, "Vandalize Macro", "Has Vandalize?", "Run Vandalize", new Vector2(-380f, 420f))
-            && HasMacroTaskBranch(branch.Children[4] as ParentTask, "Exit Dungeon Macro", "Has ExitDungeon?", "Run Exit Dungeon Macro", new Vector2(-380f, 520f))
-            && HasMacroTaskBranch(branch.Children[5] as ParentTask, "Seek Food Macro", "Has SeekFood?", "Run Seek Food Macro", new Vector2(-380f, 620f))
-            && HasMacroTaskBranch(branch.Children[6] as ParentTask, "Seek Fun Macro", "Has SeekFun?", "Run Seek Fun Macro", new Vector2(-380f, 720f))
-            && HasMacroTaskBranch(branch.Children[7] as ParentTask, "Seek Toilet Macro", "Has SeekToilet?", "Run Seek Toilet Macro", new Vector2(-380f, 820f))
-            && HasMacroTaskBranch(branch.Children[8] as ParentTask, "Seek Hygiene Macro", "Has SeekHygiene?", "Run Seek Hygiene Macro", new Vector2(-380f, 920f));
+        return HasSelectorChildren(branch, "Macro Goals", new Vector2(220f, 20f), 9)
+            && HasMacroTaskBranch(branch.Children[0] as ParentTask, "Continue Macro", "Has Continue?", "Clear Continue Macro", new Vector2(120f, 120f))
+            && HasMacroTaskBranch(branch.Children[1] as ParentTask, "Avoid Facility Macro", "Has AvoidFacility?", "Run Avoid Facility", new Vector2(120f, 220f))
+            && HasMacroTaskBranch(branch.Children[2] as ParentTask, "Complain Macro", "Has Complain?", "Run Complain", new Vector2(120f, 320f))
+            && HasMacroTaskBranch(branch.Children[3] as ParentTask, "Vandalize Macro", "Has Vandalize?", "Run Vandalize", new Vector2(120f, 420f))
+            && HasMacroTaskBranch(branch.Children[4] as ParentTask, "Exit Dungeon Macro", "Has ExitDungeon?", "Run Exit Dungeon Macro", new Vector2(120f, 520f))
+            && HasMacroTaskBranch(branch.Children[5] as ParentTask, "Seek Food Macro", "Has SeekFood?", "Run Seek Food Macro", new Vector2(120f, 620f))
+            && HasMacroTaskBranch(branch.Children[6] as ParentTask, "Seek Fun Macro", "Has SeekFun?", "Run Seek Fun Macro", new Vector2(120f, 720f))
+            && HasMacroTaskBranch(branch.Children[7] as ParentTask, "Seek Toilet Macro", "Has SeekToilet?", "Run Seek Toilet Macro", new Vector2(120f, 820f))
+            && HasMacroTaskBranch(branch.Children[8] as ParentTask, "Seek Hygiene Macro", "Has SeekHygiene?", "Run Seek Hygiene Macro", new Vector2(120f, 920f));
     }
 
     private static bool HasUtilityBranch(
@@ -3110,11 +3160,11 @@ public static class CharacterAiPlanDebugScenarios
 
     private static bool HasCriticalBranchLayout(ParentTask branch)
     {
-        return HasNodeLayout(branch, "Critical", new Vector2(-620f, 20f))
+        return HasNodeLayout(branch, "Critical", new Vector2(-900f, 20f))
             && branch.Children != null
             && branch.Children.Count == 2
-            && HasNodeLayout(branch.Children[0], "Has Critical?", new Vector2(-720f, 120f))
-            && HasNodeLayout(branch.Children[1], "Run Critical", new Vector2(-520f, 120f));
+            && HasNodeLayout(branch.Children[0], "Has Critical?", new Vector2(-1000f, 120f))
+            && HasNodeLayout(branch.Children[1], "Run Critical", new Vector2(-800f, 120f));
     }
 
     private static bool HasContinueCurrentBranchLayout(ParentTask branch)

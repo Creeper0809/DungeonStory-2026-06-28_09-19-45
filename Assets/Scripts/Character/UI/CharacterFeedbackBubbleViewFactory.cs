@@ -53,13 +53,17 @@ public sealed class CharacterFeedbackBubbleViewFactory : ICharacterFeedbackBubbl
 
         text.text = string.Empty;
         text.gameObject.SetActive(false);
-        text.transform.SetParent(null, false);
+        Transform poolParent = Application.isPlaying
+            ? DungeonRuntimeHierarchy.GetCategory(DungeonRuntimeHierarchy.WorldUi)
+            : null;
+        text.transform.SetParent(poolParent, false);
         textPool.Push(text);
     }
 
     private TextMeshPro CreateTextView()
     {
         GameObject bubbleObject = new GameObject("CharacterFeedbackBubble", typeof(TextMeshPro));
+        DungeonRuntimeHierarchy.Parent(bubbleObject, DungeonRuntimeHierarchy.WorldUi);
         TextMeshPro view = bubbleObject.GetComponent<TextMeshPro>();
         view.alignment = TextAlignmentOptions.Center;
         view.fontSize = 3.2f;

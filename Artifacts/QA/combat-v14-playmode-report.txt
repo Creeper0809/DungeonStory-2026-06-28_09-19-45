@@ -1,0 +1,28 @@
+RUNTIME=PASS; actors=2; scene=GameplayScene
+POINTER_ACTOR_LAYOUT=PASS; Sion=(18, 0); Roma=(22, 0)
+RANGED_LOADOUT=PASS; Sion: assigned=True; active=True; ammo=True; reason=
+RANGED_LOADOUT=PASS; Roma: assigned=True; active=True; ammo=True; reason=
+POINTER_MULTI_SELECT=PASS; selected=Sion,Roma
+COMMAND_BAR=PASS; 전투 명령 바와 태세 버튼 표시
+POINTER_COMBAT_STANCE=PASS; 다중 선택 전투 태세 활성화
+RELOAD_BUTTON=PASS; 재장전 버튼 표시
+POINTER_RELOAD=PASS; staff:195459406:01=1, staff:195459406:02=1
+TACTICAL_BUTTONS=PASS; 사격 모드와 사격 중지 버튼 표시
+TACTICAL_PROFILE=PASS; rescuer=Aimed->Rapid/False->True; second=Aimed->Rapid/False->True
+CAPTURE=PASS; Artifacts/QA/combat-v14-command-bar.png
+STANCE_RELEASE=PASS; 생활 AI 복귀 전 태세와 명령 해제
+POINTER_ACTOR_LAYOUT=PASS; Sion=(18, 0); Roma=(22, 0)
+MEDICAL_FACILITY=PASS; available=2
+MEDICINE=PASS; stored=15
+DOWNED=PASS; state=Downed; order=medical:1; canRunAi=False
+RESCUE_BUTTON=PASS; 구조 명령 버튼 표시
+POINTER_RESCUE_COMMAND=PASS; 구조 버튼과 쓰러진 환자 정확 클릭으로 명령 시작
+CAPTURE=PASS; Artifacts/QA/combat-v14-rescue-carry.png
+CAPTURE=PASS; Artifacts/QA/combat-v14-treatment.png
+FIELD_STABILIZATION=PASS; 현장 안정화 진행 또는 완료
+PHYSICAL_RESCUE=PASS; carrying=True; parented=True
+BED_TREATMENT=PASS; treating=True
+RECOVERY_HYSTERESIS=PASS; state=Active; downed=False; consciousness=1; mobility=0.47; blood=0
+CONSOLE_ERRORS=PASS; 
+CONSOLE_WARNINGS=PASS; 
+RESULT=PASS; failures=0; 

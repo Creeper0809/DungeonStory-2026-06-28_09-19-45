@@ -22,12 +22,13 @@ public static class PhysicalItemDebugScenarios
         Run("carry_weight_penalty", VerifyCarryWeightPenalty, lines, errors);
         Run("pile_sort_and_detail", VerifyPileSortAndDetail, lines, errors);
         Run("facility_delivery_buffer", VerifyFacilityDeliveryBuffer, lines, errors);
+        Run("loose_material_delivery_request", VerifyLooseMaterialDeliveryRequest, lines, errors);
         Run("physical_craft_material_gate", VerifyPhysicalCraftMaterialGate, lines, errors);
         Run("customer_floor_theft", VerifyCustomerFloorTheft, lines, errors);
         Run("stack_delete_fallback", VerifyStackDeleteFallback, lines, errors);
         Run("warehouse_aggregate_view", VerifyWarehouseAggregateView, lines, errors);
         Run("warehouse_stored_stack_mirror", VerifyWarehouseStoredStackMirror, lines, errors);
-        Run("save_v5_contract", VerifySaveV5Contract, lines, errors);
+        Run("save_v10_contract", VerifySaveV10Contract, lines, errors);
 
         File.WriteAllLines(ReportPath, lines);
         if (errors.Count == 0)
@@ -147,10 +148,21 @@ public static class PhysicalItemDebugScenarios
                 out int requestedAmount,
                 out string requestReason);
             Require(requested && requestedAmount == 3, $"delivery request failed: {requestReason}; amount={requestedAmount}");
-            Require(warehouse.Inventory.GetStock(StockCategory.General) == 5, "warehouse stock was not withdrawn");
-            WorldItemStackSnapshot loose = runtime.GetAllStacks().FirstOrDefault(stack => stack.State == WorldItemStackState.Loose);
-            Require(loose != null && loose.HasDestinationPosition && loose.DestinationPosition == new Vector2Int(4, 1),
-                "delivery stack did not preserve destination position");
+            Require(warehouse.Inventory.GetStock(StockCategory.General) == 8,
+                "warehouse stock changed before worker pickup");
+            Require(!runtime.GetAllStacks().Any(stack =>
+                    stack.State == WorldItemStackState.Loose
+                    && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)),
+                "warehouse material was dropped as a loose pile at request time");
+            WorldItemStackSnapshot outboundStored = runtime.GetAllStacks().SingleOrDefault(stack =>
+                stack.State == WorldItemStackState.Stored
+                && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal));
+            Require(outboundStored != null
+                    && outboundStored.Quantity == 3
+                    && !string.IsNullOrWhiteSpace(outboundStored.SourceStorageDestinationId)
+                    && outboundStored.HasDestinationPosition
+                    && outboundStored.DestinationPosition == new Vector2Int(4, 1),
+                "stored delivery reservation did not preserve source and destination");
 
             CharacterActor actor = carrierObject.AddComponent<CharacterActor>();
             CharacterCarryInventory carry = CharacterCarryInventory.Ensure(actor)
@@ -178,7 +190,7 @@ public static class PhysicalItemDebugScenarios
             Require(!runtime.GetAllStacks().Any(stack => stack.State == WorldItemStackState.FacilityBuffer
                     && stack.DestinationId == destinationId),
                 "facility input buffer was not consumed");
-            return $"requested={requestedAmount}; warehouse={warehouse.Inventory.GetStock(StockCategory.General)}";
+            return $"requested={requestedAmount}; warehouseHeld=8; outboundStored={outboundStored.Quantity}";
         }
         finally
         {
@@ -386,19 +398,32 @@ public static class PhysicalItemDebugScenarios
                 $"delivery request failed: {requestReason}; requested={requested}");
             WorldItemStackSnapshot storedAfter = runtime
                 .GetStacksAt(Vector2Int.zero, includeStored: true)
-                .FirstOrDefault(stack => stack.State == WorldItemStackState.Stored);
-            Require(warehouse.Inventory.GetStock(StockCategory.Food) == 2,
-                "warehouse aggregate was not reduced by physical delivery");
+                .FirstOrDefault(stack => stack.State == WorldItemStackState.Stored
+                    && string.IsNullOrWhiteSpace(stack.SourceStorageDestinationId));
+            WorldItemStackSnapshot outboundStored = runtime
+                .GetStacksAt(Vector2Int.zero, includeStored: true)
+                .SingleOrDefault(stack => stack.State == WorldItemStackState.Stored
+                    && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal));
+            Require(warehouse.Inventory.GetStock(StockCategory.Food) == 5,
+                "warehouse aggregate changed before physical pickup");
             Require(storedAfter != null && storedAfter.Quantity == 2,
-                $"stored mirror was not reduced with warehouse withdrawal: {storedAfter?.Quantity}");
+                $"unassigned stored remainder was wrong: {storedAfter?.Quantity}");
+            Require(outboundStored != null
+                    && outboundStored.Quantity == 3
+                    && !string.IsNullOrWhiteSpace(outboundStored.SourceStorageDestinationId),
+                "outbound stored reservation was not created");
+            Require(!runtime.GetAllStacks().Any(stack =>
+                    stack.State == WorldItemStackState.Loose
+                    && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal)),
+                "stored material became a visible loose pile");
 
             DungeonPhysicalItemSaveData captured = runtime.Capture();
             warehouse.Inventory.AddStock(StockCategory.Food, 41);
             runtime.Restore(captured);
-            Require(warehouse.Inventory.GetStock(StockCategory.Food) == 2,
+            Require(warehouse.Inventory.GetStock(StockCategory.Food) == 5,
                 $"restore did not make warehouse aggregate follow stored stacks: {warehouse.Inventory.GetStock(StockCategory.Food)}");
 
-            return $"stored=5->2; warehouse={warehouse.Inventory.GetStock(StockCategory.Food)}";
+            return $"stored=5; reserved=3; available=2; warehouse={warehouse.Inventory.GetStock(StockCategory.Food)}";
         }
         finally
         {
@@ -408,11 +433,12 @@ public static class PhysicalItemDebugScenarios
         }
     }
 
-    private static string VerifySaveV5Contract()
+    private static string VerifySaveV10Contract()
     {
-        Require(DungeonGameSaveData.CurrentVersion == 5, $"save version is {DungeonGameSaveData.CurrentVersion}");
+        Require(DungeonGameSaveData.CurrentVersion == 14, $"save version is {DungeonGameSaveData.CurrentVersion}");
         DungeonGameSaveData save = new DungeonGameSaveData();
         Require(save.physicalItems != null, "physical item save section missing");
+        Require(save.exterior != null, "exterior activity save section missing");
         save.physicalItems = CreatePileSnapshot();
         save.characters.actors.Add(new DungeonCharacterSaveData
         {
@@ -442,6 +468,56 @@ public static class PhysicalItemDebugScenarios
         Require(restored.characters.actors[0].carryInventory.items[0].quantity == 3,
             "carried item quantity changed during json round-trip");
         return $"version={DungeonGameSaveData.CurrentVersion}; stacks={restored.physicalItems.stacks.Count}; carried=3";
+    }
+
+    private static string VerifyLooseMaterialDeliveryRequest()
+    {
+        WorldItemStackRuntime runtime = CreateRuntime();
+        runtime.Start();
+        try
+        {
+            string itemId = DungeonItemCatalogSO.StockItemId(StockCategory.General);
+            Require(runtime.SpawnItemAt(
+                    itemId,
+                    5,
+                    new Vector2Int(2, 0),
+                    WorldItemStackState.Loose,
+                    string.Empty,
+                    out int spawned)
+                && spawned == 5,
+                $"spawned={spawned}");
+
+            string destinationId = WorkOrderRuntime.ConstructionDestinationPrefix + "test";
+            bool requested = runtime.TryRequestFacilityDelivery(
+                StockCategory.General,
+                3,
+                new Vector2Int(6, 0),
+                destinationId,
+                out int requestedAmount,
+                out string failure);
+            Require(requested, $"request failed: {failure}");
+            Require(requestedAmount == 3, $"requested={requestedAmount}");
+
+            IReadOnlyList<WorldItemStackSnapshot> stacks = runtime.GetAllStacks();
+            WorldItemStackSnapshot delivery = stacks.SingleOrDefault(stack =>
+                stack.State == WorldItemStackState.Loose
+                && string.Equals(stack.DestinationId, destinationId, StringComparison.Ordinal));
+            Require(delivery != null, "destination loose stack missing");
+            Require(delivery.Quantity == 3, $"delivery quantity={delivery.Quantity}");
+            Require(delivery.HasDestinationPosition && delivery.DestinationPosition == new Vector2Int(6, 0),
+                $"destination position={delivery.DestinationPosition}");
+
+            WorldItemStackSnapshot remainder = stacks.SingleOrDefault(stack =>
+                stack.State == WorldItemStackState.Loose
+                && string.IsNullOrWhiteSpace(stack.DestinationId));
+            Require(remainder != null && remainder.Quantity == 2,
+                remainder != null ? $"remainder={remainder.Quantity}" : "remainder missing");
+            return $"requested={requestedAmount}; delivery={delivery.Quantity}; remainder={remainder.Quantity}";
+        }
+        finally
+        {
+            runtime.Dispose();
+        }
     }
 
     private static DungeonPhysicalItemSaveData CreatePileSnapshot()

@@ -174,8 +174,8 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
             Check(FindButtonsPrefix("PreparationTab_").Length == 9,
                 "THREE_MEMBER_TABS",
                 "three members expose identity, aptitude, and skill tabs");
-            Check(FindButtonsPrefix("StartPartyBack").Length == 1
-                && FindButtonsPrefix("StartPartyConfirm").Length == 1,
+            Check(FindButtonsPrefix("PartyBackToOwnerButton").Length == 1
+                && FindButtonsPrefix("PreparationStartRunButton").Length == 1,
                 "SINGLE_ACTION_ROW",
                 "preparation actions are not duplicated");
 
@@ -211,7 +211,7 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
                 }
             }
 
-            yield return WaitForAllCandidates(180f);
+            yield return WaitForGeneratedStartSkills(30f);
             Check(!VisibleTextContains("LLM")
                 && !VisibleTextContains("생성 중")
                 && !VisibleTextContains("요청 키"),
@@ -224,28 +224,15 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
                 "DESKTOP_CAPTURE",
                 new Vector2Int(1600, 900));
 
-            for (int memberIndex = 0; memberIndex < 3; memberIndex++)
-            {
-                Button candidate = FindButton($"StartSkillCandidate_{memberIndex}_0", true);
-                Check(candidate != null, $"CANDIDATE_{memberIndex}", "candidate ready");
-                if (candidate == null)
-                {
-                    continue;
-                }
-
-                yield return Click(candidate);
-                candidate = FindButton($"StartSkillCandidate_{memberIndex}_0", true);
-                Check(GetLabel(candidate).Contains("다시 눌러 확정"),
-                    $"CONFIRM_ARMED_{memberIndex}",
-                    GetLabel(candidate));
-                if (candidate != null)
-                {
-                    yield return Click(candidate);
-                }
-            }
+            Check(FindButtonsPrefix("StartSkillCandidate_").Length == 0,
+                "NO_START_SKILL_CHOICES",
+                "first actives are generated automatically instead of selected");
+            Check(FindGeneratedSkillCards().Length >= 2,
+                "GENERATED_START_SKILLS",
+                "generated active and passive cards are visible for the selected staff");
 
             yield return WaitForPartyReady(180f);
-            Button confirm = FindButton("StartPartyConfirm", true);
+            Button confirm = FindButton("PreparationStartRunButton", true);
             Check(confirm != null, "PARTY_READY", "all three selections unlock the start command");
 
             yield return SelectResolution(new Vector2Int(900, 1600), "MOBILE_RESOLUTION");
@@ -259,7 +246,7 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
 
             if (confirm != null)
             {
-                confirm = FindButton("StartPartyConfirm", true);
+                confirm = FindButton("PreparationStartRunButton", true);
                 yield return Click(confirm);
                 yield return new WaitForSecondsRealtime(0.75f);
             }
@@ -286,7 +273,7 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
                     && actor.Progression.PassiveSkills.Count == 1),
                 "READY_SKILLS",
                 "owner and staff each retain one confirmed active and first passive");
-            Check(FindButton("StartPartyConfirm", false) == null,
+            Check(FindButton("PreparationStartRunButton", false) == null,
                 "PREPARATION_CLOSED",
                 "preparation UI closes after commit");
         }
@@ -304,14 +291,13 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
         }
     }
 
-    private IEnumerator WaitForAllCandidates(float timeoutSeconds)
+    private IEnumerator WaitForGeneratedStartSkills(float timeoutSeconds)
     {
         float deadline = Time.realtimeSinceStartup + timeoutSeconds;
         while (Time.realtimeSinceStartup < deadline)
         {
-            bool ready = Enumerable.Range(0, 3)
-                .All(index => FindButton($"StartSkillCandidate_{index}_0", true) != null);
-            if (ready)
+            if (FindButton("PreparationStartRunButton", true) != null
+                && FindGeneratedSkillCards().Length >= 2)
             {
                 yield break;
             }
@@ -319,7 +305,7 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
             yield return new WaitForSecondsRealtime(0.25f);
         }
 
-        failures.Add($"CANDIDATE_TIMEOUT: candidates were not ready within {timeoutSeconds:0.#} seconds");
+        failures.Add($"GENERATED_SKILL_TIMEOUT: generated start skills were not ready within {timeoutSeconds:0.#} seconds");
     }
 
     private IEnumerator WaitForPartyReady(float timeoutSeconds)
@@ -327,7 +313,7 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
         float deadline = Time.realtimeSinceStartup + timeoutSeconds;
         while (Time.realtimeSinceStartup < deadline)
         {
-            if (FindButton("StartPartyConfirm", true) != null)
+            if (FindButton("PreparationStartRunButton", true) != null)
             {
                 yield break;
             }
@@ -465,6 +451,16 @@ public sealed class StartPartyPreparationPlayModeRunner : MonoBehaviour
                 && rect.gameObject.scene.IsValid()
                 && rect.gameObject.activeInHierarchy
                 && rect.name.StartsWith("StartPartyMember_", StringComparison.Ordinal))
+            .ToArray();
+    }
+
+    private static RectTransform[] FindGeneratedSkillCards()
+    {
+        return Resources.FindObjectsOfTypeAll<RectTransform>()
+            .Where(rect => rect != null
+                && rect.gameObject.scene.IsValid()
+                && rect.gameObject.activeInHierarchy
+                && rect.name.StartsWith("OwnerSkillCard_", StringComparison.Ordinal))
             .ToArray();
     }
 

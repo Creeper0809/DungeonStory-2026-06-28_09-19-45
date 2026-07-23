@@ -190,6 +190,16 @@ public class InvasionThreatRuntime : MonoBehaviour,
         TickCandidateDelay(0f);
     }
 
+    public void DebugSetThreat(float value)
+    {
+        currentThreat = Mathf.Max(0f, value);
+        warningRaisedThisCycle = false;
+        candidateRaisedThisCycle = false;
+        candidateDelayRemaining = -1f;
+        lastFactors = SampleWorldFactors();
+        TryRaiseWarning();
+    }
+
     public bool ForceCandidateNow()
     {
         if (settings == null || candidateRaisedThisCycle)
